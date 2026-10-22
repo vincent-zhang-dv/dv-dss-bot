@@ -1,0 +1,78 @@
+"""DSS triage CLI: `python -m dss <command>`.
+
+	python -m dss triage DSS-1234 [--posted 2026-10-21_09-30-00]   # one triage, printed; no Slack
+	python -m dss slack                                              # the bot (see dss.slack)
+	python -m dss mcp                                                # the tools over stdio (MCP)
+
+Settings come from the environment. A `.env` file at the repo root (copy `.env.example`) fills
+in the ones that are not set.
+"""
+
+import argparse
+import functools
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from dss import runner
+from dss.cerb import START_TIME
+from dss.jira import ISSUE_KEY
+from dss.triage import TIME_FORMAT, explain, triage
+from dss.worker import ROOT
+
+
+def load_env(path: Path = ROOT / '.env') -> None:
+	"""KEY=VALUE lines of *path* into the environment; what is already set wins."""
+	if not path.exists():
+		return
+	for line in path.read_text(encoding='utf-8').splitlines():
+		key, sep, value = line.partition('=')
+		key, value = key.strip(), value.strip().strip('"\'')
+		if sep and key and value and not key.startswith('#'):
+			os.environ.setdefault(key, value)
+
+
+def main() -> None:
+	parser = argparse.ArgumentParser(prog='dss')
+	commands = parser.add_subparsers(dest='command', required=True)
+	one = commands.add_parser('triage', help='triage one ticket and print the analysis (no Slack)')
+	one.add_argument('key', help='ticket key, e.g. DSS-1234')
+	one.add_argument(
+		'--posted',
+		default='',
+		help='ticket time as YYYY-MM-DD_HH-MM-SS (local), for an older ticket; default now',
+	)
+	one.add_argument('--model', default=runner.MODEL)
+	commands.add_parser('slack', help='run the Slack bot')
+	commands.add_parser('mcp', help='serve the triage tools over stdio (MCP)')
+	args = parser.parse_args()
+	load_env()
+	if args.command == 'mcp':  # stdout is the MCP protocol from here on: print nothing
+		from dss.server import build
+
+		build().run()
+	elif args.command == 'slack':
+		from dss.slack import main as bot
+
+		bot()
+	else:
+		if not ISSUE_KEY.fullmatch(args.key):
+			parser.error(f'{args.key!r} is not an issue key like DSS-1234')
+		if args.posted and not START_TIME.fullmatch(args.posted):
+			parser.error(f'--posted must look like 2026-10-21_09-30-00, not {args.posted!r}')
+		posted = args.posted
+		if not posted:
+			posted = datetime.now().strftime(TIME_FORMAT)
+		ask = functools.partial(runner.run_reply, model=args.model)
+		try:
+			answer = triage(args.key, posted, ask=ask)
+		except Exception as error:  # one readable line instead of a traceback
+			raise SystemExit(explain(error)) from error
+		print(answer['text'])
+		usage = f'{answer["tokens"]:,} tokens · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
+		print(f'\n{usage}', file=sys.stderr)
+
+
+if __name__ == '__main__':
+	main()

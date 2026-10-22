@@ -1,0 +1,35 @@
+# Slack app for the DSS triage bot (dss/slack.py). Make it its own app, not the DV Assistant's:
+# Slack hands each event to one of an app's open connections, so two bots on one app would each
+# miss tickets. api.slack.com/apps > Create New App > From a manifest > paste this. Then: Install
+# to workspace (bot token xoxb-...), Basic Information > App-Level Tokens > generate one with
+# connections:write (xapp-...), and /invite @DSS Triage in #data-dev-support.
+# For a dev app, change the names below and invite it to a test channel instead.
+display_information:
+  name: DSS Triage
+  description: Triages new DSS tickets from DV data, read-only; the analysis goes to a DV reviewer's DM.
+  background_color: "#141119"
+features:
+  app_home:
+    messages_tab_enabled: true # analyses arrive in the reviewer's DM with the app
+    messages_tab_read_only_enabled: true
+  bot_user:
+    display_name: DSS Triage
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - channels:history # the workflow's "created DSS-..." posts and the start-up catch-up (public channel)
+      - groups:history # same, if #data-dev-support is private
+      - chat:write # analyses to the reviewer
+      - im:write # open the DM with the reviewer
+      - users:read # names instead of member ids
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+  interactivity:
+    is_enabled: false # no buttons: nothing is posted from the bot
+  socket_mode_enabled: true # no public URL: the bot connects out from the reviewer's PC
+  org_deploy_enabled: false
+  token_rotation_enabled: false
