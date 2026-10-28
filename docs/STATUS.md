@@ -14,10 +14,14 @@
   refused, no access, no such ticket, bad JQL). `worker.APPS` is `('cerb',)`; `DSS_ARCH_*` and
   `DV_JIRA_EMAIL` are gone from `.env.example`, README and CLAUDE.md.
 - **Checked:** `uv run pytest` (57 passed); the Jira tests fake `urlopen` and check the URLs,
-  fields and basic-auth header. Not run against real Jira yet: `.env` has no Atlassian token.
-- **Not done:** fill `CONFLUENCE_*` (or `JIRA_*`) in `.env` and run one `python -m dss triage`
-  to check `jira_get_issue` and `jira_search` live. The Jira custom field ids in `TICKET_FIELDS`
-  came from arch's code and have not been checked against a real ticket.
+  fields and basic-auth header. Live on Vincent's PC (2026-10-28), with a classic Atlassian API
+  token in `CONFLUENCE_*`, through the MCP server as Claude calls the tools: `jira_get_issue`
+  returns every triage field for a real ticket (458 characters), so the custom field ids in
+  `TICKET_FIELDS` are right; `jira_search` and `confluence_search` return results.
+- **Not done:** a scoped read-only token (`read:jira-work`, `search:confluence`,
+  `read:page:confluence`) would make the token itself read-only; the classic one has the
+  account's rights, though the tools only send GET requests. Confluence titles come back
+  HTML-escaped (`&amp;`), and the DVT number as a float (`4834.0`); both are small fixes.
 
 ### 2026-10-21 to 22: watcher moved here; first commit with fixes and tests (Vincent)
 - **Watcher:** Vincent's private DSS watcher runs in a Claude Code session in this repo, as a
