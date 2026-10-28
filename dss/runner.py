@@ -15,7 +15,8 @@ from pathlib import Path
 
 from dss.worker import ROOT
 
-MODEL = 'claude-sonnet-5-5'
+MODEL = 'claude-opus-5-5'
+EFFORT = 'high'  # low, medium, high, xhigh or max
 TIMEOUT_S = 900  # a triage reads Jira, telemetry and code
 RUN_DIR = ROOT / 'out' / 'claude_run'  # empty working folder: no CLAUDE.md to discover
 SYSTEM = Path(__file__).with_name('triage.md')
@@ -25,7 +26,7 @@ def command(model: str = MODEL) -> list[str]:
 	"""The `claude -p` command line: the triage prompt and the `dss` tools, nothing else."""
 	server = ['run', '-q', '--directory', str(ROOT), 'python', '-m', 'dss', 'mcp']
 	mcp = {'mcpServers': {'dss': {'command': 'uv', 'args': server}}}
-	line = ['claude', '-p', '--output-format', 'json', '--model', model]
+	line = ['claude', '-p', '--output-format', 'json', '--model', model, '--effort', EFFORT]
 	line += ['--setting-sources', '', '--strict-mcp-config', '--mcp-config', json.dumps(mcp)]
 	line += ['--tools', '', '--allowedTools', 'mcp__dss__*', '--permission-mode', 'dontAsk']
 	line += ['--system-prompt', SYSTEM.read_text(encoding='utf-8'), '--disable-slash-commands']
