@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from mcp import Client
 
+from dss import triage
 from dss.server import build
 
 
@@ -29,3 +30,12 @@ def call_tool(name: str, arguments: dict, server=None) -> tuple[bool, str]:
 def mcp_call():
 	""":func:`call_tool`, for tests that call tools the way Claude does."""
 	return call_tool
+
+
+@pytest.fixture(autouse=True)
+def private_output(tmp_path, monkeypatch):
+	"""Usage rows and traces go to the test's folder, never to the developer's `out/`."""
+	monkeypatch.setattr(triage, 'USAGE_FILE', tmp_path / 'usage.csv')
+	monkeypatch.setattr(triage, 'TRACE_DIR', tmp_path / 'trace')
+	for name in ('DSS_TRACE', 'DSS_TRACE_FILE'):
+		monkeypatch.delenv(name, raising=False)

@@ -45,7 +45,7 @@ class FakeClaude:
 	def __init__(self, answer='**DSS-1234 · Plot is wrong**', error=None):
 		self.answer, self.error, self.prompts = answer, error, []
 
-	def __call__(self, prompt):
+	def __call__(self, prompt, trace=None):
 		self.prompts.append(prompt)
 		if self.error:
 			raise self.error

@@ -1,5 +1,7 @@
 """One triage: the prompt Claude gets, what it cost, the reviewer's error text, and the CLI."""
 
+import csv
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -17,7 +19,7 @@ def reply(text: str = '  **DSS-1234 · Plot is wrong**  ', **usage) -> dict:
 def test_prompt_carries_the_ticket_its_time_and_the_workflow_post():
 	prompts = []
 
-	def ask(prompt):
+	def ask(prompt, trace=None):
 		prompts.append(prompt)
 		return reply(input_tokens=1000, output_tokens=200, cache_read_input_tokens=30000)
 
@@ -31,6 +33,42 @@ def test_prompt_carries_the_ticket_its_time_and_the_workflow_post():
 	assert isinstance(answer['seconds'], int)
 	triage.triage('DSS-1235', '2026-10-21_09-30-00', ask=ask)
 	assert 'workflow posted' not in prompts[1]
+
+
+
+def test_each_triage_adds_a_usage_row(tmp_path):
+	def ask(prompt, trace=None):
+		answer = reply(input_tokens=1000, output_tokens=200, cache_read_input_tokens=30000)
+		return {**answer, 'num_turns': 12}
+
+	answer = triage.triage('DSS-1234', '2026-10-21_09-30-00', ask=ask)
+	triage.triage('DSS-1235', '2026-10-21_10-00-00', ask=ask)
+	assert answer['turns'] == 12
+	with (tmp_path / 'usage.csv').open(encoding='utf-8', newline='') as file:
+		rows = list(csv.DictReader(file))  # one header, then a row per triage
+	assert [row['key'] for row in rows] == ['DSS-1234', 'DSS-1235']
+	first = rows[0]
+	assert first['posted'] == '2026-10-21_09-30-00' and first['turns'] == '12'
+	assert (first['input_tokens'], first['output_tokens']) == ('1000', '200')
+	assert first['cache_read_input_tokens'] == '30000'
+	assert first['cache_creation_input_tokens'] == '0'
+	assert first['cost_usd'] == '0.25' and first['seconds'] == '0'
+	assert re.fullmatch(r'\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d', first['run_at'])
+
+
+def test_trace_file_is_named_only_with_dss_trace(tmp_path, monkeypatch):
+	traces = []
+
+	def ask(prompt, trace=None):
+		traces.append(trace)
+		return reply()
+
+	triage.triage('DSS-1234', '2026-10-21_09-30-00', ask=ask)
+	monkeypatch.setenv('DSS_TRACE', '1')
+	triage.triage('DSS-1234', '2026-10-21_09-30-00', ask=ask)
+	assert traces[0] is None
+	assert traces[1].parent == tmp_path / 'trace' and traces[1].parent.is_dir()
+	assert re.fullmatch(r'DSS-1234_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.jsonl', traces[1].name)
 
 
 def test_spend_adds_every_token_kind_and_tolerates_missing_usage():
@@ -60,7 +98,7 @@ def claude(monkeypatch):
 	"""The CLI with a fake Claude and without the developer's .env file."""
 	prompts = []
 
-	def run_reply(prompt, model=runner.MODEL):
+	def run_reply(prompt, model=runner.MODEL, trace=None):
 		prompts.append((prompt, model))
 		return reply(input_tokens=1234)
 
@@ -78,9 +116,22 @@ def test_cli_prints_the_analysis_and_its_cost(claude, monkeypatch, capsys):
 	run_cli(monkeypatch, 'triage', 'DSS-1234', '--posted', '2026-10-21_09-30-00', '--model', 'm1')
 	out, err = capsys.readouterr()
 	assert out.strip() == '**DSS-1234 · Plot is wrong**'
-	assert '1,234 tokens · ≈ $0.25' in err
+	assert '0 turns · 1,234 tokens · ≈ $0.25' in err
 	((prompt, model),) = claude
 	assert 'New ticket DSS-1234, posted 2026-10-21_09-30-00' in prompt and model == 'm1'
+
+
+
+def test_cli_gives_claude_the_post_file(claude, monkeypatch, tmp_path, capsys):
+	post = tmp_path / 'post.txt'
+	post.write_text('created DSS-1234 · ACME · DVT1234', encoding='utf-8')
+	run_cli(monkeypatch, 'triage', 'DSS-1234', '--post-file', str(post))
+	((prompt, model),) = claude
+	assert prompt.endswith('workflow posted:\ncreated DSS-1234 · ACME · DVT1234')
+	with pytest.raises(SystemExit) as stopped:
+		run_cli(monkeypatch, 'triage', 'DSS-1234', '--post-file', str(tmp_path / 'missing.txt'))
+	assert stopped.value.code == 2 and len(claude) == 1  # Claude is not asked without the post
+	assert 'cannot read --post-file' in capsys.readouterr().err
 
 
 def test_cli_rejects_bad_input_before_asking_claude(claude, monkeypatch, capsys):
@@ -104,7 +155,7 @@ def test_cli_starts_the_tool_server_and_the_bot(monkeypatch):
 
 
 def test_cli_reports_a_failed_triage_in_one_line(monkeypatch):
-	def run_reply(prompt, model):
+	def run_reply(prompt, model, trace=None):
 		raise FileNotFoundError('claude')
 
 	monkeypatch.setattr(cli, 'load_env', lambda: None)

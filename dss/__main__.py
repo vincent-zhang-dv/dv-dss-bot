@@ -1,6 +1,7 @@
 """DSS triage CLI: `python -m dss <command>`.
 
-	python -m dss triage DSS-1234 [--posted 2026-10-21_09-30-00]   # one triage, printed; no Slack
+	python -m dss triage DSS-1234 [--posted 2026-10-21_09-30-00] [--post-file post.txt]
+	                                                                 # one triage, printed; no Slack
 	python -m dss slack                                              # the bot (see dss.slack)
 	python -m dss mcp                                                # the tools over stdio (MCP)
 
@@ -43,6 +44,11 @@ def main() -> None:
 		default='',
 		help='ticket time as YYYY-MM-DD_HH-MM-SS (local), for an older ticket; default now',
 	)
+	one.add_argument(
+		'--post-file',
+		type=Path,
+		help="a text file with the support-request workflow's Slack post (summary, client, DVT)",
+	)
 	one.add_argument('--model', default=runner.MODEL)
 	commands.add_parser('slack', help='run the Slack bot')
 	commands.add_parser('mcp', help='serve the triage tools over stdio (MCP)')
@@ -64,13 +70,20 @@ def main() -> None:
 		posted = args.posted
 		if not posted:
 			posted = datetime.now().strftime(TIME_FORMAT)
+		post = ''
+		if args.post_file:
+			try:
+				post = args.post_file.read_text(encoding='utf-8')
+			except OSError as error:
+				parser.error(f'cannot read --post-file: {error}')
 		ask = functools.partial(runner.run_reply, model=args.model)
 		try:
-			answer = triage(args.key, posted, ask=ask)
+			answer = triage(args.key, posted, post, ask=ask)
 		except Exception as error:  # one readable line instead of a traceback
 			raise SystemExit(explain(error)) from error
 		print(answer['text'])
-		usage = f'{answer["tokens"]:,} tokens · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
+		usage = f'{answer["turns"]} turns · {answer["tokens"]:,} tokens'
+		usage += f' · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
 		print(f'\n{usage}', file=sys.stderr)
 
 
