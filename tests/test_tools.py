@@ -50,31 +50,29 @@ def test_jira_rejects_a_key_before_connecting():
 
 
 @pytest.fixture
-def dvjira(monkeypatch):
-	"""arch's DVJira, faked: records every request and answers with one ticket."""
-	asked: list[tuple] = []
+def jira_site(monkeypatch):
+	"""Jira's REST API, faked: records every request and answers with one ticket."""
+	for name, value in zip(jira.ENV, ('https://dv.atlassian.net/', 'bot@acme.test', 't')):
+		monkeypatch.setenv(name, value)
+	requests = []
 
-	class FakeJira:
-		def issue(self, key, fields):
-			asked.append(('issue', key, fields))
-			return {'key': key, 'fields': {'summary': 'Plot is wrong', 'labels': ['x']}}
-
-		def enhanced_jql(self, jql, fields, limit):
-			asked.append(('search', jql, fields, limit))
+	def answer(request, timeout):
+		requests.append(request)
+		if '/issue/DSS-404' in request.full_url:
+			raise urllib.error.HTTPError(request.full_url, 404, 'Not Found', Message(), None)
+		body: dict
+		if '/search/jql' in request.full_url:
 			ticket = {'key': 'DSS-7', 'fields': {'summary': 'Old plot', 'created': '2026-01-02'}}
-			return {'issues': [ticket]}
+			body = {'issues': [ticket], 'isLast': True}
+		else:
+			body = {'key': 'DSS-1234', 'fields': {'summary': 'Plot is wrong', 'labels': ['x']}}
+		return io.BytesIO(json.dumps(body).encode())
 
-	class FakeDVJira:
-		def __init__(self, user_email):
-			asked.append(('login', user_email))
-			self.jira = FakeJira()
-
-	monkeypatch.setitem(sys.modules, 'connectors.dvjira', SimpleNamespace(DVJira=FakeDVJira))
-	monkeypatch.setenv('DV_JIRA_EMAIL', 'bot@acme.test')
-	return asked
+	monkeypatch.setattr(jira.urllib.request, 'urlopen', answer)
+	return requests
 
 
-def test_jira_asks_only_for_the_triage_fields(dvjira, monkeypatch):
+def test_jira_asks_only_for_the_triage_fields(jira_site):
 	ticket = jira.get_issue('DSS-1234')
 	assert ticket['summary'] == 'Plot is wrong' and 'labels' not in ticket
 	found = jira.search('project = DSS AND text ~ "plot"', limit=100)
@@ -88,27 +86,48 @@ def test_jira_asks_only_for_the_triage_fields(dvjira, monkeypatch):
 			'outcome': None,
 		}
 	]
-	login, issue, search = dvjira[0], dvjira[1], dvjira[3]
-	assert login == ('login', 'bot@acme.test')
-	assert issue == ('issue', 'DSS-1234', ','.join(jira.TICKET_FIELDS.values()))
-	assert search[2] == ','.join(jira.HISTORY_FIELDS.values())
-	assert search[3] == jira.MAX_RESULTS
-	monkeypatch.delenv('DV_JIRA_EMAIL')
-	with pytest.raises(RuntimeError, match='set DV_JIRA_EMAIL'):
+	issue, search = jira_site
+	assert issue.full_url.startswith('https://dv.atlassian.net/rest/api/2/issue/DSS-1234?')
+	assert issue.get_header('Authorization') == 'Basic Ym90QGFjbWUudGVzdDp0'
+	asked = urllib.parse.parse_qs(urllib.parse.urlsplit(issue.full_url).query)
+	assert asked['fields'] == [','.join(jira.TICKET_FIELDS.values())]
+	assert search.full_url.startswith('https://dv.atlassian.net/rest/api/2/search/jql?')
+	asked = urllib.parse.parse_qs(urllib.parse.urlsplit(search.full_url).query)
+	assert asked['jql'] == ['project = DSS AND text ~ "plot"']
+	assert asked['fields'] == [','.join(jira.HISTORY_FIELDS.values())]
+	assert asked['maxResults'] == [str(jira.MAX_RESULTS)]
+
+
+def test_jira_errors_say_what_happened(jira_site, monkeypatch):
+	with pytest.raises(jira.JiraError, match='no such ticket'):
+		jira.get_issue('DSS-404')
+	with pytest.raises(jira.JiraError, match='JQL query is empty'):
+		jira.search('  ')
+	monkeypatch.delenv('JIRA_TOKEN')
+	with pytest.raises(jira.JiraError, match='set JIRA_TOKEN'):
 		jira.get_issue('DSS-1234')
 
 
-def test_jira_tools_answer_through_mcp(dvjira, monkeypatch, mcp_call):
-	def in_this_process(app, module, func, **kwargs):  # instead of the arch venv
-		assert (app, module) == ('arch', 'dss.jira')
-		return getattr(jira, func)(**kwargs)
+def test_jira_falls_back_to_the_confluence_login(jira_site, monkeypatch):
+	for name, fallback in jira.ENV.items():
+		monkeypatch.delenv(name)
+		if name == 'JIRA_URL':
+			monkeypatch.setenv(fallback, 'https://dv.atlassian.net/wiki')
+		else:
+			monkeypatch.setenv(fallback, 'x')
+	assert jira.get_issue('DSS-1234')['summary'] == 'Plot is wrong'
+	assert jira_site[-1].full_url.startswith('https://dv.atlassian.net/rest/api/2/issue/')
 
-	monkeypatch.setattr(jira, 'run_in', in_this_process)
+
+def test_jira_tools_answer_through_mcp(jira_site, mcp_call):
 	failed, ticket = mcp_call('jira_get_issue', {'key': 'DSS-1234'})
 	assert not failed and 'Plot is wrong' in ticket
 	failed, found = mcp_call('jira_search', {'jql': 'project = DSS', 'limit': 5})
 	assert not failed and 'DSS-7' in found
-	assert dvjira[-1] == ('search', 'project = DSS', ','.join(jira.HISTORY_FIELDS.values()), 5)
+	asked = urllib.parse.parse_qs(urllib.parse.urlsplit(jira_site[-1].full_url).query)
+	assert asked['maxResults'] == ['5']
+	failed, text = mcp_call('jira_get_issue', {'key': 'DSS-404'})
+	assert failed and 'no such ticket' in text
 
 
 ROOT = r'\\nas\projects'

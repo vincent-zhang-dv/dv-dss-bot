@@ -28,7 +28,7 @@ class ReportingTools:
 	"""Registers tools on *server* so that a failing tool's message reaches Claude.
 
 	The MCP SDK answers any exception other than `ToolError` with only "Error executing tool
-	<name>", which would hide messages such as "arch is not set up on this machine".
+	<name>", which would hide messages such as "Jira is not set up on this machine".
 	"""
 
 	def __init__(self, server: MCPServer) -> None:

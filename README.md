@@ -14,7 +14,7 @@ Owners: Vincent Zhang and Annika. Status log: [docs/STATUS.md](docs/STATUS.md).
   -> dss/triage.py   the prompt: ticket key, time posted, the workflow's message
   -> dss/runner.py   claude -p with no user setup and no built-in tools; system prompt dss/triage.md
   -> dss/server.py   MCP server `dss`, read-only tools:
-       jira_*        dss/jira.py        ticket fields, similar tickets (arch's DVJira, arch venv)
+       jira_*        dss/jira.py        ticket fields, similar tickets (Jira REST API)
        cerb_*        dss/cerb.py        project folder, telemetry, files (project index);
                                         client info (Cerberus venv)
        code_*        dss/code.py        Cerberus source at the prod release commit (git)
@@ -34,7 +34,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude rec
 | `code_grep`, `code_read`, `code_log_s` | Cerberus source through git at the prod release commit, never the working tree. |
 | `confluence_search`, `confluence_page` | Confluence pages. |
 
-The jira and `cerb_client_info` tools run in the arch and Cerberus venvs through [dss/worker.py](dss/worker.py), so this repo needs none of their dependencies.
+`cerb_client_info` runs in the Cerberus venv through [dss/worker.py](dss/worker.py), so this repo needs none of its dependencies.
 
 ## Repository layout
 
@@ -59,10 +59,9 @@ Requirements: Windows, Python 3.11 and [uv](https://docs.astral.sh/uv/).
 1. `uv sync`
 2. Install the `claude` CLI and log in once (`claude`). Triages run under that login.
 3. **Cerberus:** a checkout of `darkvisiontech/DataDHPython` with its venv. Fetch it regularly, so the `code_*` tools see new release commits.
-4. **arch:** the `arch-master` branch of DataDHPython (for example `git worktree add ..\DataDHPython-arch arch-master`) with its venv. You also need AWS credentials that can read arch's Jira token, and `DV_JIRA_EMAIL`. Ask the arch owner for access.
-5. **Project index:** your own login. The approval covers read-only use on DSS tickets. Check that it covers you before you use it.
-6. **Confluence:** a read-only account's API token.
-7. `copy .env.example .env` and fill it in. `.env` is git-ignored.
+4. **Project index:** your own login. The approval covers read-only use on DSS tickets. Check that it covers you before you use it.
+5. **Jira and Confluence:** a read-only account's Atlassian API token. One token serves both.
+6. `copy .env.example .env` and fill it in. `.env` is git-ignored.
 
 Check the setup with one triage: `uv run python -m dss triage DSS-1234`.
 
@@ -120,13 +119,12 @@ All of them can go in `.env`; see [.env.example](.env.example).
 | Variable | Used for |
 |---|---|
 | `DSS_CERB_PY`, `DSS_CERB_CWD` | The Cerberus venv's python and checkout: `cerb_client_info` and `code_*`. |
-| `DSS_ARCH_PY`, `DSS_ARCH_CWD` | The arch venv's python and its `arch` folder: `jira_*`. |
-| `DV_JIRA_EMAIL` | The Jira account whose API token arch keeps in AWS Secrets Manager. |
 | `DV_PROJECT_INDEX_USER`, `DV_PROJECT_INDEX_PASSWORD` | Login for the project index. Sent as HTTP Basic auth over plain HTTP. |
 | `DV_PROJECT_INDEX_URL`, `DV_PROJECT_INDEX_ROOT` | The index address and the share it indexes. Default `http://192.168.25.120` and `\\192.168.24.252\projects`. |
 | `DV_CERB_PROD_DIR` | The folder analysts install Cerberus from. Default `F:/DarkVision Dropbox/Analysis/CERBERUS/prod`. |
 | `DV_CERB_REF` | A Cerberus commit for `code_*` to read instead of the prod release commit. |
 | `CONFLUENCE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_TOKEN`, `CONFLUENCE_SPACES` | The read-only Confluence account, and optionally the spaces to search. |
+| `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN` | The read-only Jira account. Each defaults to its `CONFLUENCE_*` value. |
 | `DSS_SLACK_BOT_TOKEN`, `DSS_SLACK_APP_TOKEN` | The bot's Slack tokens. |
 | `DSS_SLACK_REVIEWER` | The Slack member id whose DM gets the analyses. |
 | `DSS_SLACK_CHANNEL` | The channel to watch. Default #data-dev-support. |

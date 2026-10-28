@@ -13,8 +13,8 @@ uv run ruff format .
 uv run python -m dss triage DSS-1234 [--posted YYYY-MM-DD_HH-MM-SS]   # one real triage, no Slack
 ```
 Windows, Python 3.11, uv. Settings come from the environment or `.env` (template:
-`.env.example`). Cerberus and arch code runs in their own venvs through `dss/worker.py`; never add
-their packages to this repo's dependencies.
+`.env.example`). Cerberus code runs in its own venv through `dss/worker.py`; never add its
+packages to this repo's dependencies.
 
 ## Rules
 - **Read-only, always.** Tools send only GET requests and git reads. Adding a tool that writes
@@ -51,5 +51,8 @@ their packages to this repo's dependencies.
 | Repo | Why |
 |---|---|
 | DataDHPython (`darkvisiontech/DataDHPython`) | Cerberus. The `code_*` tools read it through git at the prod release commit, and `cerb_client_info` runs in its venv. |
-| DataDHPython, branch `arch-master` | arch. Its `DVJira` backs the `jira_*` tools. |
 | dv-auto-setup-agent | Arsenii's casing intake and auto-setup project, the source of the copied code. |
+
+arch (DataDHPython's `arch-master` branch) is not a source: Cerberus reads only the client info
+and the other spreadsheets in the DVT folder. If Cerberus starts reading arch directly, add a
+read-only arch tool; both owners agree first.
