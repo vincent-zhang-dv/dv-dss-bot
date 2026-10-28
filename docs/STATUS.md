@@ -1,5 +1,24 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-27: arch dropped; `jira_*` on the Jira REST API (Vincent, with Claude)
+- **Why:** arch is not part of this project. Cerberus reads only the client info and the other
+  spreadsheets in the DVT folder, which the `cerb_*` tools already read through the project
+  index; arch's data has to match client info, so client info is the source here. The `jira_*`
+  tools used arch only for its `DVJira` client (a Jira API token in AWS Secrets Manager).
+  If Cerberus starts reading arch directly one day, arch becomes a source the triage must read
+  too, and a read-only arch tool comes back (both owners agree first).
+- **Changed:** `dss/jira.py` calls Jira Cloud's REST API directly (`/rest/api/2/issue/<key>`
+  and `/rest/api/2/search/jql`, GET only, standard library, like `confluence.py`). Settings
+  `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN`; each falls back to its `CONFLUENCE_*` value, since one
+  Atlassian site and API token serve both. Errors reach Claude as `JiraError` (not set up, token
+  refused, no access, no such ticket, bad JQL). `worker.APPS` is `('cerb',)`; `DSS_ARCH_*` and
+  `DV_JIRA_EMAIL` are gone from `.env.example`, README and CLAUDE.md.
+- **Checked:** `uv run pytest` (57 passed); the Jira tests fake `urlopen` and check the URLs,
+  fields and basic-auth header. Not run against real Jira yet: `.env` has no Atlassian token.
+- **Not done:** fill `CONFLUENCE_*` (or `JIRA_*`) in `.env` and run one `python -m dss triage`
+  to check `jira_get_issue` and `jira_search` live. The Jira custom field ids in `TICKET_FIELDS`
+  came from arch's code and have not been checked against a real ticket.
+
 ### 2026-10-21 to 22: watcher moved here; first commit with fixes and tests (Vincent)
 - **Watcher:** Vincent's private DSS watcher runs in a Claude Code session in this repo, as a
   session schedule at minutes 7 and 37, from `out/watcher/` (git-ignored): runbook, state,

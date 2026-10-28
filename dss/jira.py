@@ -1,16 +1,27 @@
-"""`jira_*` tools: DSS tickets and their history, read-only, through arch's `DVJira`.
+"""`jira_*` tools: DSS tickets and their history, read-only, through the Jira Cloud REST API.
 
-The functions run in the arch venv. `DVJira` takes its API token from AWS Secrets Manager; the
-account's email comes from DV_JIRA_EMAIL. Only the fields triage needs are requested, so a ticket
+Uses a read-only account's API token (basic auth), standard library only. The settings are
+JIRA_URL, JIRA_EMAIL and JIRA_TOKEN; each one falls back to its CONFLUENCE_* value, since one
+Atlassian site and token serve both. Only the fields triage needs are requested, so a ticket
 costs a few hundred tokens instead of the whole issue.
 """
 
+import base64
+import json
 import os
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 
-from dss.worker import run_in
-
+TIMEOUT_S = 30
 ISSUE_KEY = re.compile(r'[A-Z][A-Z0-9]+-\d+')
+# setting -> the Confluence setting it falls back to
+ENV = {
+	'JIRA_URL': 'CONFLUENCE_URL',
+	'JIRA_EMAIL': 'CONFLUENCE_EMAIL',
+	'JIRA_TOKEN': 'CONFLUENCE_TOKEN',
+}
 # name in the answer -> Jira field id
 TICKET_FIELDS = {
 	'summary': 'summary',
@@ -35,14 +46,8 @@ MAX_RESULTS = 20
 DESCRIPTION_CHARS = 4000
 
 
-def _jira():
-	"""arch's Jira client for the DV_JIRA_EMAIL account (arch venv only)."""
-	from connectors.dvjira import DVJira
-
-	email = os.environ.get('DV_JIRA_EMAIL')
-	if not email:
-		raise RuntimeError('set DV_JIRA_EMAIL to the Jira account whose API token arch keeps')
-	return DVJira(user_email=email).jira
+class JiraError(RuntimeError):
+	"""A failure Claude should read as it is (not configured, no access, not found)."""
 
 
 def plain(value):
@@ -85,15 +90,64 @@ def get_issue(key: str) -> dict:
 	"""The triage fields of ticket *key*; the key is checked before anything is sent."""
 	if not ISSUE_KEY.fullmatch(key):
 		raise ValueError(f'{key!r} is not an issue key like DSS-1222')
-	issue = _jira().issue(key, fields=','.join(TICKET_FIELDS.values()))
+	issue = _get(f'/rest/api/2/issue/{key}', {'fields': ','.join(TICKET_FIELDS.values())})
 	return compact(issue, TICKET_FIELDS)
 
 
 def search(jql: str, limit: int = 10) -> list[dict]:
 	"""Tickets matching *jql*, at most MAX_RESULTS, with the history fields only."""
-	fields = ','.join(HISTORY_FIELDS.values())
-	page = _jira().enhanced_jql(jql, fields=fields, limit=min(limit, MAX_RESULTS))
+	jql = jql.strip()
+	if not jql:
+		raise JiraError('the JQL query is empty')
+	params = {
+		'jql': jql,
+		'fields': ','.join(HISTORY_FIELDS.values()),
+		'maxResults': max(1, min(limit, MAX_RESULTS)),
+	}
+	page = _get('/rest/api/2/search/jql', params)
 	return [compact(issue, HISTORY_FIELDS) for issue in page.get('issues', [])]
+
+
+def setting(name: str) -> str:
+	"""JIRA_<name>, or the CONFLUENCE_* value it falls back to; empty when neither is set."""
+	return os.environ.get(name) or os.environ.get(ENV[name], '')
+
+
+def _get(path: str, params: dict) -> dict:
+	missing = []
+	for name in ENV:
+		if not setting(name):
+			missing.append(name)
+	if missing:
+		raise JiraError(
+			f'Jira is not set up on this machine: set {", ".join(missing)} '
+			'(a read-only account and its API token; the CONFLUENCE_* values are used when set).'
+		)
+	auth = f'{setting("JIRA_EMAIL")}:{setting("JIRA_TOKEN")}'
+	request = urllib.request.Request(
+		f'{_base()}{path}?{urllib.parse.urlencode(params)}',
+		headers={
+			'Authorization': 'Basic ' + base64.b64encode(auth.encode()).decode(),
+			'Accept': 'application/json',
+		},
+	)
+	try:
+		with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+			return json.loads(response.read().decode('utf-8'))
+	except urllib.error.HTTPError as error:
+		reason = {
+			400: 'Jira rejected the request (check the JQL)',
+			401: 'the Jira token was refused',
+			403: 'this account cannot read that project',
+			404: 'no such ticket (or no access to it)',
+		}.get(error.code, f'Jira answered {error.code} {error.reason}')
+		raise JiraError(reason) from error
+	except (urllib.error.URLError, TimeoutError) as error:
+		raise JiraError(f'cannot reach Jira at {_base()}: {error}') from error
+
+
+def _base() -> str:
+	return setting('JIRA_URL').rstrip('/').removesuffix('/wiki')
 
 
 def register(server) -> None:
@@ -101,10 +155,10 @@ def register(server) -> None:
 	def jira_get_issue(key: str) -> dict:
 		"""One ticket's triage fields: summary, description, status, reporter, links, Project
 		Path, Toolbox Name, Investigation Outcome, client and DVT."""
-		return run_in('arch', __name__, 'get_issue', key=key)
+		return get_issue(key)
 
 	@server.tool()
 	def jira_search(jql: str, limit: int = 10) -> list[dict]:
 		"""Tickets matching *jql* (at most 20) with summary, status, created, Toolbox Name and
 		Investigation Outcome. Use it to find similar past tickets."""
-		return run_in('arch', __name__, 'search', jql=jql, limit=limit)
+		return search(jql, limit)

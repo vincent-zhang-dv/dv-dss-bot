@@ -144,9 +144,9 @@ def test_worker_runs_a_function_in_another_python(monkeypatch):
 
 
 def test_worker_says_which_setting_is_missing(monkeypatch):
-	monkeypatch.delenv('DSS_ARCH_PY', raising=False)
-	with pytest.raises(RuntimeError, match='set DSS_ARCH_PY'):
-		run_in('arch', 'json', 'dumps', obj=1)
+	monkeypatch.delenv('DSS_CERB_PY', raising=False)
+	with pytest.raises(RuntimeError, match='set DSS_CERB_PY'):
+		run_in('cerb', 'json', 'dumps', obj=1)
 	with pytest.raises(ValueError, match="unknown app 'nope'"):
 		run_in('nope', 'json', 'dumps', obj=1)
 

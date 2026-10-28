@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1].resolve()
 MARK = '@@dss@@'
-APPS = ('cerb', 'arch')  # Cerberus (DataDHPython) and arch (its arch-master branch)
+APPS = ('cerb',)  # Cerberus (DataDHPython)
 _CHILD = (
 	'import importlib, json, sys; sys.path.append(sys.argv[1]); call = json.load(sys.stdin); '
 	'function = getattr(importlib.import_module(call["module"]), call["func"]); '
