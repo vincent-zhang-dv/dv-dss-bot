@@ -13,7 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from dss import cerb, runner
 from dss.__main__ import load_env
 from dss.runner import command
-from dss.server import ReportingTools, build
+from dss.server import TRACE_CHARS, ReportingTools, build
 from dss.worker import run_in
 
 
@@ -53,6 +53,23 @@ def test_run_reply_sends_the_prompt_and_reports_failures(tmp_path, monkeypatch):
 	outcome['returncode'] = 1
 	with pytest.raises(RuntimeError, match=r'claude -p failed \(1\): boom'):
 		runner.run_reply('New ticket DSS-1234')
+
+
+
+def test_run_reply_names_the_trace_file_only_when_asked(tmp_path, monkeypatch):
+	envs = []
+
+	def run(line, **options):
+		envs.append(options['env'])
+		return subprocess.CompletedProcess(line, 0, json.dumps({'result': 'Analysis'}), '')
+
+	monkeypatch.setattr(runner, 'RUN_DIR', tmp_path / 'run')
+	monkeypatch.setattr(runner.subprocess, 'run', run)
+	monkeypatch.setenv('DSS_TRACE_FILE', str(tmp_path / 'stale.jsonl'))
+	runner.run_reply('New ticket DSS-1234', trace=tmp_path / 'DSS-1234.jsonl')
+	runner.run_reply('New ticket DSS-1234')
+	assert envs[0]['DSS_TRACE_FILE'] == str(tmp_path / 'DSS-1234.jsonl')
+	assert 'DSS_TRACE_FILE' not in envs[1]  # an inherited value never leaks into another triage
 
 
 def test_server_serves_the_triage_tools():
@@ -100,6 +117,50 @@ def test_reporting_tools_keep_results_and_explain_failures(mcp_call):
 	assert mcp_call('echo', {'text': 'hi'}, server) == (False, 'hi')
 	assert mcp_call('broken', {}, server) == (True, "Error executing tool broken: KeyError: 'dvt'")
 	assert mcp_call('refused', {}, server) == (True, 'Error executing tool refused: not allowed')
+
+
+
+def test_reporting_tools_trace_each_call_when_the_runner_asks(tmp_path, monkeypatch, mcp_call):
+	server = MCPServer('test')
+	tools = ReportingTools(server)
+
+	@tools.tool()
+	def echo(text: str) -> str:
+		"""Echo *text*."""
+		return text
+
+	@tools.tool()
+	def facts(dvt: int) -> dict:
+		"""A long dict result."""
+		return {'dvt': dvt, 'notes': 'x' * 3000}
+
+	@tools.tool()
+	def broken() -> str:
+		"""Fail as a bug would."""
+		raise KeyError('dvt')
+
+	@tools.tool()
+	def refused() -> str:
+		"""Fail on purpose."""
+		raise ToolError('not allowed')
+
+	mcp_call('echo', {'text': 'hi'}, server)  # no DSS_TRACE_FILE: nothing is written
+	assert list(tmp_path.iterdir()) == []
+	trace = tmp_path / 'DSS-1234.jsonl'
+	monkeypatch.setenv('DSS_TRACE_FILE', str(trace))
+	for name, arguments in (('echo', {'text': 'hé'}), ('facts', {'dvt': 1234})):
+		mcp_call(name, arguments, server)
+	mcp_call('broken', {}, server)
+	mcp_call('refused', {}, server)
+	lines = [json.loads(line) for line in trace.read_text(encoding='utf-8').splitlines()]
+	assert [line['tool'] for line in lines] == ['echo', 'facts', 'broken', 'refused']
+	assert all(line['seconds'] >= 0 for line in lines)
+	assert lines[0]['arguments'] == {'text': 'hé'}
+	assert (lines[0]['chars'], lines[0]['result']) == (2, 'hé')
+	assert lines[1]['arguments'] == {'dvt': 1234}
+	assert lines[1]['chars'] > TRACE_CHARS and len(lines[1]['result']) == TRACE_CHARS  # capped
+	assert lines[2]['error'] == "KeyError: 'dvt'" and 'result' not in lines[2]
+	assert lines[3]['error'] == 'ToolError: not allowed'
 
 
 def test_tool_errors_reach_claude_with_their_message(tmp_path, monkeypatch, mcp_call):

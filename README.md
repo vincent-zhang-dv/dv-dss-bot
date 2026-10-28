@@ -68,12 +68,15 @@ Check the setup with one triage: `uv run python -m dss triage DSS-1234`.
 ## Usage
 
 ```powershell
-uv run python -m dss triage DSS-1234                                 # print one analysis; no Slack, nothing saved
+uv run python -m dss triage DSS-1234                                 # print one analysis; no Slack
 uv run python -m dss triage DSS-1234 --posted 2026-10-21_09-30-00    # an older ticket
+uv run python -m dss triage DSS-1234 --post-file post.txt            # with the workflow's Slack post
 uv run python -m dss slack                                           # the bot
 ```
 
-The analysis goes to stdout, and tokens and cost to stderr. `--posted` is the ticket time, in local time, and defaults to now. `cerb_last_session` uses it to pick the reporter's last session before the ticket, so pass it for an older ticket.
+The analysis goes to stdout, and turns, tokens and cost to stderr. `--posted` is the ticket time, in local time, and defaults to now. `cerb_last_session` uses it to pick the reporter's last session before the ticket, so pass it for an older ticket. `--post-file` is a text file with the support-request workflow's post (summary, client, DVT), which the Slack bot passes on its own; it gives Claude the ticket facts when Jira is down.
+
+Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, ticket, turns, seconds, tokens by kind and cost. With `DSS_TRACE=1`, its tool calls also go to `out/trace/<key>_<run time>.jsonl`, one JSON line each: tool, arguments, seconds, and the error or the result's size and first 2,000 characters. Both hold client data and stay in the git-ignored `out/`.
 
 To try the tools by hand in Claude Code:
 
@@ -128,6 +131,7 @@ All of them can go in `.env`; see [.env.example](.env.example).
 | `DSS_SLACK_BOT_TOKEN`, `DSS_SLACK_APP_TOKEN` | The bot's Slack tokens. |
 | `DSS_SLACK_REVIEWER` | The Slack member id whose DM gets the analyses. |
 | `DSS_SLACK_CHANNEL` | The channel to watch. Default #data-dev-support. |
+| `DSS_TRACE` | `1` writes each triage's tool calls to `out/trace/`. |
 
 ## Origin
 

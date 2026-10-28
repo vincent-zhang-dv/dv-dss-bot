@@ -1,5 +1,28 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-28: smoke runs on Opus; usage log, tool-call traces, `--post-file` (Vincent, with Claude)
+- **Smoke runs** (Opus 5.5, high effort; the tracker's Phase 0 smoke tickets): DSS-1228 cost
+  $0.24 (123k tokens, 40 s) and DSS-1229 $0.17 (75k tokens, 36 s). Both stopped at Gate C:
+  without the workflow's post they had no error text (DSS-1228) and no run folder (DSS-1229).
+- **Changed:**
+  - Every triage appends a row to `out/usage.csv` (`triage.log_usage`): run time, key,
+    posted, turns, seconds, each token kind, cost. The CLI's cost line shows the turns too.
+  - `DSS_TRACE=1` traces a triage's tool calls to `out/trace/<key>_<run time>.jsonl`. The
+    runner passes the file to `claude -p` as `DSS_TRACE_FILE`; the MCP server inherits it, and
+    `server.ReportingTools` writes one JSON line per call: tool, arguments, seconds, then the
+    error, or the result's size and first 2,000 characters. The file is named by run time,
+    not ticket time, so a rerun keeps the earlier trace for comparison.
+  - `python -m dss triage --post-file post.txt` gives Claude the workflow's post, as the Slack
+    bot does.
+  - The `ask` callable now takes `trace` as a keyword argument (`runner.run_reply` and the
+    test fakes).
+- **Checked:** `uv run pytest` (62 passed; new tests for the usage rows, the trace lines, the
+  trace setting and `--post-file`); mypy clean apart from the Cerberus import it can't see.
+  Live: `claude -p` with the real `dss` server called `cerb_prod_version`, and the trace file
+  got its line.
+- **Not done:** no full triage with `DSS_TRACE=1` or `--post-file` yet; the next DSS-1228 and
+  DSS-1229 reruns with their posts would show both.
+
 ### 2026-10-28: the triage runs on Opus 5.5 at high effort (Vincent, with Claude)
 - **Changed:** `runner.MODEL` is `claude-opus-5-5` (was `claude-sonnet-5-5`), and `claude -p`
   gets `--effort high` (`runner.EFFORT`). This is for now, while reply quality is measured;
