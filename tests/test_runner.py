@@ -43,6 +43,7 @@ def test_run_reply_sends_the_prompt_and_reports_failures(tmp_path, monkeypatch):
 	assert runner.run_reply('New ticket DSS-1234', model='claude-test')['result'] == 'Analysis'
 	line, options = calls[0]
 	assert line[line.index('--model') + 1] == 'claude-test'
+	assert line[line.index('--effort') + 1] == 'high'
 	assert options['input'] == 'New ticket DSS-1234'  # on stdin, not on the command line
 	assert options['cwd'] == tmp_path / 'run' and (tmp_path / 'run').is_dir()
 	assert options['env']['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] == '1'

@@ -1,5 +1,14 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-28: the triage runs on Opus 5.5 at high effort (Vincent, with Claude)
+- **Changed:** `runner.MODEL` is `claude-opus-5-5` (was `claude-sonnet-5-5`), and `claude -p`
+  gets `--effort high` (`runner.EFFORT`). This is for now, while reply quality is measured;
+  `python -m dss triage --model` still picks another model for one run.
+- **Checked:** `uv run pytest` (57 passed); the runner test checks the `--effort` value. The CLI
+  (2.1.292) ran Opus 5.5 at high effort on a one-word prompt with no tools.
+- **Not done:** no triage on a real ticket yet. Opus at high effort costs more per run than
+  Sonnet, so the run budget agreed with Annika should allow for it.
+
 ### 2026-10-27: arch dropped; `jira_*` on the Jira REST API (Vincent, with Claude)
 - **Why:** arch is not part of this project. Cerberus reads only the client info and the other
   spreadsheets in the DVT folder, which the `cerb_*` tools already read through the project
