@@ -1,5 +1,28 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-28: answer scoring (`dss eval`) and a golden-set draft (Vincent, with Claude)
+- **Changed:**
+  - `python -m dss eval <golden> <run folder> [--judge]` scores saved answers against golden
+    rows (`dss/eval.py`): evidence read (from the trace's call arguments), citations under
+    Checked that resolve (Jira keys, Confluence page ids, code `file:line` at the commit the
+    trace shows), known false leads, Suggested labels against Jira's, length. `--judge` asks
+    Haiku through `claude -p` with no tools, MCP servers or settings; off by default.
+  - `docs/golden.example.jsonl`: the golden row format, with made-up data.
+  - `code.files` and `code.line_count`, read-only git helpers for the citation check (not
+    tools).
+- **Checked:** `uv run pytest` (78 passed; `tests/test_eval.py` runs on the example row with
+  faked lookups); mypy clean. Live, no Claude run: `dss eval` on the saved DSS-1229 smoke
+  answer parsed all six sections, resolved both Jira citations and matched both labels
+  (evidence 0/2, since that run had no trace).
+- **Outside the repo (client data, `out/eval/`):** Vincent reviewed the 38 high-confidence
+  drafts on the review page; their labels and answers are now in Jira (27 field edits, 18
+  CAUSE/EVIDENCE/SOLUTION comments, through Vincent's Atlassian login, each checked back).
+  The test-set sort now has 161 ready, 27 needing information, 192 out. A 30-row golden draft
+  (`golden_draft.jsonl`: 9 Gate B, 7 Gate C, 13 playbook, 1 Gate A; 5 pilot tickets the bot
+  got wrong or stopped short on) and a dry-run-by-default baseline loop (`run_baseline.py`).
+- **Not done:** the golden rows need Vincent's evidence pointers and false leads; no baseline
+  run (the run budget is not agreed); the judge has not been run live.
+
 ### 2026-10-28: smoke runs on Opus; usage log, tool-call traces, `--post-file` (Vincent, with Claude)
 - **Smoke runs** (Opus 5.5, high effort; the tracker's Phase 0 smoke tickets): DSS-1228 cost
   $0.24 (123k tokens, 40 s) and DSS-1229 $0.17 (75k tokens, 36 s). Both stopped at Gate C:

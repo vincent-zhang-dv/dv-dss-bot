@@ -2,6 +2,7 @@
 
 	python -m dss triage DSS-1234 [--posted 2026-10-21_09-30-00] [--post-file post.txt]
 	                                                                 # one triage, printed; no Slack
+	python -m dss eval out/eval/golden.jsonl out/eval/<run> [--judge] # score saved answers
 	python -m dss slack                                              # the bot (see dss.slack)
 	python -m dss mcp                                                # the tools over stdio (MCP)
 
@@ -50,6 +51,12 @@ def main() -> None:
 		help="a text file with the support-request workflow's Slack post (summary, client, DVT)",
 	)
 	one.add_argument('--model', default=runner.MODEL)
+	evaluate = commands.add_parser('eval', help='score saved answers against the golden set')
+	evaluate.add_argument('golden', type=Path, help='golden rows, e.g. out/eval/golden.jsonl')
+	evaluate.add_argument('run_dir', type=Path, help='folder with <key>.md and <key>_*.jsonl')
+	evaluate.add_argument(
+		'--judge', action='store_true', help='also ask Haiku whether each answer found the outcome'
+	)
 	commands.add_parser('slack', help='run the Slack bot')
 	commands.add_parser('mcp', help='serve the triage tools over stdio (MCP)')
 	args = parser.parse_args()
@@ -62,6 +69,15 @@ def main() -> None:
 		from dss.slack import main as bot
 
 		bot()
+	elif args.command == 'eval':
+		from dss import eval as scoring
+
+		try:
+			scores = scoring.run(args.golden, args.run_dir, use_judge=args.judge)
+		except (OSError, ValueError, RuntimeError) as error:  # bad file, or a lookup not set up
+			raise SystemExit(f'cannot score: {error}') from error
+		for result in scores:
+			print(scoring.summary(result))
 	else:
 		if not ISSUE_KEY.fullmatch(args.key):
 			parser.error(f'{args.key!r} is not an issue key like DSS-1234')
