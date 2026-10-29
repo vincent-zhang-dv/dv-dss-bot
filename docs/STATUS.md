@@ -33,6 +33,13 @@
     verdict. Vincent checks them there.
   - `out/eval/export_golden.py` writes `golden.jsonl` from the saved checks.
   - `run_baseline.py` now pins the code per ticket and skips tickets it has already run.
+- **Planned (tracker Phase 3b, for both owners to agree):** standard inputs and outputs.
+  - Input: code builds a ticket record before Claude starts. Each fact carries its source and
+    is taken as of the ticket time: description as opened, project and workflow, versions then,
+    inputs present, last failed run. Taking facts as of the ticket time is also the replay mode.
+  - Output: Claude answers in one JSON schema, a shared part plus a details block per step or
+    playbook. Code checks the required fields per status and renders the DM.
+  - The design is on the DSS Triage Flow page.
 - **Not done:**
   - Vincent's check of the 30.
   - A replay mode in the tools for closed tickets, which needs both owners.
