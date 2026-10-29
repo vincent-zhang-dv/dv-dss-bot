@@ -81,6 +81,16 @@ def log_s(text: str, path: str = 'cerberus', all_branches: bool = False) -> str:
 	return _capped(f'Commits up to {scope} that add or remove {text!r}', found.splitlines())
 
 
+def files(ref: str) -> list[str]:
+	"""Every file path in the Cerberus repo at *ref*."""
+	return _git('ls-tree', '-r', '--name-only', ref).splitlines()
+
+
+def line_count(path: str, ref: str) -> int:
+	"""Lines in one file at *ref*; RuntimeError when the file is not there."""
+	return len(_git('show', f'{ref}:{_checked(path)}').splitlines())
+
+
 def _git(*args: str) -> str:
 	"""Output of one read-only git command in the Cerberus checkout."""
 	done = subprocess.run(

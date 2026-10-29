@@ -40,9 +40,10 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude rec
 
 | Path | What it does |
 |---|---|
-| `dss/__main__.py` | CLI: `triage`, `slack`, `mcp`. Reads `.env`. |
+| `dss/__main__.py` | CLI: `triage`, `eval`, `slack`, `mcp`. Reads `.env`. |
 | `dss/triage.md` | The triage system prompt. Most behaviour changes happen here. |
 | `dss/triage.py` | One triage: prompt, Claude run, tokens and cost. |
+| `dss/eval.py`, `docs/golden.example.jsonl` | Scores saved answers against the golden set; a made-up golden row. |
 | `dss/runner.py` | The locked-down `claude -p` command line. |
 | `dss/server.py` | The `dss` MCP server. |
 | `dss/jira.py`, `cerb.py`, `code.py`, `confluence.py` | The tools, one module per source. |
@@ -77,6 +78,15 @@ uv run python -m dss slack                                           # the bot
 The analysis goes to stdout, and turns, tokens and cost to stderr. `--posted` is the ticket time, in local time, and defaults to now. `cerb_last_session` uses it to pick the reporter's last session before the ticket, so pass it for an older ticket. `--post-file` is a text file with the support-request workflow's post (summary, client, DVT), which the Slack bot passes on its own; it gives Claude the ticket facts when Jira is down.
 
 Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, ticket, turns, seconds, tokens by kind and cost. With `DSS_TRACE=1`, its tool calls also go to `out/trace/<key>_<run time>.jsonl`, one JSON line each: tool, arguments, seconds, and the error or the result's size and first 2,000 characters. Both hold client data and stay in the git-ignored `out/`.
+
+### Scoring answers
+
+```powershell
+uv run python -m dss eval out/eval/golden.jsonl out/eval/2026-10-30_baseline           # no Claude runs
+uv run python -m dss eval out/eval/golden.jsonl out/eval/2026-10-30_baseline --judge   # plus a Haiku judge
+```
+
+The golden set has one JSON line per closed DSS ticket with its known resolution: the ticket and its time, the gate that should settle it, the outcome in one line, the evidence the run should read, phrases of known false leads, the Toolbox Name and Investigation Outcome, and where the answer comes from. `docs/golden.example.jsonl` is a made-up row to copy; the real rows hold client data and live in the git-ignored `out/eval/`. The run folder holds each ticket's answer as `<key>.md` and its trace as `<key>_<run time>.jsonl`. For each ticket, `eval` prints and saves (`scores.jsonl` in the run folder) whether the run read each evidence item, whether every Jira key, Confluence page and code `file:line` under Checked exists (looked up read-only, code at the commit the trace shows), any false lead found, whether Suggested labels name the Jira labels, and the length. `--judge` adds a locked-down Haiku (`claude -p` with no tools) saying whether the answer reached the outcome; each judgement is one more run under your login.
 
 To try the tools by hand in Claude Code:
 

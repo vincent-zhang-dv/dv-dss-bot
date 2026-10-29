@@ -1,5 +1,74 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-29: baseline of the 30 golden tickets; the golden set goes on a review page (Vincent, with Claude)
+- **Changed:** `dss eval` no longer reads a host such as `8000@ACME-12` as a Jira key (one test
+  added).
+- **Checked:** `uv run pytest` (78 passed); mypy clean. Baseline: the 30 golden tickets triaged
+  with `python -m dss triage --posted`, traces on. Each run read Cerberus as of the ticket date:
+  `DV_CERB_REF` was set to the last origin/master commit before the ticket. Cost about $7 in all,
+  30 to 75 s per run, no failures. `dss eval` on them: every citation resolved except one, a
+  license host written like a key. 18 of 30 answers are over the 3,500-character limit. 10 of 30
+  start with a status line ("I've finished the checks…") before the title, and that line would
+  reach the DM too.
+- **Claude's draft verdicts (Vincent to check):** 17 right, 9 partly, 4 missed. Code bugs are the
+  strongest: 9 of 13 playbook tickets right. Setup problems are the weakest. Of the pilot
+  tickets, DSS-1225 and DSS-1226 are now right, DSS-1228 and DSS-1229 partly, DSS-1217 still
+  missed.
+- **Found: the replay is not yet fair.** These need fixing before the scores mean much:
+  - A closed ticket still shows the bot its status, its Investigation Outcome and its linked
+    DTN titles.
+  - Some descriptions were edited after the fix; one is now the answer itself.
+  - `cerb_prod_version` reports today's version while the code is pinned. Four answers therefore
+    wrongly say a fix "is not in prod 1.0.4".
+  - `code_log_s` across all branches finds fixes made after the ticket.
+  - Project folders show today's state: folders renamed since, and runs made after the fix.
+  - Some Confluence pages were written after the ticket.
+
+  Separately, `cerb_client_info` output was too large to read in 6 answers.
+- **Jira:** DSS-877's Toolbox Name changed from CERB-WI to CAT, as Vincent asked; read back.
+- **Outside the repo:**
+  - PR #5 opened for `dss eval`.
+  - The private claude.ai page "DSS Golden Set" holds the 30 tickets. Each shows what the
+    ticket said at the start, the real outcome, the bot's answer, and Claude's draft key and
+    verdict. Vincent checks them there.
+  - `out/eval/export_golden.py` writes `golden.jsonl` from the saved checks.
+  - `run_baseline.py` now pins the code per ticket and skips tickets it has already run.
+- **Planned (tracker Phase 3b, for both owners to agree):** standard inputs and outputs.
+  - Input: code builds a ticket record before Claude starts. Each fact carries its source and
+    is taken as of the ticket time: description as opened, project and workflow, versions then,
+    inputs present, last failed run. Taking facts as of the ticket time is also the replay mode.
+  - Output: Claude answers in one JSON schema, a shared part plus a details block per step or
+    playbook. Code checks the required fields per status and renders the DM.
+  - The design is on the DSS Triage Flow page.
+- **Not done:**
+  - Vincent's check of the 30.
+  - A replay mode in the tools for closed tickets, which needs both owners.
+  - The judge has not run live.
+  - Ruff.
+
+### 2026-10-28: answer scoring (`dss eval`) and a golden-set draft (Vincent, with Claude)
+- **Changed:**
+  - `python -m dss eval <golden> <run folder> [--judge]` scores saved answers against golden
+    rows (`dss/eval.py`): evidence read (from the trace's call arguments), citations under
+    Checked that resolve (Jira keys, Confluence page ids, code `file:line` at the commit the
+    trace shows), known false leads, Suggested labels against Jira's, length. `--judge` asks
+    Haiku through `claude -p` with no tools, MCP servers or settings; off by default.
+  - `docs/golden.example.jsonl`: the golden row format, with made-up data.
+  - `code.files` and `code.line_count`, read-only git helpers for the citation check (not
+    tools).
+- **Checked:** `uv run pytest` (78 passed; `tests/test_eval.py` runs on the example row with
+  faked lookups); mypy clean. Live, no Claude run: `dss eval` on the saved DSS-1229 smoke
+  answer parsed all six sections, resolved both Jira citations and matched both labels
+  (evidence 0/2, since that run had no trace).
+- **Outside the repo (client data, `out/eval/`):** Vincent reviewed the 38 high-confidence
+  drafts on the review page; their labels and answers are now in Jira (27 field edits, 18
+  CAUSE/EVIDENCE/SOLUTION comments, through Vincent's Atlassian login, each checked back).
+  The test-set sort now has 161 ready, 27 needing information, 192 out. A 30-row golden draft
+  (`golden_draft.jsonl`: 9 Gate B, 7 Gate C, 13 playbook, 1 Gate A; 5 pilot tickets the bot
+  got wrong or stopped short on) and a dry-run-by-default baseline loop (`run_baseline.py`).
+- **Not done:** the golden rows need Vincent's evidence pointers and false leads; no baseline
+  run (the run budget is not agreed); the judge has not been run live.
+
 ### 2026-10-28: smoke runs on Opus; usage log, tool-call traces, `--post-file` (Vincent, with Claude)
 - **Smoke runs** (Opus 5.5, high effort; the tracker's Phase 0 smoke tickets): DSS-1228 cost
   $0.24 (123k tokens, 40 s) and DSS-1229 $0.17 (75k tokens, 36 s). Both stopped at Gate C:
