@@ -44,6 +44,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude rec
 | `dss/triage.md` | The triage system prompt. Most behaviour changes happen here. |
 | `dss/triage.py` | One triage: prompt, Claude run, tokens and cost. |
 | `dss/eval.py`, `docs/golden.example.jsonl` | Scores saved answers against the golden set; a made-up golden row. |
+| `docs/triage_record.schema.json`, `docs/triage_record.example.json`, `docs/known_causes.json` | Proposal, not used by the bot yet: the triage record's schema, a made-up example, and a draft list of known causes. |
 | `dss/runner.py` | The locked-down `claude -p` command line. |
 | `dss/server.py` | The `dss` MCP server. |
 | `dss/jira.py`, `cerb.py`, `code.py`, `confluence.py` | The tools, one module per source. |

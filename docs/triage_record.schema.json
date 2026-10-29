@@ -1,0 +1,242 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "DSS triage record",
+	"description": "Proposal, not yet agreed by both owners. One record per DSS ticket: dss_ticket is filled by code, triage and class by Claude, resolved by a person after the DSS ticket closes. The design is on the DSS Triage Flow page.",
+	"type": "object",
+	"required": ["schema", "dss_ticket", "triage", "class"],
+	"additionalProperties": false,
+	"properties": {
+		"schema": {"const": "dss-triage/1"},
+		"dss_ticket": {"$ref": "#/$defs/dss_ticket"},
+		"triage": {"$ref": "#/$defs/triage"},
+		"class": {"$ref": "#/$defs/class"},
+		"resolved": {"$ref": "#/$defs/resolved"}
+	},
+	"$defs": {
+		"dss_key": {"type": "string", "pattern": "^DSS-[0-9]+$"},
+		"dtn_key": {"type": "string", "pattern": "^DTN-[0-9]+$"},
+		"text": {"type": "string", "minLength": 1},
+		"dss_ticket": {
+			"description": "Facts as they were when the DSS ticket was filed, each built by code.",
+			"type": "object",
+			"required": ["key", "created", "reporter", "workflow", "toolbox"],
+			"additionalProperties": false,
+			"properties": {
+				"key": {"$ref": "#/$defs/dss_key"},
+				"created": {"type": "string", "format": "date-time"},
+				"reporter": {"$ref": "#/$defs/text"},
+				"dvt": {"type": ["integer", "null"]},
+				"workflow": {"enum": ["PE", "WI", "CI", "FF", "combo", "unknown"]},
+				"toolbox": {"type": ["string", "null"], "description": "Jira Toolbox Name, as filed."},
+				"cerberus_version": {"type": ["string", "null"], "description": "The analyst's last session."},
+				"prod_version": {"type": ["string", "null"], "description": "Prod when the DSS ticket was filed."},
+				"last_error": {"type": ["string", "null"], "description": "The last failed session's error text."},
+				"inputs": {"type": "object", "additionalProperties": {"type": "boolean"}}
+			}
+		},
+		"triage": {
+			"description": "Claude's answer; the DM and its thread reply are rendered from it.",
+			"type": "object",
+			"required": ["status", "confidence", "settled_at", "what"],
+			"additionalProperties": false,
+			"properties": {
+				"status": {"enum": ["proved", "likely", "needs_info", "not_cerberus"]},
+				"confidence": {"enum": ["high", "medium", "low"]},
+				"settled_at": {"enum": ["record", "gate_a", "gate_b", "gate_c", "playbook"]},
+				"playbook": {"enum": ["crash", "wrong_numbers", "missing_output", "feature_request", "how_to", null]},
+				"what": {"$ref": "#/$defs/text"},
+				"cause": {"type": ["string", "null"], "description": "One sentence: X was Y, so Z."},
+				"where": {
+					"type": ["object", "null"],
+					"required": ["kind"],
+					"additionalProperties": false,
+					"properties": {
+						"kind": {"enum": ["data_file", "folder", "setting", "code", "version", "outside"]},
+						"path": {"type": "string"},
+						"detail": {"type": "string"}
+					}
+				},
+				"evidence": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["fact", "ref"],
+						"additionalProperties": false,
+						"properties": {
+							"fact": {"$ref": "#/$defs/text"},
+							"ref": {"$ref": "#/$defs/text", "description": "The tool call that read it, or 'computed'."}
+						}
+					}
+				},
+				"not_proved": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+				"questions": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["ask", "settles"],
+						"additionalProperties": false,
+						"properties": {
+							"ask": {"$ref": "#/$defs/text"},
+							"settles": {"$ref": "#/$defs/text"}
+						}
+					}
+				},
+				"do_now": {
+					"type": ["object", "null"],
+					"required": ["who", "action"],
+					"additionalProperties": false,
+					"properties": {
+						"who": {"enum": ["analyst", "data_developer", "it", "other_team"]},
+						"action": {"$ref": "#/$defs/text"}
+					}
+				},
+				"escalate": {
+					"description": "An existing DTN ticket, or a ready-to-send draft. A person sends it.",
+					"type": ["object", "null"],
+					"required": ["kind"],
+					"minProperties": 2,
+					"additionalProperties": false,
+					"properties": {
+						"kind": {"enum": ["bug", "feature", "docs"]},
+						"dtn_ticket": {"$ref": "#/$defs/dtn_key"},
+						"draft": {"$ref": "#/$defs/text"}
+					}
+				},
+				"reply": {"type": ["string", "null"]},
+				"secondary": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["cause", "class"],
+						"additionalProperties": false,
+						"properties": {
+							"cause": {"$ref": "#/$defs/text"},
+							"class": {"$ref": "#/$defs/class"}
+						}
+					}
+				},
+				"similar_dss_tickets": {"type": "array", "items": {"$ref": "#/$defs/dss_key"}},
+				"flags": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "What this run could not read."},
+				"details": {"type": "object", "description": "Depends on the step or playbook; see the details table on the page."}
+			},
+			"allOf": [
+				{
+					"if": {"properties": {"status": {"const": "proved"}}},
+					"then": {"$ref": "#/$defs/answered"}
+				},
+				{
+					"if": {"properties": {"status": {"const": "likely"}}},
+					"then": {
+						"allOf": [
+							{"$ref": "#/$defs/answered"},
+							{"required": ["not_proved"], "properties": {"not_proved": {"minItems": 1}}}
+						]
+					}
+				},
+				{
+					"if": {"properties": {"status": {"const": "needs_info"}}},
+					"then": {"required": ["questions"], "properties": {"questions": {"minItems": 1}}}
+				},
+				{
+					"if": {"properties": {"status": {"const": "not_cerberus"}}},
+					"then": {"required": ["details"], "properties": {"details": {"required": ["owner"]}}}
+				},
+				{
+					"if": {"properties": {"status": {"const": "proved"}, "playbook": {"const": "wrong_numbers"}}, "required": ["playbook"]},
+					"then": {"required": ["details"], "properties": {"details": {"required": ["reported", "expected", "first_difference"]}}}
+				}
+			]
+		},
+		"answered": {
+			"description": "What proved and likely answers must give.",
+			"required": ["cause", "evidence", "do_now"],
+			"properties": {
+				"cause": {"$ref": "#/$defs/text"},
+				"evidence": {"minItems": 1},
+				"do_now": {"type": "object"}
+			}
+		},
+		"class": {
+			"description": "Planning fields: enums and keys only, no client names, safe to count and share.",
+			"type": "object",
+			"required": ["cause_family", "feature", "prevent"],
+			"additionalProperties": false,
+			"properties": {
+				"cause_family": {"$ref": "#/$defs/cause_family"},
+				"feature": {"$ref": "#/$defs/feature"},
+				"module": {"type": ["string", "null"], "description": "A code path, only when proved."},
+				"known_cause": {
+					"type": ["string", "null"],
+					"pattern": "^(new:)?[a-z0-9]+(-[a-z0-9]+)*$",
+					"description": "A slug from docs/known_causes.json, or new:<slug> for the reviewer to accept."
+				},
+				"impact": {"enum": ["blocked", "workaround", "question", null]},
+				"fix_type": {"enum": ["analyst_action", "setup", "update", "code_fix", "workaround", "explained", "redirect", null]},
+				"prevent": {"$ref": "#/$defs/prevent"},
+				"prevent_note": {"type": "string"},
+				"dtn_tickets": {"type": "array", "items": {"$ref": "#/$defs/dtn_key"}},
+				"labels": {
+					"type": "object",
+					"description": "Jira's own two fields on the DSS ticket.",
+					"additionalProperties": false,
+					"properties": {
+						"toolbox": {"type": ["string", "null"]},
+						"outcome": {"type": ["string", "null"]}
+					}
+				}
+			}
+		},
+		"cause_family": {
+			"enum": [
+				"code_bug",
+				"input_data",
+				"environment",
+				"works_as_designed",
+				"outside_cerberus",
+				"outdated_install",
+				"unsupported",
+				"how_to",
+				"feature_request"
+			]
+		},
+		"feature": {
+			"description": "Revised 2026-10-29 after sorting 45 more DSS tickets; for the team to agree.",
+			"enum": [
+				"install_launch",
+				"project_select",
+				"client_info",
+				"pe_volumetric_report",
+				"pe_plug_report",
+				"pe_perf_status",
+				"pe_image_doc",
+				"pe_tubeviews",
+				"pe_baselines",
+				"pe_qc",
+				"wi_catcall",
+				"wi_caliper_inputs",
+				"wi_2d_log",
+				"wi_wall_loss",
+				"wi_techlog_export",
+				"wi_las_export",
+				"wi_reports",
+				"ff_report",
+				"other"
+			]
+		},
+		"prevent": {
+			"enum": ["code_fix", "input_check", "install_check", "docs", "release_notice", "support_case", "none"]
+		},
+		"resolved": {
+			"description": "Filled by a person after the DSS ticket closes; class corrected where the bot was wrong.",
+			"type": "object",
+			"required": ["by", "closed", "class"],
+			"additionalProperties": false,
+			"properties": {
+				"by": {"$ref": "#/$defs/text"},
+				"closed": {"type": "string", "format": "date"},
+				"class": {"$ref": "#/$defs/class"},
+				"fixed_in": {"type": ["string", "null"], "description": "The release that fixed it, for code fixes."}
+			}
+		}
+	}
+}

@@ -1,5 +1,40 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-29: the triage record proposal as files; its planning fields tested on 45 DSS tickets (Vincent, with Claude)
+- **Changed (a proposal; the bot does not use these yet):**
+  - `docs/triage_record.schema.json`: the triage record from the DSS Triage Flow page, as JSON
+    Schema. `dss_ticket` is filled by code, `triage` and `class` by Claude, `resolved` by a person.
+    It checks the status rules:
+    - proved and likely need a cause, evidence and `do_now`, and likely also needs `not_proved`;
+    - needs info needs questions;
+    - not Cerberus needs an owner;
+    - proved wrong numbers needs both values and the first difference.
+  - `docs/triage_record.example.json`: the page's example, with made-up data.
+  - `docs/known_causes.json`: 17 known causes drafted from settled DSS tickets. Each gives how to
+    prove the cause and the fix; 10 have two or more DSS tickets.
+  - `tests/test_triage_record.py`. `jsonschema` is now a dev dependency; it was already installed
+    through `mcp`.
+- **Checked:** `uv run pytest` (97 passed); mypy clean apart from the Cerberus import. Each case
+  the tests expect the schema to refuse was checked to fail for its intended reason.
+- **Tested: the planning fields on 45 more closed Cerberus DSS tickets.** They are a fixed-seed
+  sample of the "ready" DSS tickets not sorted before. Claude sorted them from the Jira text; the
+  result is in `out/eval/class_test.jsonl`.
+  - The cause families held: 42 of 45 fit, and the other 3 have no information in Jira.
+  - The first `feature` list did not: only 17 of 45 fit. The rest would only fit by lumping four
+    PE deliverables into `pe_plots_tables`, and catcall, LAS export, the AIA and burst reports
+    and tubeviews were missing. The schema has a revised list of 19 values, prefixed by workflow.
+  - 14 of 45 have no resolution text in Jira, and none states the impact. A back-fill from Jira
+    alone can set the cause family, feature and prevent for most DSS tickets. It cannot set the
+    impact, and the fix type stays unclear for 11 of 45.
+  - Two boundary questions for the team:
+    - a `setting` family, for causes that are a Cerberus setting (DSS-1048, DSS-1204);
+    - merging `outdated_install` into `environment` (DSS-945 and DSS-1018 sat on the line).
+- **Outside the repo:**
+  - PR #5 merged.
+  - The DSS Triage Flow page was restructured: a contents column, live and planned tags, stale
+    parts removed. It now holds the triage record proposal and Sean's planning use.
+- **Not done:** the team's agreement on the record; nothing in the bot reads or writes it yet.
+
 ### 2026-10-29: baseline of the 30 golden tickets; the golden set goes on a review page (Vincent, with Claude)
 - **Changed:** `dss eval` no longer reads a host such as `8000@ACME-12` as a Jira key (one test
   added).
