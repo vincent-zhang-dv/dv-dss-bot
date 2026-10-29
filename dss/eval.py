@@ -34,7 +34,7 @@ SECTION = re.compile(
 	re.I,
 )
 TOOL_POINTER = re.compile(r'([a-z]+_[a-z_]+):(.+)')  # code_read:cerberus/plots.py
-JIRA_KEY = re.compile(r'\b[A-Z][A-Z0-9]{1,9}-\d+\b')
+JIRA_KEY = re.compile(r'(?<![\w@\\-])[A-Z][A-Z0-9]{1,9}-\d+\b')  # not hosts: 8000@DV-4269
 NOT_JIRA = {'UTF', 'ISO', 'SHA', 'RFC', 'PEP'}  # look like keys: UTF-8, ISO-8601
 CONFLUENCE_PAGE = re.compile(r'pages/(\d+)|\bpage(?: id)?\s+(\d{5,})', re.I)
 CODE_LINE = re.compile(r'([\w./\\-]+\.(?:py|json|ya?ml|toml|cfg|ini)):(\d+)')

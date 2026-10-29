@@ -105,6 +105,8 @@ def test_citations_under_checked():
 		('code', ('deliverables/bookmarks.py', 42)),
 	]
 	assert eval.citations('UTF-8 text, ISO-8601 dates, DSS-1 and DSS-1') == [('jira', 'DSS-1')]
+	assert eval.citations('license 8000@ACME-1234, host \\\\ACME-99\\share') == []
+	assert eval.citations('https://acme.atlassian.net/browse/DSS-7') == [('jira', 'DSS-7')]
 
 
 def test_score_on_the_example():

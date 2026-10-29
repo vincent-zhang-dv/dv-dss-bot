@@ -1,5 +1,44 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-29: baseline of the 30 golden tickets; the golden set goes on a review page (Vincent, with Claude)
+- **Changed:** `dss eval` no longer reads a host such as `8000@ACME-12` as a Jira key (one test
+  added).
+- **Checked:** `uv run pytest` (78 passed); mypy clean. Baseline: the 30 golden tickets triaged
+  with `python -m dss triage --posted`, traces on. Each run read Cerberus as of the ticket date:
+  `DV_CERB_REF` was set to the last origin/master commit before the ticket. Cost about $7 in all,
+  30 to 75 s per run, no failures. `dss eval` on them: every citation resolved except one, a
+  license host written like a key. 18 of 30 answers are over the 3,500-character limit. 10 of 30
+  start with a status line ("I've finished the checks…") before the title, and that line would
+  reach the DM too.
+- **Claude's draft verdicts (Vincent to check):** 17 right, 9 partly, 4 missed. Code bugs are the
+  strongest: 9 of 13 playbook tickets right. Setup problems are the weakest. Of the pilot
+  tickets, DSS-1225 and DSS-1226 are now right, DSS-1228 and DSS-1229 partly, DSS-1217 still
+  missed.
+- **Found: the replay is not yet fair.** These need fixing before the scores mean much:
+  - A closed ticket still shows the bot its status, its Investigation Outcome and its linked
+    DTN titles.
+  - Some descriptions were edited after the fix; one is now the answer itself.
+  - `cerb_prod_version` reports today's version while the code is pinned. Four answers therefore
+    wrongly say a fix "is not in prod 1.0.4".
+  - `code_log_s` across all branches finds fixes made after the ticket.
+  - Project folders show today's state: folders renamed since, and runs made after the fix.
+  - Some Confluence pages were written after the ticket.
+
+  Separately, `cerb_client_info` output was too large to read in 6 answers.
+- **Jira:** DSS-877's Toolbox Name changed from CERB-WI to CAT, as Vincent asked; read back.
+- **Outside the repo:**
+  - PR #5 opened for `dss eval`.
+  - The private claude.ai page "DSS Golden Set" holds the 30 tickets. Each shows what the
+    ticket said at the start, the real outcome, the bot's answer, and Claude's draft key and
+    verdict. Vincent checks them there.
+  - `out/eval/export_golden.py` writes `golden.jsonl` from the saved checks.
+  - `run_baseline.py` now pins the code per ticket and skips tickets it has already run.
+- **Not done:**
+  - Vincent's check of the 30.
+  - A replay mode in the tools for closed tickets, which needs both owners.
+  - The judge has not run live.
+  - Ruff.
+
 ### 2026-10-28: answer scoring (`dss eval`) and a golden-set draft (Vincent, with Claude)
 - **Changed:**
   - `python -m dss eval <golden> <run folder> [--judge]` scores saved answers against golden
