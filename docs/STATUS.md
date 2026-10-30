@@ -28,8 +28,9 @@
     - Two rendering faults in Slack Markdown (eaten backslashes, `__init__` as bold) and a footer
       joined to the quoted reply were fixed afterwards. The thread reply went out fixed; the DM
       had already gone out.
+  - Merged as PR #7, which included #6. On `main` after the merge: 121 tests pass, and code read
+    DSS-1233's `dss_ticket` facts from every source with no failure notes (no Claude run).
 - **Not done:**
-  - Merging PR #6 and this branch (left to Vincent).
   - The bot posting the trial itself: this PC has no Slack bot tokens, so the session delivers
     the DM.
   - A repeat between Claude's `flags` and code's notes when both say the same thing.
