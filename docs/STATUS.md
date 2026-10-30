@@ -15,7 +15,9 @@
   - `tests/test_triage_record.py`. `jsonschema` is now a dev dependency; it was already installed
     through `mcp`.
 - **Checked:** `uv run pytest` (97 passed); mypy clean apart from the Cerberus import. Each case
-  the tests expect the schema to refuse was checked to fail for its intended reason.
+  the tests expect the schema to refuse was checked to fail for its intended reason. `ruff check`
+  and `ruff format --check` pass on the changed files. On the rest of the repo, ruff 0.17.1
+  reports 9 lint findings and 3 unformatted test files, all already on `main`; left alone here.
 - **Tested: the planning fields on 45 more closed Cerberus DSS tickets.** They are a fixed-seed
   sample of the "ready" DSS tickets not sorted before. Claude sorted them from the Jira text; the
   result is in `out/eval/class_test.jsonl`.
