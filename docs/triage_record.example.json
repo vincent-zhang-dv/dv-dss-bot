@@ -1,0 +1,72 @@
+{
+	"schema": "dss-triage/1",
+	"dss_ticket": {
+		"key": "DSS-1234",
+		"created": "2026-10-22T10:00:00-07:00",
+		"reporter": "Ann Analyst",
+		"dvt": 1234,
+		"project": "\\\\server\\projects\\ACME\\DVT1234_2026-10-20_WI_Well-1",
+		"workflow": "WI",
+		"toolbox": "CERB-WI",
+		"cerberus_version": "1.0.3",
+		"prod_version": "1.0.4",
+		"last_error": null,
+		"inputs": {"client_info": true, "bookmarks": true, "dvcalipers": true}
+	},
+	"triage": {
+		"status": "proved",
+		"confidence": "high",
+		"settled_at": "playbook",
+		"playbook": "wrong_numbers",
+		"what": "Defect Summary shows 19.97% wall loss at joint 57; the client expects 21%",
+		"cause": "The casing record has ID 4.5 in while the tally has 4.55 in, so nominal thickness is 0.500 in and wall loss computes to 19.97%",
+		"where": {"kind": "data_file", "path": "DVT1234_client_info.xlsm", "detail": "Casing Record row 3"},
+		"evidence": [
+			{"fact": "Casing Record row 3 has ID 4.5 in; the tally has 4.55 in", "ref": "cerb_client_info:1234"},
+			{"fact": "0.09985 / 0.500 = 19.97%; with ID 4.55 in it is 21.02%", "ref": "computed"}
+		],
+		"not_proved": [],
+		"questions": [],
+		"do_now": {"who": "analyst", "action": "Correct the casing record ID to 4.55 in and rerun"},
+		"escalate": null,
+		"reply": "The casing record in the client info has ID 4.5 in, but the casing tally has 4.55 in. Correct the casing record to 4.55 in and rerun the Defect Summary; wall loss at joint 57 then computes to 21.02%.",
+		"secondary": [],
+		"similar_dss_tickets": ["DSS-1100"],
+		"flags": [],
+		"details": {
+			"playbook": "wrong_numbers",
+			"reported": {"value": "19.97%", "where": "Defect Summary, joint 57"},
+			"expected": {"value": "21%", "where": "client casing tally"},
+			"first_difference": "casing ID"
+		}
+	},
+	"class": {
+		"cause_family": "input_data",
+		"feature": "wi_wall_loss",
+		"module": null,
+		"known_cause": "casing-record-vs-tally",
+		"impact": "blocked",
+		"fix_type": "analyst_action",
+		"prevent": "input_check",
+		"prevent_note": "Warn when the casing record ID differs from the tally",
+		"dtn_tickets": [],
+		"labels": {"toolbox": "CERB-WI", "outcome": "User Error"}
+	},
+	"resolved": {
+		"by": "reviewer",
+		"closed": "2026-10-24",
+		"class": {
+			"cause_family": "input_data",
+			"feature": "wi_wall_loss",
+			"module": null,
+			"known_cause": "casing-record-vs-tally",
+			"impact": "blocked",
+			"fix_type": "analyst_action",
+			"prevent": "input_check",
+			"prevent_note": "Warn when the casing record ID differs from the tally",
+			"dtn_tickets": [],
+			"labels": {"toolbox": "CERB-WI", "outcome": "User Error"}
+		},
+		"fixed_in": null
+	}
+}

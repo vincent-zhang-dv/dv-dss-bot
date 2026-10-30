@@ -11,6 +11,7 @@ uv run pytest
 uv run ruff check .
 uv run ruff format .
 uv run python -m dss triage DSS-1234 [--posted YYYY-MM-DD_HH-MM-SS]   # one real triage, no Slack
+uv run python -m dss trial DSS-1234 [--posted ...] [--post-file ...]   # the same as a checked record
 ```
 Windows, Python 3.11, uv. Settings come from the environment or `.env` (template:
 `.env.example`). Cerberus code runs in its own venv through `dss/worker.py`; never add its

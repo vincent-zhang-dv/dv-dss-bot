@@ -22,26 +22,36 @@ RUN_DIR = ROOT / 'out' / 'claude_run'  # empty working folder: no CLAUDE.md to d
 SYSTEM = Path(__file__).with_name('triage.md')
 
 
-def command(model: str = MODEL) -> list[str]:
-	"""The `claude -p` command line: the triage prompt and the `dss` tools, nothing else."""
+def command(model: str = MODEL, system: str = '') -> list[str]:
+	"""The `claude -p` command line: the triage prompt and the `dss` tools, nothing else.
+
+	*system* replaces the system prompt read from SYSTEM (the trial's record prompt).
+	"""
 	server = ['run', '-q', '--directory', str(ROOT), 'python', '-m', 'dss', 'mcp']
 	mcp = {'mcpServers': {'dss': {'command': 'uv', 'args': server}}}
+	if not system:
+		system = SYSTEM.read_text(encoding='utf-8')
 	line = ['claude', '-p', '--output-format', 'json', '--model', model, '--effort', EFFORT]
 	line += ['--setting-sources', '', '--strict-mcp-config', '--mcp-config', json.dumps(mcp)]
 	line += ['--tools', '', '--allowedTools', 'mcp__dss__*', '--permission-mode', 'dontAsk']
-	line += ['--system-prompt', SYSTEM.read_text(encoding='utf-8'), '--disable-slash-commands']
+	line += ['--system-prompt', system, '--disable-slash-commands']
 	line += ['--no-session-persistence']
 	return line
 
 
 def run_reply(
-	prompt: str, model: str = MODEL, timeout: float = TIMEOUT_S, trace: Path | None = None
+	prompt: str,
+	model: str = MODEL,
+	timeout: float = TIMEOUT_S,
+	trace: Path | None = None,
+	system: str = '',
 ) -> dict:
 	"""The whole `claude -p` JSON reply to *prompt*: `result`, `total_cost_usd`, `usage`, ...
 
 	The prompt goes on stdin. Raises RuntimeError when claude fails or ends without an answer
 	(turn limit, error), and FileNotFoundError when the `claude` CLI is not installed. With
 	*trace*, the `dss` server appends each tool call to that file (:func:`dss.server.trace`).
+	*system* replaces the triage system prompt (see :func:`command`).
 	"""
 	RUN_DIR.mkdir(parents=True, exist_ok=True)
 	env = {**os.environ, 'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1'}
@@ -49,7 +59,7 @@ def run_reply(
 	if trace:
 		env['DSS_TRACE_FILE'] = str(trace)  # the MCP server inherits claude's environment
 	done = subprocess.run(
-		command(model),
+		command(model, system),
 		input=prompt,
 		capture_output=True,
 		encoding='utf-8',

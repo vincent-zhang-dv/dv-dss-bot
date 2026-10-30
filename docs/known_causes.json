@@ -1,0 +1,190 @@
+[
+	{
+		"slug": "paraview-not-on-path",
+		"cause": "ParaView 5.13 is not set up as the Confluence page says (installed system-wide, its bin folder on PATH), so the Cerb-FF report cannot find pvbatch.",
+		"prove": "The FF error mentions pvbatch or ParaView; compare the PATH entry with the Confluence setup page.",
+		"fix": "Install ParaView 5.13 system-wide, put its bin folder (not pvbatch itself) on PATH, and restart.",
+		"cause_family": "environment",
+		"feature": "ff_report",
+		"prevent": "install_check",
+		"dss_tickets": ["DSS-924", "DSS-959", "DSS-1021"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "download-blocked-by-network",
+		"cause": "Zscaler or a certificate check blocks a package download, so Cerberus reports 'failed to download' and may not update.",
+		"prove": "The error says 'failed to download' (torch in DSS-937); it happens on the office network or a hot desk.",
+		"fix": "Follow the Cerberus 'failed to download' section of the Hot Desking Troubleshooting Guide; otherwise IT.",
+		"cause_family": "environment",
+		"feature": "install_launch",
+		"prevent": "docs",
+		"dss_tickets": ["DSS-937", "DSS-979"],
+		"dtn_tickets": [],
+		"confluence_pages": ["4725637197"]
+	},
+	{
+		"slug": "dropbox-sync-stalls-update",
+		"cause": "Dropbox or VFS sync is stuck, so the Cerberus update never arrives or the wheel copy hangs.",
+		"prove": "The reporter's last session runs a version older than prod, or the wheel copy hangs; Dropbox is still syncing.",
+		"fix": "Let Dropbox finish or fix the sync, then relaunch Cerberus.",
+		"cause_family": "outdated_install",
+		"feature": "install_launch",
+		"prevent": "install_check",
+		"dss_tickets": ["DSS-945", "DSS-1018"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "dropbox-path-not-standard",
+		"cause": "Dropbox sits at its default folder under C:\\Users instead of F:\\DarkVision Dropbox, so Cerberus cannot find its files.",
+		"prove": "The paths in the error or the session start with C:\\Users\\<user>\\ and a Dropbox folder.",
+		"fix": "Set the Dropbox location to F:\\DarkVision Dropbox, then relaunch Cerberus.",
+		"cause_family": "environment",
+		"feature": "install_launch",
+		"prevent": "install_check",
+		"dss_tickets": ["DSS-1056"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "excel-instance-lingering",
+		"cause": "An Excel process left running by an earlier failed script blocks the COM server, so Cerberus loses its Excel connection.",
+		"prove": "The error mentions the Excel or COM connection, and Task Manager shows a leftover Excel process.",
+		"fix": "End the leftover Excel process in Task Manager and rerun.",
+		"cause_family": "environment",
+		"feature": "client_info",
+		"prevent": "code_fix",
+		"dss_tickets": ["DSS-868", "DSS-894"],
+		"dtn_tickets": ["DTN-2914"]
+	},
+	{
+		"slug": "client-info-locked",
+		"cause": "The client info is locked on the share, so Cerberus, MATLAB and Excel all fail to open it.",
+		"prove": "Every tool fails on the same client info, Excel included.",
+		"fix": "Close the client info wherever it is open; if nobody has it open, ask IT to clear the lock.",
+		"cause_family": "outside_cerberus",
+		"feature": "client_info",
+		"prevent": "none",
+		"dss_tickets": ["DSS-1226"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "stage-design-special-chars",
+		"cause": "Stage design names with commas, several dashes or other special characters break the fill scripts and plot saving.",
+		"prove": "Read the stage design names in the client info; the failing step is a fill script or a plot save.",
+		"fix": "Use a simple stage design name for now. Code fixes so far: DSS-845 changed the fill delimiter to semicolons; DSS-826 cleans the plot save path.",
+		"cause_family": "code_bug",
+		"feature": "client_info",
+		"prevent": "code_fix",
+		"dss_tickets": ["DSS-826", "DSS-845", "DSS-1136"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "client-info-version-mismatch",
+		"cause": "The client info's version says 1.4 while its content follows 1.5, so Cerberus reads it with the wrong sheet map.",
+		"prove": "Compare the version in the Dropdown sheet with the template the content follows.",
+		"fix": "Set the version in the Dropdown sheet to match the content, then rerun.",
+		"cause_family": "input_data",
+		"feature": "client_info",
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-984"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "mixed-depth-units",
+		"cause": "The cluster info sheet had spec depths in ft and found depths in m, so the volumetric calculation got an empty table and failed.",
+		"prove": "Compare the units of the depth columns in the cluster info sheet.",
+		"fix": "Fill the cluster info depths in the units the template expects, then rerun.",
+		"cause_family": "input_data",
+		"feature": "pe_volumetric_report",
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-869"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "file-naming-convention",
+		"cause": "An input file or folder is not named the way Cerberus expects, and Cerberus matches names exactly; MATLAB is laxer for some names.",
+		"prove": "Compare the names with the convention: DVT<n>_ project folders, <pass>_Radial pass names and caliper files, the casing tally file name.",
+		"fix": "Rename to the convention (copy old files first), then rerun.",
+		"cause_family": "input_data",
+		"feature": null,
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-1001", "DSS-1070", "DSS-1112", "DSS-1117"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "rm-names-mismatch",
+		"cause": "The RM names the perf randomizer reads do not match the perf info in the client info, so the randomizer errors.",
+		"prove": "Run Check Names and compare the RMs it lists with the client info perf info.",
+		"fix": "Correct the RMs so they match, then rerun.",
+		"cause_family": "input_data",
+		"feature": "pe_qc",
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-851", "DSS-910"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "lwp-perfs-not-final",
+		"cause": "The LWP's final perforation bookmarks are empty (not finalized), so the alternative-well baselines come out NaN and Make Baseline Plots Only fails.",
+		"prove": "Read the LWP project's final perforation bookmarks; they are empty.",
+		"fix": "Finalize the LWP perforations, then rerun.",
+		"cause_family": "input_data",
+		"feature": "pe_baselines",
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-1228"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "casing-record-vs-tally",
+		"cause": "The client info casing record ID differs from the casing tally, so the nominal thickness, and with it the wall loss, is off.",
+		"prove": "Compare the casing record ID with the tally, and recompute the wall loss with each.",
+		"fix": "Correct the casing record to match the tally, then rerun.",
+		"cause_family": "input_data",
+		"feature": "wi_wall_loss",
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-1171"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "casing-split-missing",
+		"cause": "A casing size change has no casingSplit in the client info (older templates lack the column), so the 2D log and Techlog treat the casing sizes wrongly.",
+		"prove": "The casing record has more than one size and no casingSplit value at the change.",
+		"fix": "Add casingSplit at the size change, using the current template, and rerun catcall. DTN-3717 tracks the split at a tiny depth gap seen in DSS-1225.",
+		"cause_family": "input_data",
+		"feature": "wi_2d_log",
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-981", "DSS-1225"],
+		"dtn_tickets": ["DTN-3717"]
+	},
+	{
+		"slug": "radx-depth-clip-at-zero",
+		"cause": "The RADX config clips the RAID 2D log at 0 ft, so a clean range that starts at a negative depth is cut off.",
+		"prove": "The clean range starts at a negative depth, and the RADX config's Depth Min is 0.",
+		"fix": "Set Depth Min in the RADX config editor to the top of the clean range. DTN-3673 stops the clip at 0.",
+		"cause_family": "works_as_designed",
+		"feature": "wi_2d_log",
+		"prevent": "code_fix",
+		"dss_tickets": ["DSS-1048", "DSS-1204"],
+		"dtn_tickets": ["DTN-3673"]
+	},
+	{
+		"slug": "path-too-long",
+		"cause": "A RADX render temp file path is over the Windows 260-character limit (262 in DSS-1229), so the RAID 2D log is not produced.",
+		"prove": "Measure the temp page PDF path built from the project path.",
+		"fix": "Shorten the project path for now; DTN-3727 is the code fix.",
+		"cause_family": "code_bug",
+		"feature": "wi_2d_log",
+		"prevent": "code_fix",
+		"dss_tickets": ["DSS-1229"],
+		"dtn_tickets": ["DTN-3727"]
+	},
+	{
+		"slug": "upstream-release-break",
+		"cause": "A new release of a tool Cerberus depends on (VizApp, Napari, PySide6) changes its behaviour, so a Cerberus script breaks.",
+		"prove": "The break started after that tool updated, and the error is inside the tool's API.",
+		"fix": "Pin the version that worked, or update the Cerberus code and release a new wheel.",
+		"cause_family": "code_bug",
+		"feature": null,
+		"prevent": "code_fix",
+		"dss_tickets": ["DSS-883", "DSS-1147"],
+		"dtn_tickets": []
+	}
+]

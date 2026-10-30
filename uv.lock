@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.11.*"
 
 [[package]]
@@ -136,6 +136,7 @@ name = "dv-dss-bot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "jsonschema" },
     { name = "mcp" },
     { name = "slack-bolt" },
 ]
@@ -148,6 +149,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "jsonschema", specifier = ">=4" },
     { name = "mcp", specifier = ">=2" },
     { name = "slack-bolt", specifier = ">=1.30.0" },
 ]

@@ -1,5 +1,78 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-30: trial mode for the triage record (Vincent, with Claude)
+- **Changed:** `python -m dss trial <key>` runs the triage record design by hand; the bot is
+  unchanged. It takes the same arguments as `triage`. It runs the same locked-down Claude with
+  `triage.md`'s steps and rules, but with `dss/triage_record.md` as the answer section.
+  - Code first reads the `dss_ticket` block: Jira, the project folder, the workflow from the
+    folder name, the reporter's last session, and the prod version. A failed source is noted
+    rather than fatal.
+  - Code checks Claude's JSON against the schema and renders a DM (the decision) and a thread
+    reply (the proof). Claude's text is escaped so paths and names show as written.
+  - Each trial is saved in `out/trial/`, never in `out/answers/`, which the bot reads.
+  - Small changes, with no change for the bot: `runner` takes an optional system prompt;
+    `jira.get_issue` takes optional fields; `triage.run` is split out of `triage.triage`; the
+    CLI shares its ticket arguments.
+  - `jsonschema` is now a runtime dependency.
+  - Schema: an optional `project` field in `dss_ticket` (the page lists it as an input).
+    `class.cause_family`, `feature` and `prevent` may be null, so a needs-info answer isn't
+    pushed to guess them; this is for the owners to confirm.
+- **Checked:**
+  - `uv run pytest` (121 passed); mypy clean apart from the Cerberus import; ruff check and
+    format pass on the changed files.
+  - Live trials on DSS-1234, the newest DSS ticket: about 70 s and $0.35–0.38 each.
+    - Run 1 failed the record check: `not_proved` items came as objects and `secondary.class` as
+      one value. The prompt now spells out both shapes.
+    - Run 2 passed. It found the known cause `path-too-long` (DTN-3727) and was sent to
+      Vincent's DM through the Slack connector.
+    - Two rendering faults in Slack Markdown (eaten backslashes, `__init__` as bold) and a footer
+      joined to the quoted reply were fixed afterwards. The thread reply went out fixed; the DM
+      had already gone out.
+- **Not done:**
+  - Merging PR #6 and this branch (left to Vincent).
+  - The bot posting the trial itself: this PC has no Slack bot tokens, so the session delivers
+    the DM.
+  - A repeat between Claude's `flags` and code's notes when both say the same thing.
+  - Jira shows today's state: a DSS ticket two days old already showed its DTN link, so the run
+    saw the answer. Not a problem for new DSS tickets.
+
+### 2026-10-29: the triage record proposal as files; its planning fields tested on 45 DSS tickets (Vincent, with Claude)
+- **Changed (a proposal; the bot does not use these yet):**
+  - `docs/triage_record.schema.json`: the triage record from the DSS Triage Flow page, as JSON
+    Schema. `dss_ticket` is filled by code, `triage` and `class` by Claude, `resolved` by a person.
+    It checks the status rules:
+    - proved and likely need a cause, evidence and `do_now`, and likely also needs `not_proved`;
+    - needs info needs questions;
+    - not Cerberus needs an owner;
+    - proved wrong numbers needs both values and the first difference.
+  - `docs/triage_record.example.json`: the page's example, with made-up data.
+  - `docs/known_causes.json`: 17 known causes drafted from settled DSS tickets. Each gives how to
+    prove the cause and the fix; 10 have two or more DSS tickets.
+  - `tests/test_triage_record.py`. `jsonschema` is now a dev dependency; it was already installed
+    through `mcp`.
+- **Checked:** `uv run pytest` (97 passed); mypy clean apart from the Cerberus import. Each case
+  the tests expect the schema to refuse was checked to fail for its intended reason. `ruff check`
+  and `ruff format --check` pass on the changed files. On the rest of the repo, ruff 0.17.1
+  reports 9 lint findings and 3 unformatted test files, all already on `main`; left alone here.
+- **Tested: the planning fields on 45 more closed Cerberus DSS tickets.** They are a fixed-seed
+  sample of the "ready" DSS tickets not sorted before. Claude sorted them from the Jira text; the
+  result is in `out/eval/class_test.jsonl`.
+  - The cause families held: 42 of 45 fit, and the other 3 have no information in Jira.
+  - The first `feature` list did not: only 17 of 45 fit. The rest would only fit by lumping four
+    PE deliverables into `pe_plots_tables`, and catcall, LAS export, the AIA and burst reports
+    and tubeviews were missing. The schema has a revised list of 19 values, prefixed by workflow.
+  - 14 of 45 have no resolution text in Jira, and none states the impact. A back-fill from Jira
+    alone can set the cause family, feature and prevent for most DSS tickets. It cannot set the
+    impact, and the fix type stays unclear for 11 of 45.
+  - Two boundary questions for the team:
+    - a `setting` family, for causes that are a Cerberus setting (DSS-1048, DSS-1204);
+    - merging `outdated_install` into `environment` (DSS-945 and DSS-1018 sat on the line).
+- **Outside the repo:**
+  - PR #5 merged.
+  - The DSS Triage Flow page was restructured: a contents column, live and planned tags, stale
+    parts removed. It now holds the triage record proposal and Sean's planning use.
+- **Not done:** the team's agreement on the record; nothing in the bot reads or writes it yet.
+
 ### 2026-10-29: baseline of the 30 golden tickets; the golden set goes on a review page (Vincent, with Claude)
 - **Changed:** `dss eval` no longer reads a host such as `8000@ACME-12` as a Jira key (one test
   added).

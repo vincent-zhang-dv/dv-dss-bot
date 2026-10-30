@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "DSS ticket triage: a locked-down, read-only Claude drafts an analysis for a data developer"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+	"jsonschema>=4",
 	"mcp>=2",
 	"slack-bolt>=1.30.0",
 ]
