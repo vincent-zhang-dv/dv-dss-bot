@@ -44,7 +44,8 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude rec
 | `dss/triage.md` | The triage system prompt. Most behaviour changes happen here. |
 | `dss/triage.py` | One triage: prompt, Claude run, tokens and cost. |
 | `dss/eval.py`, `docs/golden.example.jsonl` | Scores saved answers against the golden set; a made-up golden row. |
-| `docs/triage_record.schema.json`, `docs/triage_record.example.json`, `docs/known_causes.json` | Proposal, not used by the bot yet: the triage record's schema, a made-up example, and a draft list of known causes. |
+| `docs/triage_record.schema.json`, `docs/triage_record.example.json`, `docs/known_causes.json` | The triage record's schema (a proposal), a made-up example, and a draft list of known causes. Only trial mode uses them. |
+| `dss/record.py`, `dss/triage_record.md` | Trial mode: the triage as a checked record, and the answer section that replaces `triage.md`'s. |
 | `dss/runner.py` | The locked-down `claude -p` command line. |
 | `dss/server.py` | The `dss` MCP server. |
 | `dss/jira.py`, `cerb.py`, `code.py`, `confluence.py` | The tools, one module per source. |
@@ -73,12 +74,24 @@ Check the setup with one triage: `uv run python -m dss triage DSS-1234`.
 uv run python -m dss triage DSS-1234                                 # print one analysis; no Slack
 uv run python -m dss triage DSS-1234 --posted 2026-10-21_09-30-00    # an older ticket
 uv run python -m dss triage DSS-1234 --post-file post.txt            # with the workflow's Slack post
+uv run python -m dss trial DSS-1234 --posted ... --post-file ...     # the same triage as a checked record
 uv run python -m dss slack                                           # the bot
 ```
 
 The analysis goes to stdout, and turns, tokens and cost to stderr. `--posted` is the ticket time, in local time, and defaults to now. `cerb_last_session` uses it to pick the reporter's last session before the ticket, so pass it for an older ticket. `--post-file` is a text file with the support-request workflow's post (summary, client, DVT), which the Slack bot passes on its own; it gives Claude the ticket facts when Jira is down.
 
 Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, ticket, turns, seconds, tokens by kind and cost. With `DSS_TRACE=1`, its tool calls also go to `out/trace/<key>_<run time>.jsonl`, one JSON line each: tool, arguments, seconds, and the error or the result's size and first 2,000 characters. Both hold client data and stay in the git-ignored `out/`.
+
+### Trial mode
+
+`python -m dss trial` runs the triage record design (the DSS Triage Flow page) by hand, without changing the bot. It takes the same arguments as `triage` and runs the same locked-down Claude with the same steps and rules. Four things differ:
+
+- Before Claude starts, code reads the `dss_ticket` block: the reporter, DVT, project folder, workflow, Toolbox Name, the reporter's Cerberus version and last failed run, and the prod version. A source that fails leaves its facts null and is noted; it doesn't stop the triage.
+- Claude answers with one JSON object (the `triage` and `class` blocks), following [dss/triage_record.md](dss/triage_record.md) in place of `triage.md`'s Markdown answer section.
+- Code checks the record against `docs/triage_record.schema.json`.
+- Code renders a DM (the decision: status, cause, what to do, questions, suggested reply) and a thread reply (the proof: evidence, not proved, details, class, the facts code read). An answer that fails the check is shown as given, with the problems.
+
+The command prints the DM, then the thread reply. Each trial is saved as `out/trial/<key>_<run time>.json`, never in `out/answers/`, the folder the bot reads to tell which tickets are done. The trial doesn't post to Slack; whoever runs it delivers the DM and the thread reply to the reviewer.
 
 ### Scoring answers
 

@@ -64,6 +64,8 @@ def test_needs_info_with_a_question_needs_no_cause():
 		],
 	)
 	assert errors(record) == []
+	record['class'].update(cause_family=None, feature=None, prevent=None)  # not known yet
+	assert errors(record) == []
 
 
 @pytest.mark.parametrize(

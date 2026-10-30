@@ -33,19 +33,31 @@ def triage(key: str, posted: str, post: str = '', ask=runner.run_reply) -> dict:
 	*posted* is the ticket time in TIME_FORMAT; the triage looks for the reporter's Cerberus
 	session before it. *post* is the support-request workflow's message, when there is one.
 	*ask* is :func:`dss.runner.run_reply` (faked in tests).
+	"""
+	prompt = PROMPT.format(key=key, posted=posted, post=workflow_post(post))
+	return run(key, posted, prompt, ask)
 
-	Each triage adds a row to USAGE_FILE. With DSS_TRACE=1, its tool calls also go to
+
+def workflow_post(post: str) -> str:
+	"""The support-request workflow's *post* as the end of a prompt; empty when there is none."""
+	if not post:
+		return ''
+	return f'\n\nThe support-request workflow posted:\n{post[:MAX_POST]}'
+
+
+def run(key: str, posted: str, prompt: str, ask=runner.run_reply) -> dict:
+	"""Claude's answer to *prompt* about ticket *key*, with what it cost (see :func:`triage`).
+
+	Each run adds a row to USAGE_FILE. With DSS_TRACE=1, its tool calls also go to
 	TRACE_DIR/<key>_<run time>.jsonl.
 	"""
-	if post:
-		post = f'\n\nThe support-request workflow posted:\n{post[:MAX_POST]}'
 	run_at = datetime.now().strftime(TIME_FORMAT)
 	trace = None
 	if os.environ.get('DSS_TRACE') == '1':
 		TRACE_DIR.mkdir(parents=True, exist_ok=True)
 		trace = TRACE_DIR / f'{key}_{run_at}.jsonl'
 	started = time.monotonic()
-	reply = ask(PROMPT.format(key=key, posted=posted, post=post), trace=trace)
+	reply = ask(prompt, trace=trace)
 	seconds = round(time.monotonic() - started)
 	turns = int(reply.get('num_turns') or 0)
 	answer = {'text': reply['result'].strip(), **spend(reply), 'turns': turns, 'seconds': seconds}

@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from mcp import Client
 
-from dss import triage
+from dss import record, triage
 from dss.server import build
 
 
@@ -34,8 +34,9 @@ def mcp_call():
 
 @pytest.fixture(autouse=True)
 def private_output(tmp_path, monkeypatch):
-	"""Usage rows and traces go to the test's folder, never to the developer's `out/`."""
+	"""Usage rows, traces and trials go to the test's folder, never to the developer's `out/`."""
 	monkeypatch.setattr(triage, 'USAGE_FILE', tmp_path / 'usage.csv')
 	monkeypatch.setattr(triage, 'TRACE_DIR', tmp_path / 'trace')
+	monkeypatch.setattr(record, 'TRIAL_DIR', tmp_path / 'trial')
 	for name in ('DSS_TRACE', 'DSS_TRACE_FILE'):
 		monkeypatch.delenv(name, raising=False)

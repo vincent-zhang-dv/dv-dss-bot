@@ -86,12 +86,17 @@ def compact(issue: dict, fields: dict[str, str]) -> dict:
 	return found
 
 
-def get_issue(key: str) -> dict:
-	"""The triage fields of ticket *key*; the key is checked before anything is sent."""
+def get_issue(key: str, fields: dict[str, str] = TICKET_FIELDS) -> dict:
+	"""The triage *fields* of ticket *key*; the key is checked before anything is sent."""
 	if not ISSUE_KEY.fullmatch(key):
 		raise ValueError(f'{key!r} is not an issue key like DSS-1222')
-	issue = _get(f'/rest/api/2/issue/{key}', {'fields': ','.join(TICKET_FIELDS.values())})
-	return compact(issue, TICKET_FIELDS)
+	issue = _get(f'/rest/api/2/issue/{key}', {'fields': ','.join(fields.values())})
+	return compact(issue, fields)
+
+
+def browse_url(key: str) -> str:
+	"""The Jira page of ticket *key*."""
+	return f'{_base()}/browse/{key}'
 
 
 def search(jql: str, limit: int = 10) -> list[dict]:

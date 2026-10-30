@@ -26,6 +26,7 @@
 				"created": {"type": "string", "format": "date-time"},
 				"reporter": {"$ref": "#/$defs/text"},
 				"dvt": {"type": ["integer", "null"]},
+				"project": {"type": ["string", "null"], "description": "The project folder on the share."},
 				"workflow": {"enum": ["PE", "WI", "CI", "FF", "combo", "unknown"]},
 				"toolbox": {"type": ["string", "null"], "description": "Jira Toolbox Name, as filed."},
 				"cerberus_version": {"type": ["string", "null"], "description": "The analyst's last session."},
@@ -157,13 +158,13 @@
 			}
 		},
 		"class": {
-			"description": "Planning fields: enums and keys only, no client names, safe to count and share.",
+			"description": "Planning fields: enums and keys only, no client names, safe to count and share. cause_family, feature and prevent are null while the cause is unknown.",
 			"type": "object",
 			"required": ["cause_family", "feature", "prevent"],
 			"additionalProperties": false,
 			"properties": {
-				"cause_family": {"$ref": "#/$defs/cause_family"},
-				"feature": {"$ref": "#/$defs/feature"},
+				"cause_family": {"anyOf": [{"$ref": "#/$defs/cause_family"}, {"type": "null"}]},
+				"feature": {"anyOf": [{"$ref": "#/$defs/feature"}, {"type": "null"}]},
 				"module": {"type": ["string", "null"], "description": "A code path, only when proved."},
 				"known_cause": {
 					"type": ["string", "null"],
@@ -172,7 +173,7 @@
 				},
 				"impact": {"enum": ["blocked", "workaround", "question", null]},
 				"fix_type": {"enum": ["analyst_action", "setup", "update", "code_fix", "workaround", "explained", "redirect", null]},
-				"prevent": {"$ref": "#/$defs/prevent"},
+				"prevent": {"anyOf": [{"$ref": "#/$defs/prevent"}, {"type": "null"}]},
 				"prevent_note": {"type": "string"},
 				"dtn_tickets": {"type": "array", "items": {"$ref": "#/$defs/dtn_key"}},
 				"labels": {
