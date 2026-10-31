@@ -17,8 +17,18 @@
     - Its workaround (wider tracks in the RADX layout) was not checked. A data developer said
       the font size is not a setting.
     - Neither fix is on `develop-v1.1-release`.
+  - A blind trial on DSS-1236 (a Techlog 2D log missing the white line between joints), 61 s
+    and $0.49, was wrong. It said "likely, medium confidence: casing sections, mark casingSplit".
+    A data developer called it a bug. The screenshots, which the run can't see, show the line
+    missing at a collar in the column beside the depth numbers, between two joints with defects.
+    The run had flagged the white line as not proved, yet still rated its answer likely and
+    gave the analyst an action.
   - `uv run pytest` (122 passed); ruff check and format pass on the changed files.
 - **Not done:**
+  - The run can't see the workflow's screenshot, the key evidence in both trials. Passing it to
+    Claude needs the Slack app to read files; for the owners to decide.
+  - A prompt rule that an unconfirmed symptom caps the status below "likely", to test on a
+    few tickets first.
   - A read-only tool that lists remote branches whose names mention a DSS or DTN key would
     have found Annika's fix; for the owners to decide.
   - `known_causes.json` has no entry for this header problem.
