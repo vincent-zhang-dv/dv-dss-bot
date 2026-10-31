@@ -231,6 +231,13 @@ def test_claude_text_shows_as_written(sources):
 	assert '> Rerun it.\n> Thanks\n\n_Trial' in dm  # the footer is not part of the quoted reply
 
 
+def test_reply_is_not_part_of_the_escalation_draft(sources):
+	escalate = {'kind': 'bug', 'draft': 'The header text overlaps.'}
+	text = answer_text(escalate=escalate, reply='Rerun it.')
+	dm = record.trial('DSS-1234', POSTED, ask=claude(text, []))['dm']
+	assert '> The header text overlaps.\n\n**Suggested reply:**\n> Rerun it.' in dm
+
+
 def test_empty_fields_are_left_out(sources):
 	text = answer_text(
 		status='needs_info',

@@ -1,5 +1,28 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-10-31: first trial on a new DSS ticket (Vincent, with Claude)
+- **Changed:** the trial DM leaves a blank line after the escalation draft, so Slack no longer
+  pulls "Suggested reply" into the quote (`record._decision`, with a test).
+- **Checked:**
+  - A blind trial on DSS-1235 (an overlapping RAID 2D Log header), 15 minutes after it was
+    posted, from the workflow post only. The record check passed in 62 s for $0.39. The result
+    was sent to Vincent's DM, with the proof in the thread.
+  - Against the data developers' answer in Slack (a known header font problem, fixed on
+    Arsenii's and Annika's branches, not released):
+    - It found the cause, Arsenii's fix (d99479197, only on `DTN3703-work-ars-killer-2dlog`),
+      that prod 1.0.4 lacks it, and the earlier DSS-1210.
+    - It missed Annika's fix (1552cf587, only on `DSS-1210-work-annika-raid-headers`). That
+      commit changes only label alignment, so the `code_log_s` text searches can't find it,
+      and no tool lists branches by name.
+    - Its workaround (wider tracks in the RADX layout) was not checked. A data developer said
+      the font size is not a setting.
+    - Neither fix is on `develop-v1.1-release`.
+  - `uv run pytest` (122 passed); ruff check and format pass on the changed files.
+- **Not done:**
+  - A read-only tool that lists remote branches whose names mention a DSS or DTN key would
+    have found Annika's fix; for the owners to decide.
+  - `known_causes.json` has no entry for this header problem.
+
 ### 2026-10-30: trial mode for the triage record (Vincent, with Claude)
 - **Changed:** `python -m dss trial <key>` runs the triage record design by hand; the bot is
   unchanged. It takes the same arguments as `triage`. It runs the same locked-down Claude with

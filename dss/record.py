@@ -279,7 +279,8 @@ def _decision(record: dict) -> str:
 		if escalate.get('dtn_ticket'):
 			lines.append(f'**Escalate ({kind}):** {escalate["dtn_ticket"]}')
 		if escalate.get('draft'):
-			lines.append(f'**Escalate ({kind}), draft to send:**\n{_quote(escalate["draft"])}')
+			# the blank line ends the quote; Markdown would run the next line into it
+			lines.append(f'**Escalate ({kind}), draft to send:**\n{_quote(escalate["draft"])}\n')
 	if answer.get('reply'):
 		lines.append(f'**Suggested reply:**\n{_quote(answer["reply"])}')
 	return '\n'.join(lines)
