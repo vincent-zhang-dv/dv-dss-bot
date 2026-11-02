@@ -1,5 +1,25 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-02: trial on DSS-1239 (Vincent, with Claude)
+- **Checked:**
+  - A blind trial on DSS-1239, where making the PE analysis document fails. It took 51 s and
+    $0.25, passed the record check as "needs info, low confidence", and was sent to Vincent's
+    DM.
+  - Against the screenshot in the DSS ticket's thread, which the session read and the run can't:
+    - The traceback is `ValueError: arange: cannot compute length` in the completions histogram
+      (`histogram_plots.py` `base_histogram`) for one stage design.
+    - That design has no usable perforation values left, so the bin range is NaN.
+    - Prod, master and `develop-v1.1-release` have no guard for this.
+    - The run asked the analyst for the error text the screenshot already shows, and followed
+      the analyst's guess about a failed plug.
+  - The low status was right. The gap is the screenshot again: all three trials since DSS-1235
+    needed it.
+  - The same screenshot shows Cerberus's telemetry sink failing on flush
+    (`OSError: [Errno 22]`), which may be why the run found no telemetry for the failed
+    session; not checked.
+- **Not done:** DSS-1237 and DSS-1238 got no trial (Vincent picked the newest). Reading the
+  workflow's screenshot is still open (see 2026-10-31).
+
 ### 2026-10-31: first trial on a new DSS ticket (Vincent, with Claude)
 - **Changed:** the trial DM leaves a blank line after the escalation draft, so Slack no longer
   pulls "Suggested reply" into the quote (`record._decision`, with a test).
