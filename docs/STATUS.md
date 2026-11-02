@@ -8,7 +8,9 @@
   - Against the screenshot in the DSS ticket's thread, which the session read and the run can't:
     - The traceback is `ValueError: arange: cannot compute length` in the completions histogram
       (`histogram_plots.py` `base_histogram`) for one stage design.
-    - That design has no usable perforation values left, so the bin range is NaN.
+    - That design's only stage has no measured perforations (all plugged, debris or no data),
+      so the bin range is NaN. Calling `base_histogram` on the project's exported statistics
+      reproduced the error for that design; designs with even one volume pass.
     - Prod, master and `develop-v1.1-release` have no guard for this.
     - The run asked the analyst for the error text the screenshot already shows, and followed
       the analyst's guess about a failed plug.
