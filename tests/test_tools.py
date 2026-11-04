@@ -1,5 +1,6 @@
 """DSS triage tools: Jira fields flattened, project files through the index, code at the release."""
 
+import asyncio
 import base64
 import io
 import json
@@ -17,8 +18,10 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+from mcp import Client
 
 from dss import cerb, code, jira
+from dss.server import build
 
 
 def test_jira_issue_keeps_only_plain_triage_fields():
@@ -583,6 +586,69 @@ def test_documents_on_the_share_are_read_through_the_index(index, monkeypatch, t
 		cerb.read_document(PROJECT + r'\~$Report.docx')
 	with pytest.raises(ValueError, match='outside the project share'):
 		cerb.read_document(r'C:\Users\x\report.pdf')
+
+
+MADE_UP_PNG = b'\x89PNG made-up'
+
+
+def picture(width: int, height: int) -> dict:
+	"""One picture as `cerb.pictures` hands it over from the Cerberus venv."""
+	data = base64.b64encode(MADE_UP_PNG).decode()
+	return {'format': 'png', 'size': [width, height], 'shown': [width, height], 'data': data}
+
+
+@pytest.fixture
+def share_images(index, monkeypatch, tmp_path):
+	"""A plot and a PDF on the faked share; `cerb.pictures` faked: the PDF's page 1 holds only
+	a logo, page 2 eight plots."""
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	plot, report = PROJECT + r'\Deliverables\plot.png', PROJECT + r'\Deliverables\intro.pdf'
+	index[plot] = MADE_UP_PNG
+	index[report] = b'%PDF-1.7 made-up'
+
+	def run_in(app, module, func, **kwargs):
+		assert (module, func) == ('dss.cerb', 'pictures')
+		if not kwargs['path'].endswith('.pdf'):
+			return {'pages': 0, 'found': 1, 'images': [picture(800, 600)]}
+		if kwargs['page'] == 1:
+			return {'pages': 2, 'found': 0, 'images': []}
+		return {'pages': 2, 'found': 8, 'images': [picture(1899, 1078)] * cerb.MAX_PAGE_PICTURES}
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	return plot, report
+
+
+def test_images_and_pdf_pictures_are_shown_to_claude(share_images):
+	plot, report = share_images
+	line, image = cerb.read_image(plot)
+	assert line == 'plot.png (800x600 pixels)'
+	assert image.data == MADE_UP_PNG and image.to_image_content().mime_type == 'image/png'
+	parts = cerb.read_image(report, page=2)
+	assert parts[0].startswith('intro.pdf, page 2 of 2: 8 pictures, the first 6 shown (1899x1078, ')
+	assert len(parts) == 1 + cerb.MAX_PAGE_PICTURES
+	only_logos = (
+		'intro.pdf, page 1 of 2: 0 pictures (only logos or icons, or none); '
+		'cerb_read_document reads its text'
+	)
+	assert cerb.read_image(report, page=1) == [only_logos]
+	with pytest.raises(ValueError, match='give the PDF page'):
+		cerb.read_image(report)
+	with pytest.raises(ValueError, match='is not an image'):
+		cerb.read_image(PROJECT + r'\notes.txt')
+	with pytest.raises(ValueError, match='outside the project share'):
+		cerb.read_image(r'C:\Users\x\plot.png')
+
+
+def test_claude_gets_share_images_as_images(share_images):
+	plot, _ = share_images
+
+	async def call():
+		async with Client(build()) as client:
+			return await client.call_tool('cerb_read_image', {'path': plot})
+
+	result = asyncio.run(call())
+	assert not result.is_error
+	assert [part.type for part in result.content] == ['text', 'image']
 
 
 def git(repo, *args) -> str:

@@ -35,6 +35,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `cerb_client_info` | A `client_info.xlsm` as Cerberus reads it. |
 | `cerb_read_sheet` | Any `.xlsx` or `.xlsm` on the share (statistics spreadsheets, other client info sheets): its sheets and sizes, then 100-row pages with Excel's row numbers, optionally only the rows containing a text. Copied through the index and read with openpyxl in the Cerberus venv. |
 | `cerb_read_document` | The text of a `.pdf` or `.docx` on the share (deliverable reports, intro pages): up to 20 pages per answer (Word in parts of about 3,000 characters), optionally only the pages containing a text. Pages that are only a picture show no text. Read with pypdf and python-docx in the Cerberus venv. |
+| `cerb_read_image` | An image on the share (`.png`, `.jpg` and other bitmaps), or the pictures in one page of a PDF on the share (plots `cerb_read_document` can't read), given to Claude as images: scaled to 1568 pixels on the long side, logos left out, at most 6 per page. Read with Pillow and pypdf in the Cerberus venv. |
 | `cerb_prod_version` | The version of the prod Cerberus wheel. |
 | `code_grep`, `code_read`, `code_log_s` | Cerberus source through git at the prod release commit, never the working tree. |
 | `code_log`, `code_branches`, `code_contains` | Cerberus history: recent commits on a file or folder, branches named with a DTN key or word, and whether a build (prod, a release or the analyst's UAT build) includes a commit. Git reads only. |

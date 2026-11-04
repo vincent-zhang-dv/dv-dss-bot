@@ -12,6 +12,7 @@ file loaded after this module is imported still applies.
 
 import base64
 import importlib.metadata
+import io
 import json
 import ntpath
 import os
@@ -48,6 +49,11 @@ DOCUMENTS = ('.pdf', '.docx')  # what pypdf and python-docx open; not the old bi
 DOC_PAGES = 20  # pages per answer
 DOC_CHARS = 30_000  # per answer too
 WORD_PART_CHARS = 3000  # a Word file has no pages, so its text is cut into parts about this long
+IMAGES = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tif', '.tiff', '.webp')  # what Pillow opens
+MAX_IMAGE_SIDE = 1568  # pixels on the long side; Claude scales larger images down anyway
+MAX_IMAGE_BYTES = 3_500_000  # a bigger PNG is sent as JPEG
+MIN_PICTURE_PIXELS = 200 * 200  # smaller pictures in a PDF are logos and icons
+MAX_PAGE_PICTURES = 6  # each costs Claude about 1.5-3k tokens
 WHEEL = re.compile(r'cerberus-(\d+(?:\.\d+)+)-py3-none-any\.whl')
 # <login>_telemetry_<local start time>_<pid>.log, see cerberus/modules/telemetry/config.py
 TELEMETRY_LOG = re.compile(r'(.+)_telemetry_(\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d)_\d+\.log')
@@ -104,6 +110,54 @@ def document(path: str) -> dict:
 			parts.append('')
 		parts[-1] += line + '\n'
 	return {'unit': 'part', 'parts': parts}
+
+
+def pictures(path: str, page: int = 0) -> dict:
+	"""The image at *path*, or the pictures in page *page* of the PDF at *path*, each scaled to
+	at most MAX_IMAGE_SIDE pixels and base64-encoded. Pictures under MIN_PICTURE_PIXELS (logos)
+	are left out, and at most MAX_PAGE_PICTURES are kept.
+
+	Runs in the Cerberus venv (Pillow, pypdf), through `cerb_read_image`.
+	"""
+	from PIL import Image
+
+	pages = 0
+	found = []
+	if path.lower().endswith('.pdf'):
+		from pypdf import PdfReader
+
+		reader = PdfReader(path)
+		pages = len(reader.pages)
+		if not 1 <= page <= pages:
+			raise ValueError(f'the PDF has {pages} pages; page {page} is not one of them')
+		for embedded in reader.pages[page - 1].images:
+			width, height = embedded.image.size
+			if width * height >= MIN_PICTURE_PIXELS:
+				found.append(embedded.image)
+	else:
+		found.append(Image.open(path))
+	encoded = []
+	for picture in found[:MAX_PAGE_PICTURES]:
+		encoded.append(_encoded(picture))
+	return {'pages': pages, 'found': len(found), 'images': encoded}
+
+
+def _encoded(picture) -> dict:
+	"""A Pillow image as base64 PNG, or JPEG when the PNG is over MAX_IMAGE_BYTES, scaled down
+	to MAX_IMAGE_SIDE on the long side."""
+	original = picture.size
+	picture.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))  # only shrinks, keeps the shape
+	if picture.mode not in ('RGB', 'RGBA', 'L'):
+		picture = picture.convert('RGB')
+	buffer = io.BytesIO()
+	picture.save(buffer, 'PNG')
+	kind = 'png'
+	if buffer.tell() > MAX_IMAGE_BYTES:
+		buffer = io.BytesIO()
+		picture.convert('RGB').save(buffer, 'JPEG', quality=85)
+		kind = 'jpeg'
+	data = base64.b64encode(buffer.getvalue()).decode()
+	return {'format': kind, 'size': list(original), 'shown': list(picture.size), 'data': data}
 
 
 def cerberus_found() -> dict:
@@ -302,6 +356,37 @@ def read_document(path: str, first: int = 1, contains: str = '') -> str:
 	return (
 		f'{ntpath.basename(path)}: {document_page(found["parts"], found["unit"], first, contains)}'
 	)
+
+
+def read_image(path: str, page: int = 0) -> list:
+	"""An image on the share, or the pictures in one page of a PDF on the share, for Claude to
+	look at: a line saying what follows, then the images (:func:`pictures`)."""
+	from mcp.server.mcpserver import Image  # not in the Cerberus venv, which imports this module
+
+	name = ntpath.basename(path)
+	lower = path.lower()
+	if not lower.endswith((*IMAGES, '.pdf')):
+		raise ValueError(f'{path} is not an image ({", ".join(IMAGES)}) or a PDF')
+	if lower.endswith('.pdf') and page < 1:
+		raise ValueError('give the PDF page whose pictures to show, from 1')
+	found = run_in('cerb', __name__, 'pictures', path=str(local_copy(path)), page=page)
+	sizes = []
+	for image in found['images']:
+		sizes.append(f'{image["size"][0]}x{image["size"][1]}')
+	if found['pages']:
+		line = f'{name}, page {page} of {found["pages"]}: {found["found"]} pictures'
+		if not found['images']:
+			line += ' (only logos or icons, or none); cerb_read_document reads its text'
+		elif found['found'] > len(found['images']):
+			line += f', the first {len(found["images"])} shown'
+	else:
+		line = f'{name}'
+	if sizes:
+		line += f' ({", ".join(sizes)} pixels)'
+	parts: list = [line]
+	for image in found['images']:
+		parts.append(Image(data=base64.b64decode(image['data']), format=image['format']))
+	return parts
 
 
 def document_page(parts: list[str], unit: str, first: int = 1, contains: str = '') -> str:
@@ -554,6 +639,8 @@ def _no_answer(url: str, error: Exception) -> str:
 
 
 def register(server) -> None:
+	from mcp.server.mcpserver import Image  # not at the top: the Cerberus venv imports this module
+
 	@server.tool()
 	def cerb_client_info(path: str) -> dict:
 		"""Well info, casing strings and joints of a `client_info.xlsm`, as Cerberus reads them (the
@@ -596,6 +683,14 @@ def register(server) -> None:
 		3,000 characters), and where the next answer starts. *contains* keeps only the pages
 		with that text. Pages that are only an image show no text."""
 		return read_document(path, first, contains)
+
+	@server.tool()
+	def cerb_read_image(path: str, page: int = 0) -> list[str | Image]:
+		"""Look at an image on the project share (.png, .jpg and other bitmaps, such as a plot in
+		Deliverables), or at the pictures in page *page* of a PDF on the share (plots that
+		cerb_read_document cannot read, like the 2D log overview plots). Large images are scaled
+		to 1568 pixels; logos are left out."""
+		return read_image(path, page)
 
 	@server.tool()
 	def cerb_last_session(project: str, user: str, before: str = '') -> dict:

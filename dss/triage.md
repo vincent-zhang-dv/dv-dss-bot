@@ -70,7 +70,8 @@ gives a proved answer, and say which step that was.
      lead.
    - Missing or empty output: compare what the screenshots show with what the analyst expected,
      then the settings, templates and depth ranges the output depends on. Read the output
-     itself when it is a PDF or Word file (`cerb_read_document`).
+     itself when it is a PDF or Word file (`cerb_read_document`), and look at its plots and
+     images (`cerb_read_image`).
    - Feature request: step 2's searches cover it; read the matches that look closest.
    - How-to: `confluence_search` and `confluence_page`.
 
