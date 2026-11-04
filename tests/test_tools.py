@@ -5,9 +5,11 @@ import base64
 import io
 import json
 import ntpath
+import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import zipfile
@@ -193,10 +195,14 @@ def index(monkeypatch):
 	"""
 	files: dict[str, bytes] = {}
 
-	def get(url_path):
+	def get(url_path, into=None):
 		if not url_path.startswith('/?'):
 			parts = [urllib.parse.unquote(part) for part in url_path[1:].split('/')]
-			return files['\\'.join(parts)]
+			data = files['\\'.join(parts)]
+			if into is None:
+				return data
+			into.write_bytes(data)  # the real one streams it (cerb._stream)
+			return b''
 		hits, folders = [], set()
 		for path, data in files.items():
 			hits.append(
@@ -268,6 +274,43 @@ def test_project_files_are_listed_read_and_copied(index, tmp_path, monkeypatch):
 	copy = cerb.local_copy(PROJECT + r'\DVT1234_client_info.xlsm')
 	assert copy == tmp_path / 'dv_project_index' / 'ACME' / PROJECT.rsplit('\\', 1)[1] / copy.name
 	assert copy.read_bytes() == b'PK\x03\x04\0\0'
+
+
+def test_copies_are_reused_for_a_while_then_deleted(index, tmp_path, monkeypatch):
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	report = PROJECT + r'\Deliverables\report.pdf'
+	index[report] = b'first'
+	copy = cerb.local_copy(report)
+	index[report] = b'second'
+	assert cerb.local_copy(report).read_bytes() == b'first'  # paging: no second download
+	stale = time.time() - cerb.COPY_FRESH_S - 1
+	os.utime(copy, (stale, stale))
+	assert cerb.local_copy(report).read_bytes() == b'second'
+	old = tmp_path / 'dv_project_index' / 'ACME' / 'DVT9_old' / 'Deliverables' / 'old.pdf'
+	old.parent.mkdir(parents=True)
+	old.write_bytes(b'old')
+	ancient = time.time() - cerb.COPY_KEEP_S - 1
+	os.utime(old, (ancient, ancient))
+	cerb.local_copy(report)
+	assert not (tmp_path / 'dv_project_index' / 'ACME' / 'DVT9_old').exists()  # folders too
+	assert copy.exists()
+
+
+def test_big_files_stream_to_disk_up_to_the_limit(tmp_path, monkeypatch):
+	target = tmp_path / 'big.docx'
+	monkeypatch.setattr(cerb, 'CHUNK_BYTES', 4)
+	cerb._stream(io.BytesIO(b'0123456789'), target, limit=10)
+	assert target.read_bytes() == b'0123456789'
+	with pytest.raises(RuntimeError, match=r'over 0 MB, the most this bot copies'):
+		cerb._stream(io.BytesIO(b'0123456789A'), tmp_path / 'bigger.docx', limit=10)
+	assert sorted(path.name for path in tmp_path.iterdir()) == ['big.docx']  # nothing left behind
+	monkeypatch.delenv('DV_PROJECT_INDEX_MAX_MB', raising=False)
+	assert cerb._max_copy_bytes() == 1024 * 2**20
+	monkeypatch.setenv('DV_PROJECT_INDEX_MAX_MB', '2000')
+	assert cerb._max_copy_bytes() == 2000 * 2**20
+	monkeypatch.setenv('DV_PROJECT_INDEX_MAX_MB', '1 GB')
+	with pytest.raises(ValueError, match='must be a number of MB'):
+		cerb._max_copy_bytes()
 
 
 def test_project_tools_read_only_inside_the_share(index):

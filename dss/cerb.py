@@ -11,6 +11,7 @@ file loaded after this module is imported still applies.
 """
 
 import base64
+import contextlib
 import importlib.metadata
 import io
 import json
@@ -19,6 +20,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,7 +35,11 @@ DEFAULT_INDEX_ROOT = r'\\192.168.24.252\projects'
 DEFAULT_PROD_DIR = 'F:/DarkVision Dropbox/Analysis/CERBERUS/prod'
 INDEX_ENV = ('DV_PROJECT_INDEX_USER', 'DV_PROJECT_INDEX_PASSWORD')
 TIMEOUT_S = 60
-MAX_FETCH_BYTES = 50 * 2**20  # one file is held in memory
+MAX_FETCH_BYTES = 50 * 2**20  # a file read as text is held in memory
+DEFAULT_MAX_COPY_MB = 1024  # a copy streams to disk (DV_PROJECT_INDEX_MAX_MB)
+CHUNK_BYTES = 2**20
+COPY_FRESH_S = 15 * 60  # a copy this new is used again: paging through a file downloads it once
+COPY_KEEP_S = 24 * 3600  # older copies are deleted
 MAX_LISTED = 500
 # All of a project's telemetry logs are listed, then filtered by login here. Add login terms to
 # the search if a project's telemetry folder grows past this.
@@ -495,13 +501,37 @@ def _row_line(number: int, texts: list[str]) -> str:
 
 
 def local_copy(path: str) -> Path:
-	"""Download *path* from the share into the temp folder, for tools that need a file on disk."""
+	"""*path* from the share, copied into the temp folder for the tools that need a file on disk.
+
+	The copy streams to disk, so files up to DV_PROJECT_INDEX_MAX_MB (default 1 GB) can be read.
+	A copy made in the last COPY_FRESH_S is used again, so paging through a big file downloads it
+	once (a change to the file on the share in that time is not seen); copies older than
+	COPY_KEEP_S are deleted.
+	"""
 	inside = _inside_index(path)
 	relative = inside[len(_index_root()) + 1 :]
-	target = Path(tempfile.gettempdir(), 'dv_project_index', relative)
+	copies = Path(tempfile.gettempdir(), 'dv_project_index')
+	_prune(copies)
+	target = copies / relative
+	if target.exists() and time.time() - target.stat().st_mtime < COPY_FRESH_S:
+		return target
 	target.parent.mkdir(parents=True, exist_ok=True)
-	target.write_bytes(_fetch(inside))
+	_get(_url_path(inside), into=target)
 	return target
+
+
+def _prune(copies: Path) -> None:
+	"""Delete copies older than COPY_KEEP_S, and the folders they leave empty."""
+	if not copies.exists():
+		return
+	cutoff = time.time() - COPY_KEEP_S
+	for path in copies.rglob('*'):
+		if path.is_file() and path.stat().st_mtime < cutoff:
+			path.unlink(missing_ok=True)
+	for path in sorted(copies.rglob('*'), reverse=True):  # a folder after everything in it
+		if path.is_dir() and not any(path.iterdir()):
+			with contextlib.suppress(OSError):  # another triage is copying into it right now
+				path.rmdir()
 
 
 def prod_version() -> str:
@@ -596,12 +626,49 @@ def _search(query: str, count: int = MAX_LISTED) -> list[dict]:
 
 
 def _fetch(path: str) -> bytes:
-	parts = _inside_index(path).lstrip('\\').split('\\')
-	return _get('/%5C%5C' + '/'.join(urllib.parse.quote(part, safe='') for part in parts))
+	return _get(_url_path(_inside_index(path)))
 
 
-def _get(url_path: str) -> bytes:
-	"""GET from the project index, the only request this module sends."""
+def _url_path(inside: str) -> str:
+	"""The index's URL path of a file on the share."""
+	parts = inside.lstrip('\\').split('\\')
+	return '/%5C%5C' + '/'.join(urllib.parse.quote(part, safe='') for part in parts)
+
+
+def _max_copy_bytes() -> int:
+	text = _setting('DV_PROJECT_INDEX_MAX_MB', str(DEFAULT_MAX_COPY_MB))
+	try:
+		return int(text) * 2**20
+	except ValueError as error:
+		raise ValueError(f'DV_PROJECT_INDEX_MAX_MB must be a number of MB, not {text!r}') from error
+
+
+def _stream(response, target: Path, limit: int) -> None:
+	"""*response* into *target*, CHUNK_BYTES at a time, at most *limit* bytes; a copy that is
+	too big or breaks off leaves nothing behind."""
+	partial = target.with_name(target.name + '.partial')
+	size = 0
+	try:
+		with partial.open('wb') as file:
+			while True:
+				chunk = response.read(CHUNK_BYTES)
+				if not chunk:
+					break
+				size += len(chunk)
+				if size > limit:
+					raise RuntimeError(
+						f'the file is over {limit // 2**20} MB, the most this bot copies '
+						'(DV_PROJECT_INDEX_MAX_MB)'
+					)
+				file.write(chunk)
+		partial.replace(target)
+	finally:
+		partial.unlink(missing_ok=True)
+
+
+def _get(url_path: str, into: Path | None = None) -> bytes:
+	"""GET from the project index, the only request this module sends. The answer is returned,
+	up to MAX_FETCH_BYTES, or with *into* streamed to that file (:func:`_stream`)."""
 	missing = []
 	for name in INDEX_ENV:
 		if not os.environ.get(name):
@@ -616,7 +683,11 @@ def _get(url_path: str) -> bytes:
 	)
 	try:
 		with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-			data = response.read(MAX_FETCH_BYTES + 1)
+			if into is None:
+				data = response.read(MAX_FETCH_BYTES + 1)
+			else:
+				_stream(response, into, _max_copy_bytes())
+				data = b''
 	except urllib.error.HTTPError as error:
 		reason = {
 			401: 'the project index refused the login',
@@ -626,7 +697,9 @@ def _get(url_path: str) -> bytes:
 	except (urllib.error.URLError, TimeoutError) as error:
 		raise RuntimeError(_no_answer(url, error)) from error
 	if len(data) > MAX_FETCH_BYTES:
-		raise RuntimeError(f'the file is over {MAX_FETCH_BYTES // 2**20} MB, too big to read here')
+		raise RuntimeError(
+			f'the file is over {MAX_FETCH_BYTES // 2**20} MB, too big to read as text here'
+		)
 	return data
 
 

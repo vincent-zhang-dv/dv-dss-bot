@@ -175,6 +175,7 @@ All of them can go in `.env`; see [.env.example](.env.example).
 | `DSS_CERB_PROD_CODE` | Where the prod wheel is unpacked, one folder per version, so `cerb_client_info` runs the Cerberus analysts installed. |
 | `DV_PROJECT_INDEX_USER`, `DV_PROJECT_INDEX_PASSWORD` | Login for the project index. Sent as HTTP Basic auth over plain HTTP. |
 | `DV_PROJECT_INDEX_URL`, `DV_PROJECT_INDEX_ROOT` | The index address and the share it indexes. Default `http://192.168.25.120` and `\\192.168.24.252\projects`. |
+| `DV_PROJECT_INDEX_MAX_MB` | The biggest file the sheet, document, image and client info tools copy from the share, in MB. Default 1024. Copies stream to disk, are reused for 15 minutes and deleted after a day; `cerb_read_text` still reads at most 50 MB. |
 | `DV_CERB_PROD_DIR` | The folder analysts install Cerberus from. Default `F:/DarkVision Dropbox/Analysis/CERBERUS/prod`. |
 | `DV_CERB_REF` | A Cerberus commit for `code_*` to read instead of the prod release commit. |
 | `CONFLUENCE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_TOKEN`, `CONFLUENCE_SPACES` | The read-only Confluence account, and optionally the spaces to search. |
