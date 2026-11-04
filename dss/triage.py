@@ -8,6 +8,7 @@ import os
 import subprocess
 import time
 from datetime import datetime
+from pathlib import Path
 
 from dss import runner
 from dss.worker import ROOT
@@ -15,7 +16,7 @@ from dss.worker import ROOT
 TIME_FORMAT = '%Y-%m-%d_%H-%M-%S'  # local time, as Cerberus names its telemetry logs
 MAX_POST = 8000
 PROMPT = """New ticket {key}, posted {posted} (local time).
-Format with plain Markdown (paragraphs, lists, `code`); no tables wider than 4 columns.{post}"""
+Format with plain Markdown (paragraphs, lists, `code`); no tables wider than 4 columns.{thread}{post}"""
 USAGE_KEYS = (
 	'input_tokens',
 	'output_tokens',
@@ -27,15 +28,27 @@ USAGE_COLUMNS = ('run_at', 'key', 'posted', 'turns', 'seconds', *USAGE_KEYS, 'co
 TRACE_DIR = ROOT / 'out' / 'trace'  # one file of tool calls per triage, with DSS_TRACE=1
 
 
-def triage(key: str, posted: str, post: str = '', ask=runner.run_reply) -> dict:
+def triage(
+	key: str, posted: str, post: str = '', ask=runner.run_reply, thread_ts: str = ''
+) -> dict:
 	"""Claude's analysis of ticket *key*: `text`, `cost_usd`, `tokens`, `turns` and `seconds`.
 
 	*posted* is the ticket time in TIME_FORMAT; the triage looks for the reporter's Cerberus
-	session before it. *post* is the support-request workflow's message, when there is one.
-	*ask* is :func:`dss.runner.run_reply` (faked in tests).
+	session before it. *post* is the support-request workflow's message, when there is one, and
+	*thread_ts* its Slack ts, which `slack_thread` reads. *ask* is :func:`dss.runner.run_reply`
+	(faked in tests).
 	"""
-	prompt = PROMPT.format(key=key, posted=posted, post=workflow_post(post))
+	prompt = PROMPT.format(
+		key=key, posted=posted, thread=slack_thread(thread_ts), post=workflow_post(post)
+	)
 	return run(key, posted, prompt, ask)
+
+
+def slack_thread(thread_ts: str) -> str:
+	"""The `slack_thread` call for the ticket's thread, as a prompt line; empty when not known."""
+	if not thread_ts:
+		return ''
+	return f'\n\nIts Slack thread, with the replies and screenshots: `slack_thread("{thread_ts}")`.'
 
 
 def workflow_post(post: str) -> str:
@@ -45,17 +58,19 @@ def workflow_post(post: str) -> str:
 	return f'\n\nThe support-request workflow posted:\n{post[:MAX_POST]}'
 
 
-def run(key: str, posted: str, prompt: str, ask=runner.run_reply) -> dict:
+def run(
+	key: str, posted: str, prompt: str, ask=runner.run_reply, trace: Path | None = None
+) -> dict:
 	"""Claude's answer to *prompt* about ticket *key*, with what it cost (see :func:`triage`).
 
-	Each run adds a row to USAGE_FILE. With DSS_TRACE=1, its tool calls also go to
-	TRACE_DIR/<key>_<run time>.jsonl.
+	Each run adds a row to USAGE_FILE. Its tool calls go to *trace* when given, else with
+	DSS_TRACE=1 to TRACE_DIR/<key>_<run time>.jsonl.
 	"""
 	run_at = datetime.now().strftime(TIME_FORMAT)
-	trace = None
-	if os.environ.get('DSS_TRACE') == '1':
-		TRACE_DIR.mkdir(parents=True, exist_ok=True)
+	if trace is None and os.environ.get('DSS_TRACE') == '1':
 		trace = TRACE_DIR / f'{key}_{run_at}.jsonl'
+	if trace is not None:
+		trace.parent.mkdir(parents=True, exist_ok=True)
 	started = time.monotonic()
 	reply = ask(prompt, trace=trace)
 	seconds = round(time.monotonic() - started)

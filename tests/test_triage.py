@@ -1,9 +1,11 @@
 """One triage: the prompt Claude gets, what it cost, the reviewer's error text, and the CLI."""
 
 import csv
+import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -32,8 +34,11 @@ def test_prompt_carries_the_ticket_its_time_and_the_workflow_post():
 	assert answer['tokens'] == 31200 and answer['cost_usd'] == 0.25
 	assert isinstance(answer['seconds'], int)
 	triage.triage('DSS-1235', '2026-10-21_09-30-00', ask=ask)
-	assert 'workflow posted' not in prompts[1]
-
+	assert 'workflow posted' not in prompts[1] and 'slack_thread' not in prompts[1]
+	triage.triage('DSS-1236', '2026-10-21_09-30-00', post, ask=ask, thread_ts='1792523850.5')
+	line = '\n\nIts Slack thread, with the replies and screenshots: `slack_thread("1792523850.5")`.'
+	assert line in prompts[2]
+	assert prompts[2].index('slack_thread("1792523850.5")') < prompts[2].index('workflow posted')
 
 
 def test_each_triage_adds_a_usage_row(tmp_path):
@@ -121,12 +126,11 @@ def test_cli_prints_the_analysis_and_its_cost(claude, monkeypatch, capsys):
 	assert 'New ticket DSS-1234, posted 2026-10-21_09-30-00' in prompt and model == 'm1'
 
 
-
 def test_cli_gives_claude_the_post_file(claude, monkeypatch, tmp_path, capsys):
 	post = tmp_path / 'post.txt'
 	post.write_text('created DSS-1234 · ACME · DVT1234', encoding='utf-8')
 	run_cli(monkeypatch, 'triage', 'DSS-1234', '--post-file', str(post))
-	((prompt, model),) = claude
+	((prompt, _model),) = claude
 	assert prompt.endswith('workflow posted:\ncreated DSS-1234 · ACME · DVT1234')
 	with pytest.raises(SystemExit) as stopped:
 		run_cli(monkeypatch, 'triage', 'DSS-1234', '--post-file', str(tmp_path / 'missing.txt'))
@@ -134,13 +138,33 @@ def test_cli_gives_claude_the_post_file(claude, monkeypatch, tmp_path, capsys):
 	assert 'cannot read --post-file' in capsys.readouterr().err
 
 
+def test_cli_reads_the_thread_as_the_bot_would_have(claude, monkeypatch):
+	link = 'https://acme.slack.com/archives/C0793LJ1KDM/p1792523850000500?thread_ts=1.2'
+	for thread in (link, '1792523850.000500'):
+		run_cli(monkeypatch, 'triage', 'DSS-1234', '--thread', thread)
+		prompt, _model = claude[-1]
+		assert '`slack_thread("1792523850.000500")`' in prompt
+		posted = datetime.fromtimestamp(1792523850.0005).strftime(triage.TIME_FORMAT)
+		assert f'posted {posted} (local time)' in prompt  # the post's own time
+		until = float(os.environ['DSS_THREAD_UNTIL'])
+		assert until == pytest.approx(1792523850.0005 + slack.TRIAGE_DELAY_S)
+	run_cli(monkeypatch, 'triage', 'DSS-1234', '--thread', link, '--posted', '2026-10-21_09-30-00')
+	assert 'posted 2026-10-21_09-30-00' in claude[-1][0]
+
+
 def test_cli_rejects_bad_input_before_asking_claude(claude, monkeypatch, capsys):
-	for args in (('DSS 1234',), ('DSS-1234', '--posted', '2026-10-21 09:30')):
+	bad = (
+		('DSS 1234',),
+		('DSS-1234', '--posted', '2026-10-21 09:30'),
+		('DSS-1234', '--thread', 'https://acme.slack.com/archives/C0793LJ1KDM'),
+	)
+	for args in bad:
 		with pytest.raises(SystemExit) as stopped:
 			run_cli(monkeypatch, 'triage', *args)
 		assert stopped.value.code == 2
 	err = capsys.readouterr().err
 	assert "'DSS 1234' is not an issue key" in err and '--posted must look like' in err
+	assert 'is not a Slack permalink or a ts' in err
 	assert claude == []
 
 

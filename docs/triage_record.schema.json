@@ -6,7 +6,7 @@
 	"required": ["schema", "dss_ticket", "triage", "class"],
 	"additionalProperties": false,
 	"properties": {
-		"schema": {"const": "dss-triage/1"},
+		"schema": {"const": "dss-triage/2"},
 		"dss_ticket": {"$ref": "#/$defs/dss_ticket"},
 		"triage": {"$ref": "#/$defs/triage"},
 		"class": {"$ref": "#/$defs/class"},
@@ -38,14 +38,41 @@
 		"triage": {
 			"description": "Claude's answer; the DM and its thread reply are rendered from it.",
 			"type": "object",
-			"required": ["status", "confidence", "settled_at", "what"],
+			"required": ["status", "confidence", "settled_at", "what", "request", "prior_art"],
 			"additionalProperties": false,
 			"properties": {
 				"status": {"enum": ["proved", "likely", "needs_info", "not_cerberus"]},
 				"confidence": {"enum": ["high", "medium", "low"]},
-				"settled_at": {"enum": ["record", "gate_a", "gate_b", "gate_c", "playbook"]},
+				"settled_at": {"enum": ["request", "prior_art", "gate_a", "gate_b", "gate_c", "playbook"]},
 				"playbook": {"enum": ["crash", "wrong_numbers", "missing_output", "feature_request", "how_to", null]},
 				"what": {"$ref": "#/$defs/text"},
+				"request": {
+					"description": "Step 1: what the analyst asks, stated before the investigation.",
+					"type": "object",
+					"required": ["output", "expected", "asks"],
+					"additionalProperties": false,
+					"properties": {
+						"output": {"type": ["string", "null"], "description": "The output or Cerberus step where they see it."},
+						"expected": {"type": ["string", "null"], "description": "What they expected, when the ticket says."},
+						"asks": {"enum": ["fix", "explanation", "rerun", "how_to", "feature"]}
+					}
+				},
+				"prior_art": {
+					"description": "Steps 2 and 3: past DSS and DTN tickets, commits, branches and pages that match, and whether each one's fix applies. Empty when the searches found nothing.",
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["ref", "what", "state", "applies", "why"],
+						"additionalProperties": false,
+						"properties": {
+							"ref": {"$ref": "#/$defs/text", "description": "A DSS or DTN key, a commit, a branch or a page."},
+							"what": {"$ref": "#/$defs/text"},
+							"state": {"enum": ["fixed_released", "fixed_unreleased", "open", "explained", "unknown"]},
+							"applies": {"enum": ["yes", "partly", "no"]},
+							"why": {"$ref": "#/$defs/text", "description": "The evidence for applies, such as a code_contains result."}
+						}
+					}
+				},
 				"cause": {"type": ["string", "null"], "description": "One sentence: X was Y, so Z."},
 				"where": {
 					"type": ["object", "null"],
@@ -145,6 +172,10 @@
 				{
 					"if": {"properties": {"status": {"const": "proved"}, "playbook": {"const": "wrong_numbers"}}, "required": ["playbook"]},
 					"then": {"required": ["details"], "properties": {"details": {"required": ["reported", "expected", "first_difference"]}}}
+				},
+				{
+					"if": {"properties": {"settled_at": {"const": "prior_art"}}},
+					"then": {"properties": {"prior_art": {"contains": {"properties": {"applies": {"const": "yes"}}}}}}
 				}
 			]
 		},

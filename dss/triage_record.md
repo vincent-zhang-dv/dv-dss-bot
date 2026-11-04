@@ -15,19 +15,29 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
 
 `triage`:
 - `status`: `proved` when every link of the cause was read with a tool; `likely` when the cause
-  fits the evidence but a link was not read; `needs_info` when the answer depends on something
-  only the analyst can give; `not_cerberus` when Gate A says so.
+  fits the evidence but no tool can read one link; `needs_info` when the answer depends on
+  something only the analyst can give; `not_cerberus` when Gate A says so.
 - `confidence`: `high`, `medium` or `low`.
-- `settled_at`: the step that settled it: `record`, `gate_a`, `gate_b`, `gate_c` or `playbook`.
+- `settled_at`: the step that settled it: `request` (step 1), `prior_art` (steps 2 and 3),
+  `gate_a`, `gate_b`, `gate_c` or `playbook`.
 - `playbook`: `crash`, `wrong_numbers`, `missing_output`, `feature_request` or `how_to`; null
-  when it settled before step 5.
+  when it settled before step 7.
 - `what`: what the analyst reported, in one line.
+- `request`: step 1's statement of the request, {"output", "expected", "asks"}: the output or
+  Cerberus step where they see it, what they expected (null when the ticket doesn't say), and
+  `asks`, one of `fix`, `explanation`, `rerun`, `how_to` or `feature`.
+- `prior_art`: what steps 2 and 3 found, [{"ref", "what", "state", "applies", "why"}]: `ref` a
+  DSS or DTN key, commit, branch or page; `what` the past issue in one line; `state` one of
+  `fixed_released`, `fixed_unreleased`, `open`, `explained` or `unknown`; `applies` `yes`,
+  `partly` or `no`; `why` the evidence for `applies`, such as a `code_contains` result. Empty
+  when the searches found nothing; code checks in the trace that they ran before the
+  investigation.
 - `cause`: one sentence with its mechanism, "X was Y, so Z"; null when unknown.
 - `where`: where the cause lives, {"kind", "path", "detail"}, with kind one of `data_file`,
   `folder`, `setting`, `code`, `version` or `outside`; null when unknown.
 - `evidence`: the proved results (the rules' Checked), [{"fact", "ref"}]. `ref` is the tool call
-  that read the fact, such as `cerb_client_info:1234` or `code_read:cerberus/plots.py:120`, or
-  `computed`.
+  that read the fact, such as `cerb_client_info:1234`, `code_read:cerberus/plots.py:120` or
+  `slack_thread:reply 1 screenshot`, or `computed`.
 - `not_proved`: strings, each naming what could not be checked and what would settle it (the
   rules' Not proved).
 - `questions`: [{"ask", "settles"}], only questions whose answer settles something, each saying
@@ -40,8 +50,8 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
   null when nothing should be sent yet.
 - `secondary`: a second, separate cause, [{"cause", "class"}], where `class` is a whole class
   object as described below, not a single value. Label suggestions go in `class.labels`, not here.
-- `similar_dss_tickets`: keys of similar DSS tickets, such as "DSS-1100".
-- `flags`: what this run could not read (a tool that failed, a screenshot).
+- `similar_dss_tickets`: keys of similar DSS tickets, such as "DSS-1100", for linking in Jira.
+- `flags`: what this run could not read (a tool that failed, a file it could not open).
 - `details`, by where it settled; {} otherwise:
   - `not_cerberus`: {"owner", "sop"}: the likely owner and the SOP link.
   - Gate B: {"version", "prod_version", "failed_run", "config"}.
@@ -53,7 +63,8 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
 What each status needs: `proved` and `likely` need `cause`, at least one `evidence` item and
 `do_now`; `likely` also needs `not_proved`; `needs_info` needs `questions`; `not_cerberus` needs
 `details.owner`; `proved` with `wrong_numbers` needs `details.reported`, `details.expected` and
-`details.first_difference`. When you cannot give what a status needs, choose the status you can
+`details.first_difference`; `settled_at` `prior_art` needs a `prior_art` item that applies
+(`yes`). When you cannot give what a status needs, choose the status you can
 support.
 
 `class` holds the fields for planning summaries: values from these lists and keys only, never

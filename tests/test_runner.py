@@ -55,7 +55,6 @@ def test_run_reply_sends_the_prompt_and_reports_failures(tmp_path, monkeypatch):
 		runner.run_reply('New ticket DSS-1234')
 
 
-
 def test_run_reply_names_the_trace_file_only_when_asked(tmp_path, monkeypatch):
 	envs = []
 
@@ -75,17 +74,22 @@ def test_run_reply_names_the_trace_file_only_when_asked(tmp_path, monkeypatch):
 def test_server_serves_the_triage_tools():
 	tools = {tool.name: tool for tool in asyncio.run(build().list_tools())}
 	assert set(tools) == {
+		'slack_thread',
 		'jira_get_issue',
 		'jira_search',
 		'cerb_client_info',
 		'cerb_find_project',
 		'cerb_list',
 		'cerb_read_text',
+		'cerb_read_sheet',
 		'cerb_last_session',
 		'cerb_prod_version',
 		'code_grep',
 		'code_read',
 		'code_log_s',
+		'code_log',
+		'code_branches',
+		'code_contains',
 		'confluence_search',
 		'confluence_page',
 	}
@@ -117,7 +121,6 @@ def test_reporting_tools_keep_results_and_explain_failures(mcp_call):
 	assert mcp_call('echo', {'text': 'hi'}, server) == (False, 'hi')
 	assert mcp_call('broken', {}, server) == (True, "Error executing tool broken: KeyError: 'dvt'")
 	assert mcp_call('refused', {}, server) == (True, 'Error executing tool refused: not allowed')
-
 
 
 def test_reporting_tools_trace_each_call_when_the_runner_asks(tmp_path, monkeypatch, mcp_call):

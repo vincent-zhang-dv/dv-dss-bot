@@ -1,6 +1,7 @@
 """Slack desk: workflow ticket post -> triage -> the reviewer's DM, with a fake Slack client."""
 
 import re
+import time
 
 import pytest
 
@@ -69,6 +70,7 @@ def test_new_ticket_is_triaged_and_drafted_to_the_reviewer_only(tmp_path):
 	bot = desk(tmp_path, claude)
 	bot.on_message(ticket())
 	assert 'New ticket DSS-1234, posted 20' in claude.prompts[0]
+	assert '`slack_thread("1792523850.5")`' in claude.prompts[0]  # Claude reads the thread
 	assert '*Client:* ACME' in claude.prompts[0]  # the workflow's post goes along
 	sent = bot.client.sent('chat_postMessage')
 	assert [message['channel'] for message in sent] == [REVIEWER]  # nothing in the channel
@@ -77,6 +79,20 @@ def test_new_ticket_is_triaged_and_drafted_to_the_reviewer_only(tmp_path):
 	assert '1,234 tokens · ≈ $0.02' in str(sent[0]['blocks'][-1])
 	saved = bot.store.get(CHANNEL, '1792523850.5')
 	assert saved['ticket'] == 'DSS-1234' and saved['tokens'] == 1234
+
+
+def test_a_new_ticket_waits_for_the_screenshots_and_first_replies(tmp_path):
+	waits: list[float] = []
+	claude = FakeClaude()
+	bot = slack.SlackDesk(
+		FakeSlack(), REVIEWER, AnswerStore(tmp_path), ask=claude, sleep=waits.append
+	)
+	bot.on_message(ticket(ts=f'{time.time() - 1:.6f}'))  # posted a second ago
+	(waited,) = waits
+	assert slack.TRIAGE_DELAY_S - 60 < waited <= slack.TRIAGE_DELAY_S
+	assert len(claude.prompts) == 1
+	bot.on_message(ticket(ts=f'{time.time() - slack.TRIAGE_DELAY_S - 1:.6f}'))  # caught up late
+	assert len(waits) == 1 and len(claude.prompts) == 2
 
 
 def test_only_new_workflow_tickets_are_triaged(tmp_path):
@@ -152,9 +168,9 @@ def test_bot_says_which_settings_to_set(monkeypatch):
 
 def test_bot_watches_the_test_channel_when_one_is_set(monkeypatch):
 	monkeypatch.delenv('DSS_SLACK_CHANNEL', raising=False)
-	assert slack._channel() == CHANNEL
+	assert slack.watched_channel() == CHANNEL
 	monkeypatch.setenv('DSS_SLACK_CHANNEL', 'CTEST')
-	assert slack._channel() == 'CTEST'
+	assert slack.watched_channel() == 'CTEST'
 
 
 def test_store_names_stay_inside_its_folder(tmp_path):

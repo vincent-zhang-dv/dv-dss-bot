@@ -15,7 +15,7 @@ import time
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-MODULES = ('jira', 'cerb', 'code', 'confluence')
+MODULES = ('thread', 'jira', 'cerb', 'code', 'confluence')
 TRACE_CHARS = 2000  # result text kept per call in a trace line
 
 

@@ -2,9 +2,11 @@
 
 When a support-request workflow posts "created DSS-…" in the channel, Claude triages the ticket
 (:mod:`dss.triage`) and the analysis goes to the reviewer's DM only; nothing is posted in the
-channel. The bot runs on the reviewer's PC under their `claude` login (Socket Mode: no public
-URL). On start it also triages the tickets of the last CATCH_UP_S that have no saved answer,
-because Slack does not resend events missed while the bot was down.
+channel. The triage starts TRIAGE_DELAY_S after the post, so the thread it reads
+(`slack_thread`) holds the analyst's screenshots. The bot runs on the reviewer's PC under their
+`claude` login (Socket Mode: no public URL). On start it also triages the tickets of the last
+CATCH_UP_S that have no saved answer, because Slack does not resend events missed while the bot
+was down.
 
 	set DSS_SLACK_BOT_TOKEN=xoxb-...  DSS_SLACK_APP_TOKEN=xapp-...  DSS_SLACK_REVIEWER=U0...
 	python -m dss slack
@@ -30,6 +32,7 @@ from dss.worker import ROOT
 CHANNEL = 'C0793LJ1KDM'  # #data-dev-support
 TICKET = re.compile(r'created (DSS-\d+)')  # what the support-request workflows post
 CATCH_UP_S = 24 * 3600  # on start, triage tickets posted this recently that were missed
+TRIAGE_DELAY_S = 300  # the analyst's screenshots and first replies follow the post within minutes
 SEEN_S = 600  # an event seen this recently is a redelivery; Slack resends unacknowledged events
 BLOCK_CHARS = 2900  # Slack's section text limit is 3000
 MAX_BLOCKS = 50  # Slack's limit per message
@@ -39,9 +42,44 @@ ENV = ('DSS_SLACK_BOT_TOKEN', 'DSS_SLACK_APP_TOKEN', 'DSS_SLACK_REVIEWER')
 log = logging.getLogger(__name__)
 
 
+class Names:
+	"""Slack markup as plain text, asking Slack for each user's display name once.
+
+	*client* is a slack_sdk WebClient (faked in tests).
+	"""
+
+	def __init__(self, client) -> None:
+		self.client = client
+		self._names: dict[str, str] = {}
+
+	def plain(self, text: str) -> str:
+		"""Slack markup to plain text: user/channel mentions to names, links to their URLs."""
+		text = re.sub(r'<@([A-Z0-9]+)>', lambda match: '@' + self.name(match[1]), text)
+		text = re.sub(r'<#[A-Z0-9]+\|([^>]*)>', r'#\1', text)
+		text = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2 (\1)', text)
+		text = re.sub(r'<(https?://[^>]+)>', r'\1', text)
+		return text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+
+	def name(self, user: str) -> str:
+		"""The display name of Slack user *user*, or the id itself when Slack cannot say."""
+		if user not in self._names:
+			try:
+				profile = self.client.users_info(user=user)['user']
+				self._names[user] = (
+					profile.get('profile', {}).get('display_name')
+					or profile.get('real_name')
+					or profile.get('name')
+					or user
+				)
+			except Exception:  # noqa: BLE001 - a missing name must not stop the triage
+				return user
+		return self._names[user]
+
+
 class SlackDesk:
-	"""Workflow posts in, analyses to the reviewer. *client* is a slack_sdk WebClient and *ask*
-	is :func:`dss.runner.run_reply` (both faked in tests); Bolt wiring is in :func:`build_app`.
+	"""Workflow posts in, analyses to the reviewer. *client* is a slack_sdk WebClient, *ask*
+	is :func:`dss.runner.run_reply` and *sleep* is :func:`time.sleep` (all faked in tests); Bolt
+	wiring is in :func:`build_app`.
 	"""
 
 	def __init__(
@@ -51,13 +89,15 @@ class SlackDesk:
 		store: AnswerStore,
 		channel: str = CHANNEL,
 		ask=runner.run_reply,
+		sleep=time.sleep,
 	) -> None:
 		self.client = client
 		self.reviewer = reviewer
 		self.store = store
 		self.channel = channel
 		self.ask = ask
-		self._names: dict[str, str] = {}
+		self.sleep = sleep
+		self.names = Names(client)
 		self._seen: dict[str, float] = {}  # event ts -> when it was first seen
 		self._lock = threading.Lock()
 
@@ -69,11 +109,14 @@ class SlackDesk:
 		channel, ts, key = event['channel'], event['ts'], ticket[1]
 		if event.get('thread_ts', ts) != ts or self._repeat(ts):
 			return
+		wait = float(ts) + TRIAGE_DELAY_S - time.time()
+		if wait > 0:
+			self.sleep(wait)
 		# Cerberus names telemetry logs by local start time; the triage compares against this
 		posted = datetime.fromtimestamp(float(ts)).strftime(TIME_FORMAT)
 		link = self._link(channel, ts)
 		try:
-			answer = triage(key, posted, self._plain(event['text']), self.ask)
+			answer = triage(key, posted, self.names.plain(event['text']), self.ask, thread_ts=ts)
 		except Exception as error:  # noqa: BLE001 - the reviewer must hear about every failure
 			detail = explain(error)
 			warning = f':warning: Could not triage <{link}|{key}>: {detail}'
@@ -95,29 +138,6 @@ class SlackDesk:
 		for event in reversed(history['messages']):  # Slack lists newest first
 			if self.store.get(self.channel, event['ts']) is None:
 				self.on_message({**event, 'channel': self.channel})
-
-	def _plain(self, text: str) -> str:
-		"""Slack markup to plain text: user/channel mentions to names, links to their URLs."""
-		text = re.sub(r'<@([A-Z0-9]+)>', lambda match: '@' + self._name(match[1]), text)
-		text = re.sub(r'<#[A-Z0-9]+\|([^>]*)>', r'#\1', text)
-		text = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2 (\1)', text)
-		text = re.sub(r'<(https?://[^>]+)>', r'\1', text)
-		return text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
-
-	def _name(self, user: str) -> str:
-		"""The display name of Slack user *user*, or the id itself when Slack cannot say."""
-		if user not in self._names:
-			try:
-				profile = self.client.users_info(user=user)['user']
-				self._names[user] = (
-					profile.get('profile', {}).get('display_name')
-					or profile.get('real_name')
-					or profile.get('name')
-					or user
-				)
-			except Exception:  # noqa: BLE001 - a missing name must not stop the triage
-				return user
-		return self._names[user]
 
 	def _repeat(self, ts: str) -> bool:
 		"""Whether the event *ts* was already seen within SEEN_S, i.e. Slack sent it again."""
@@ -187,7 +207,7 @@ def _context(text: str) -> dict:
 	return {'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': text}]}
 
 
-def _channel() -> str:
+def watched_channel() -> str:
 	"""The channel to watch: DSS_SLACK_CHANNEL (a test channel), else #data-dev-support."""
 	return os.environ.get('DSS_SLACK_CHANNEL') or CHANNEL
 
@@ -196,7 +216,7 @@ def build_app(store: AnswerStore, reviewer: str):
 	from slack_bolt import App
 
 	app = App(token=os.environ['DSS_SLACK_BOT_TOKEN'])
-	desk = SlackDesk(app.client, reviewer, store, _channel())
+	desk = SlackDesk(app.client, reviewer, store, watched_channel())
 	app.event('message')(lambda event: desk.on_message(event))
 	return app, desk
 
@@ -214,7 +234,7 @@ def main() -> None:
 			f'Set {", ".join(missing)} first: the bot and app tokens of the Slack app made from '
 			'slack_manifest.yaml, and your Slack member id (profile > Copy member ID).'
 		)
-	log.info('triaging new tickets in %s', _channel())
+	log.info('triaging new tickets in %s', watched_channel())
 	app, desk = build_app(AnswerStore(ROOT / 'out' / 'answers'), os.environ['DSS_SLACK_REVIEWER'])
 	handler = SocketModeHandler(app, os.environ['DSS_SLACK_APP_TOKEN'])
 	handler.connect()

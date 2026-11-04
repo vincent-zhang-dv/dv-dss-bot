@@ -1,8 +1,9 @@
 """DSS triage CLI: `python -m dss <command>`.
 
 	python -m dss triage DSS-1234 [--posted 2026-10-21_09-30-00] [--post-file post.txt]
-	                                                                 # one triage, printed; no Slack
-	python -m dss trial DSS-1234 [--posted ...] [--post-file ...]    # the same as a checked record
+	                              [--thread <permalink or ts>]       # one triage, printed; no Slack
+	python -m dss trial DSS-1234 [--posted ...] [--post-file ...] [--thread ...]
+	                                                                 # the same as a checked record
 	python -m dss eval out/eval/golden.jsonl out/eval/<run> [--judge] # score saved answers
 	python -m dss slack                                              # the bot (see dss.slack)
 	python -m dss mcp                                                # the tools over stdio (MCP)
@@ -14,6 +15,7 @@ in the ones that are not set.
 import argparse
 import functools
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -21,8 +23,12 @@ from pathlib import Path
 from dss import runner
 from dss.cerb import START_TIME
 from dss.jira import ISSUE_KEY
+from dss.slack import TRIAGE_DELAY_S
+from dss.thread import TS
 from dss.triage import TIME_FORMAT, explain, triage
 from dss.worker import ROOT
+
+PERMALINK = re.compile(r'/p(\d+)(\d{6})(?:[?#].*)?$')  # .../archives/<channel>/p<ts digits>
 
 
 def load_env(path: Path = ROOT / '.env') -> None:
@@ -78,7 +84,7 @@ def main() -> None:
 
 		posted, post = ticket_input(parser, args)
 		try:
-			result = record.trial(args.key, posted, post)
+			result = record.trial(args.key, posted, post, thread_ts=args.thread or '')
 		except Exception as error:  # one readable line instead of a traceback
 			raise SystemExit(explain(error)) from error
 		print(f'{result["dm"]}\n\n--- thread reply ---\n\n{result["thread"]}')
@@ -91,7 +97,7 @@ def main() -> None:
 		posted, post = ticket_input(parser, args)
 		ask = functools.partial(runner.run_reply, model=args.model)
 		try:
-			answer = triage(args.key, posted, post, ask=ask)
+			answer = triage(args.key, posted, post, ask=ask, thread_ts=args.thread or '')
 		except Exception as error:  # one readable line instead of a traceback
 			raise SystemExit(explain(error)) from error
 		print(answer['text'])
@@ -111,15 +117,39 @@ def add_ticket_arguments(command: argparse.ArgumentParser) -> None:
 		type=Path,
 		help="a text file with the support-request workflow's Slack post (summary, client, DVT)",
 	)
+	command.add_argument(
+		'--thread',
+		type=thread_ts,
+		help="the workflow post's Slack permalink or ts; Claude reads its thread as the bot would",
+	)
+
+
+def thread_ts(value: str) -> str:
+	"""The Slack ts of a post, from its permalink or the ts itself."""
+	value = value.strip()
+	if TS.fullmatch(value):
+		return value
+	link = PERMALINK.search(value)
+	if not link:
+		raise argparse.ArgumentTypeError(f'{value!r} is not a Slack permalink or a ts')
+	return f'{link[1]}.{link[2]}'
 
 
 def ticket_input(parser: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[str, str]:
-	"""The checked ticket time (default now) and the workflow's post; bad input stops here."""
+	"""The checked ticket time and the workflow's post; bad input stops here.
+
+	The time defaults to the post's (`--thread`), else now. With `--thread`, `slack_thread` leaves
+	out the replies that came after the bot would have started (DSS_THREAD_UNTIL).
+	"""
 	if not ISSUE_KEY.fullmatch(args.key):
 		parser.error(f'{args.key!r} is not an issue key like DSS-1234')
 	if args.posted and not START_TIME.fullmatch(args.posted):
 		parser.error(f'--posted must look like 2026-10-21_09-30-00, not {args.posted!r}')
 	posted = args.posted
+	if args.thread:
+		os.environ['DSS_THREAD_UNTIL'] = f'{float(args.thread) + TRIAGE_DELAY_S:.6f}'
+		if not posted:
+			posted = datetime.fromtimestamp(float(args.thread)).strftime(TIME_FORMAT)
 	if not posted:
 		posted = datetime.now().strftime(TIME_FORMAT)
 	post = ''

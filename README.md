@@ -10,10 +10,12 @@ Owners: Vincent Zhang and Annika. Status log: [docs/STATUS.md](docs/STATUS.md).
 
 ```
 #data-dev-support: a workflow posts "created DSS-1234"
-  -> dss/slack.py    new ticket (on start, also any from the last 24 h with no saved answer)
-  -> dss/triage.py   the prompt: ticket key, time posted, the workflow's message
+  -> dss/slack.py    new ticket, triaged 5 minutes after the post so its thread holds the
+                     screenshots (on start, also any from the last 24 h with no saved answer)
+  -> dss/triage.py   the prompt: ticket key, time posted, the workflow's message, its thread
   -> dss/runner.py   claude -p with no user setup and no built-in tools; system prompt dss/triage.md
   -> dss/server.py   MCP server `dss`, read-only tools:
+       slack_thread  dss/thread.py      the ticket's thread: replies, screenshots (Slack API)
        jira_*        dss/jira.py        ticket fields, similar tickets (Jira REST API)
        cerb_*        dss/cerb.py        project folder, telemetry, files (project index);
                                         client info (Cerberus venv)
@@ -22,19 +24,22 @@ Owners: Vincent Zhang and Annika. Status log: [docs/STATUS.md](docs/STATUS.md).
   -> the reviewer's DM; the answer is saved in out/answers/
 ```
 
-The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude records the facts and then goes through Gate A (is it a Cerberus issue?), Gate B (is it a known setup problem?) and Gate C (are the inputs there?). It then follows one playbook for the symptom. Only proved results go under "Checked"; everything else goes under "Not proved", with what would settle it.
+The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude first states the request, then searches past issues: DSS and DTN tickets, git history and branches, and troubleshooting pages. It then checks whether a past fix applies to this analyst's build. Only after that does it investigate. It goes through Gate A (is it a Cerberus issue?), Gate B (is it a known setup problem?) and Gate C (are the inputs there?), then follows one playbook for the symptom. Only proved results go under "Checked"; everything else goes under "Not proved", with what would settle it. Trial mode enforces the order: the record must state the request and the past issues, and the run's trace must show the Jira and git searches before any code or project file is read.
 
 | Tool | Reads |
 |---|---|
+| `slack_thread` | The ticket's Slack thread: the workflow's post and every reply, oldest first, with screenshots as images and text files as text. Only threads of "created DSS-…" posts in the watched channel. |
 | `jira_get_issue`, `jira_search` | A ticket's triage fields, and similar tickets. |
 | `cerb_find_project`, `cerb_list`, `cerb_read_text` | The DVT's project folder, a folder's entries, and a text file in 400-line pages, through the project index. |
 | `cerb_last_session` | The reporter's newest Cerberus telemetry log before the ticket: version, failed script runs, last saved config. |
 | `cerb_client_info` | A `client_info.xlsm` as Cerberus reads it. |
+| `cerb_read_sheet` | Any `.xlsx` or `.xlsm` on the share (statistics spreadsheets, other client info sheets): its sheets and sizes, then 100-row pages with Excel's row numbers, optionally only the rows containing a text. Copied through the index and read with openpyxl in the Cerberus venv. |
 | `cerb_prod_version` | The version of the prod Cerberus wheel. |
 | `code_grep`, `code_read`, `code_log_s` | Cerberus source through git at the prod release commit, never the working tree. |
+| `code_log`, `code_branches`, `code_contains` | Cerberus history: recent commits on a file or folder, branches named with a DTN key or word, and whether a build (prod, a release or the analyst's UAT build) includes a commit. Git reads only. |
 | `confluence_search`, `confluence_page` | Confluence pages. |
 
-`cerb_client_info` runs in the Cerberus venv through [dss/worker.py](dss/worker.py), so this repo needs none of its dependencies.
+`cerb_client_info` and `cerb_read_sheet` run in the Cerberus venv through [dss/worker.py](dss/worker.py), so this repo needs none of its dependencies.
 
 ## Repository layout
 
@@ -48,7 +53,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude rec
 | `dss/record.py`, `dss/triage_record.md` | Trial mode: the triage as a checked record, and the answer section that replaces `triage.md`'s. |
 | `dss/runner.py` | The locked-down `claude -p` command line. |
 | `dss/server.py` | The `dss` MCP server. |
-| `dss/jira.py`, `cerb.py`, `code.py`, `confluence.py` | The tools, one module per source. |
+| `dss/thread.py`, `jira.py`, `cerb.py`, `code.py`, `confluence.py` | The tools, one module per source. |
 | `dss/worker.py` | Runs a function in another app's venv. |
 | `dss/slack.py`, `dss/store.py` | The Slack bot and its saved answers. |
 | `slack_manifest.yaml` | The bot's Slack app. |
@@ -74,11 +79,14 @@ Check the setup with one triage: `uv run python -m dss triage DSS-1234`.
 uv run python -m dss triage DSS-1234                                 # print one analysis; no Slack
 uv run python -m dss triage DSS-1234 --posted 2026-10-21_09-30-00    # an older ticket
 uv run python -m dss triage DSS-1234 --post-file post.txt            # with the workflow's Slack post
-uv run python -m dss trial DSS-1234 --posted ... --post-file ...     # the same triage as a checked record
+uv run python -m dss triage DSS-1234 --thread <permalink of the post> # with its Slack thread
+uv run python -m dss trial DSS-1234 --thread ... --post-file ...     # the same triage as a checked record
 uv run python -m dss slack                                           # the bot
 ```
 
 The analysis goes to stdout, and turns, tokens and cost to stderr. `--posted` is the ticket time, in local time, and defaults to now. `cerb_last_session` uses it to pick the reporter's last session before the ticket, so pass it for an older ticket. `--post-file` is a text file with the support-request workflow's post (summary, client, DVT), which the Slack bot passes on its own; it gives Claude the ticket facts when Jira is down.
+
+`--thread` takes the workflow post's permalink (or its ts) and lets Claude read the thread with `slack_thread`, as the bot does. `--posted` then defaults to the post's time. Replies posted more than 5 minutes after the post are left out, so a triage of an older ticket sees what the bot would have seen, not the developers' answers. It needs `DSS_SLACK_BOT_TOKEN`; the bot token alone starts no bot.
 
 Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, ticket, turns, seconds, tokens by kind and cost. With `DSS_TRACE=1`, its tool calls also go to `out/trace/<key>_<run time>.jsonl`, one JSON line each: tool, arguments, seconds, and the error or the result's size and first 2,000 characters. Both hold client data and stay in the git-ignored `out/`.
 
@@ -111,6 +119,8 @@ claude mcp add dss -- uv run -q --directory <this repo> python -m dss mcp
 ### The Slack bot
 
 Create the bot's own Slack app from [slack_manifest.yaml](slack_manifest.yaml) and set the `DSS_SLACK_*` variables. Don't reuse the DV Assistant's app: Slack hands each event to one of an app's open connections, so two bots on one app would each miss tickets.
+
+The bot waits until 5 minutes after the post before it triages (`TRIAGE_DELAY_S`): the workflow posts the analyst's "Screenshot of error" right away, and analysts often add more in the first minutes. `slack_thread` downloads those screenshots, which needs the `files:read` scope; an app made from an older manifest needs that scope added and the app reinstalled.
 
 Slack doesn't resend events the bot missed. On start it therefore triages every ticket from the last 24 hours that has no saved answer, oldest first.
 
@@ -152,7 +162,7 @@ All of them can go in `.env`; see [.env.example](.env.example).
 | `DV_CERB_REF` | A Cerberus commit for `code_*` to read instead of the prod release commit. |
 | `CONFLUENCE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_TOKEN`, `CONFLUENCE_SPACES` | The read-only Confluence account, and optionally the spaces to search. |
 | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN` | The read-only Jira account. Each defaults to its `CONFLUENCE_*` value. |
-| `DSS_SLACK_BOT_TOKEN`, `DSS_SLACK_APP_TOKEN` | The bot's Slack tokens. |
+| `DSS_SLACK_BOT_TOKEN`, `DSS_SLACK_APP_TOKEN` | The bot's Slack tokens. `slack_thread` reads with the bot token, also in `triage` and `trial`. |
 | `DSS_SLACK_REVIEWER` | The Slack member id whose DM gets the analyses. |
 | `DSS_SLACK_CHANNEL` | The channel to watch. Default #data-dev-support. |
 | `DSS_TRACE` | `1` writes each triage's tool calls to `out/trace/`. |

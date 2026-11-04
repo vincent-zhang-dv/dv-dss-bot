@@ -1,11 +1,11 @@
 """`cerb_*` tools: what Cerberus reads and ran for a job.
 
-`client_info` runs in the DataDHPython venv. The project tools read DVT project folders through
-the project index (the Everything HTTP server over the project share), approved for read-only use
-on DSS tickets: they send only GET requests, and only for paths inside the indexed share. The
-login comes from DV_PROJECT_INDEX_USER and DV_PROJECT_INDEX_PASSWORD. `prod_version` reads
-DV_CERB_PROD_DIR (the folder analysts install Cerberus from). Settings are read at each call, so a
-`.env` file loaded after this module is imported still applies.
+`client_info` and `workbook` run in the DataDHPython venv. The project tools read DVT project
+folders through the project index (the Everything HTTP server over the project share), approved
+for read-only use on DSS tickets: they send only GET requests, and only for paths inside the
+indexed share. The login comes from DV_PROJECT_INDEX_USER and DV_PROJECT_INDEX_PASSWORD.
+`prod_version` reads DV_CERB_PROD_DIR (the folder analysts install Cerberus from). Settings are
+read at each call, so a `.env` file loaded after this module is imported still applies.
 """
 
 import base64
@@ -34,6 +34,11 @@ MAX_LISTED = 500
 MAX_TELEMETRY_LOGS = 5000
 MAX_TEXT_LINES = 400
 MAX_FAILED_RUNS = 10
+WORKBOOKS = ('.xlsx', '.xlsm')  # what openpyxl opens; not the old binary .xls
+SHEET_ROWS = 100  # rows per page of a sheet
+SHEET_CHARS = 30_000  # per page too: a statistics row runs to about 400 characters
+CELL_CHARS = 200
+TOP_ROWS = 3  # shown before a later page or the rows a filter found, for the column names
 WHEEL = re.compile(r'cerberus-(\d+(?:\.\d+)+)-py3-none-any\.whl')
 # <login>_telemetry_<local start time>_<pid>.log, see cerberus/modules/telemetry/config.py
 TELEMETRY_LOG = re.compile(r'(.+)_telemetry_(\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d)_\d+\.log')
@@ -56,6 +61,61 @@ def client_info(path: str) -> dict:
 		found['strings'] = strings.to_dict('records')
 		found['joints'] = record.to_dict('records')
 	return found
+
+
+def workbook(path: str, sheet: str = '') -> dict:
+	"""The worksheets of the workbook at *path* with their sizes, or every row of *sheet*.
+
+	Runs in the Cerberus venv (openpyxl), through `cerb_read_sheet`. Formulas give the value Excel
+	saved. `cells[0]` is row 1 and empty rows are kept, so rows keep Excel's numbers; trailing
+	empty cells and rows are dropped.
+	"""
+	from openpyxl import load_workbook
+
+	book = load_workbook(path, read_only=True, data_only=True)
+	try:
+		names = []
+		for worksheet in book.worksheets:  # chart sheets have no cells
+			names.append(worksheet.title)
+		if not sheet:
+			sizes = []
+			for worksheet in book.worksheets:
+				rows = _sheet_rows(worksheet)
+				widest = 0
+				for row in rows:
+					widest = max(widest, len(row))
+				sizes.append({'name': worksheet.title, 'rows': len(rows), 'columns': widest})
+			return {'sheets': sizes}
+		if sheet not in names:
+			raise ValueError(f'no sheet {sheet!r}; the sheets are: {", ".join(names)}')
+		return {'cells': _sheet_rows(book[sheet])}
+	finally:
+		book.close()
+
+
+def _sheet_rows(worksheet) -> list[list]:
+	"""Every row of *worksheet* from row 1, as JSON values."""
+	worksheet.reset_dimensions()  # a stale size record would cut rows off
+	rows = []
+	for values in worksheet.iter_rows(min_row=1, values_only=True):
+		row = []
+		for value in values:
+			row.append(_json_cell(value))
+		while row and row[-1] in (None, ''):
+			row.pop()
+		rows.append(row)
+	while rows and not rows[-1]:
+		rows.pop()
+	return rows
+
+
+def _json_cell(value):
+	"""A cell's value as JSON: dates and times as ISO text, anything else unusual as text."""
+	if value is None or isinstance(value, bool | int | float | str):
+		return value
+	if hasattr(value, 'isoformat'):
+		return value.isoformat()
+	return str(value)
 
 
 def find_project(dvt: int) -> dict:
@@ -150,6 +210,104 @@ def read_text(path: str, first_line: int = 1) -> dict:
 		'total_lines': len(lines),
 		'text': '\n'.join(lines[start : start + MAX_TEXT_LINES]),
 	}
+
+
+def read_sheet(path: str, sheet: str = '', first_row: int = 1, contains: str = '') -> str:
+	"""One page of *sheet* of a workbook on the share; without *sheet*, its sheets and sizes.
+
+	The workbook is copied through the index and read in the Cerberus venv (:func:`workbook`).
+	See :func:`sheet_page` for the page.
+	"""
+	if not path.lower().endswith(WORKBOOKS):
+		raise ValueError(f'{path} is not an .xlsx or .xlsm workbook; cerb_read_text reads text')
+	if ntpath.basename(path).startswith('~$'):
+		raise ValueError(
+			f'{path} is the lock file Excel keeps while the workbook is open; read the workbook'
+		)
+	local = str(local_copy(path))
+	name = ntpath.basename(path)
+	if not sheet:
+		sheets = run_in('cerb', __name__, 'workbook', path=local)['sheets']
+		parts = []
+		for found in sheets:
+			parts.append(f'"{found["name"]}" {found["rows"]:,} rows x {found["columns"]} columns')
+		return f'{name}: {len(sheets)} sheets: {"; ".join(parts)}.'
+	cells = run_in('cerb', __name__, 'workbook', path=local, sheet=sheet)['cells']
+	return f'{name} [{sheet}]: {sheet_page(cells, first_row, contains)}'
+
+
+def sheet_page(cells: list[list], first_row: int = 1, contains: str = '') -> str:
+	"""A line saying what the page holds, then its rows: Excel's row number and the cells,
+	tab-separated, one row per line.
+
+	A page is up to SHEET_ROWS rows and SHEET_CHARS characters from *first_row* on. With
+	*contains*, only rows with a cell holding that text (any case) count. A filtered page, or one
+	that starts later, also shows the top TOP_ROWS rows, for the column names.
+	"""
+	needle = contains.lower()
+	start = max(first_row, 1)
+	lines: dict[int, str] = {}  # row number -> line
+	size = 0
+	matched = 0
+	last = 0
+	next_row = None
+	for number in range(start, len(cells) + 1):
+		texts = _cell_texts(cells[number - 1])
+		if needle and not any(needle in text.lower() for text in texts):
+			continue
+		matched += 1
+		if next_row is not None:
+			continue  # only counting the matches from here on
+		line = _row_line(number, texts)
+		if len(lines) == SHEET_ROWS or (lines and size + len(line) > SHEET_CHARS):
+			next_row = number
+			if not needle:
+				break
+			continue
+		lines[number] = line
+		size += len(line) + 1
+		last = number
+	shown = len(lines)
+	widest = 0
+	for row in cells:
+		widest = max(widest, len(row))
+	summary = f'{len(cells):,} rows, {widest} columns.'
+	if needle:
+		summary += f' {matched:,} rows from row {start} on contain "{contains}"; {shown} below'
+	elif lines:
+		summary += f' Rows {start}-{last} below'
+	else:
+		summary += f' No rows from row {start} on'
+	top = min(TOP_ROWS, len(cells))
+	missing = any(number not in lines for number in range(1, top + 1))
+	if (needle or start > 1) and missing:
+		summary += ", with the sheet's top rows for the column names"
+		for number in range(1, top + 1):
+			lines.setdefault(number, _row_line(number, _cell_texts(cells[number - 1])))
+	if next_row is None:
+		summary += '. End of sheet.'
+	else:
+		summary += f'. More from first_row={next_row}.'
+	return '\n'.join([summary, *(lines[number] for number in sorted(lines))])
+
+
+def _cell_texts(row: list) -> list[str]:
+	"""*row*'s cells as one-line text: whole floats without .0, long text cut at CELL_CHARS."""
+	texts = []
+	for value in row:
+		text = ''
+		if isinstance(value, float) and value.is_integer():
+			text = str(int(value))
+		elif value is not None:
+			text = ' '.join(str(value).split())  # tabs and line breaks would split the row
+		if len(text) > CELL_CHARS:
+			text = text[:CELL_CHARS] + '…'
+		texts.append(text)
+	return texts
+
+
+def _row_line(number: int, texts: list[str]) -> str:
+	return '\t'.join([str(number), *texts])
 
 
 def local_copy(path: str) -> Path:
@@ -290,6 +448,15 @@ def register(server) -> None:
 		"""Up to 400 lines of a text file on the project share (config, log, csv) from
 		*first_line* on, with the file's total line count."""
 		return read_text(path, first_line)
+
+	@server.tool()
+	def cerb_read_sheet(path: str, sheet: str = '', first_row: int = 1, contains: str = '') -> str:
+		"""An .xlsx or .xlsm workbook on the project share, such as a statistics spreadsheet or
+		the client info. Without *sheet*: its sheets and their sizes. With *sheet*: up to 100 rows
+		from *first_row* (Excel row numbers, cells tab-separated, formulas as last saved), the
+		sheet's top 3 rows first for the column names, and where the next page starts.
+		*contains* keeps only the rows with a cell containing that text."""
+		return read_sheet(path, sheet, first_row, contains)
 
 	@server.tool()
 	def cerb_last_session(project: str, user: str, before: str = '') -> dict:

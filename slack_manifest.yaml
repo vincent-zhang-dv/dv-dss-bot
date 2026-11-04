@@ -18,8 +18,9 @@ features:
 oauth_config:
   scopes:
     bot:
-      - channels:history # the workflow's "created DSS-..." posts and the start-up catch-up (public channel)
+      - channels:history # the workflow's "created DSS-..." posts, their threads and the start-up catch-up (public channel)
       - groups:history # same, if #data-dev-support is private
+      - files:read # the screenshots in a DSS ticket's thread (slack_thread)
       - chat:write # analyses to the reviewer
       - im:write # open the DM with the reviewer
       - users:read # names instead of member ids

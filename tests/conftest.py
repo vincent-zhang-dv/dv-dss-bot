@@ -40,3 +40,5 @@ def private_output(tmp_path, monkeypatch):
 	monkeypatch.setattr(record, 'TRIAL_DIR', tmp_path / 'trial')
 	for name in ('DSS_TRACE', 'DSS_TRACE_FILE'):
 		monkeypatch.delenv(name, raising=False)
+	# the CLI sets this one itself; setting it here makes monkeypatch remove it after the test
+	monkeypatch.setenv('DSS_THREAD_UNTIL', '')
