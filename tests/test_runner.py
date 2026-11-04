@@ -208,6 +208,17 @@ def test_worker_runs_a_function_in_another_python(monkeypatch):
 		run_in('cerb', 'json', 'nope')
 
 
+def test_worker_puts_a_folder_first_on_the_import_path(monkeypatch, tmp_path):
+	first, checkout = tmp_path / 'first', tmp_path / 'checkout'
+	for folder in (first, checkout):
+		folder.mkdir()
+		(folder / 'both.py').write_text('def where():\n\treturn __file__\n', encoding='utf-8')
+	monkeypatch.setenv('DSS_CERB_PY', sys.executable)
+	monkeypatch.setenv('DSS_CERB_CWD', str(checkout))  # `python -c` puts its working folder first
+	assert run_in('cerb', 'both', 'where') == str(checkout / 'both.py')
+	assert run_in('cerb', 'both', 'where', first_path=str(first)) == str(first / 'both.py')
+
+
 def test_worker_says_which_setting_is_missing(monkeypatch):
 	monkeypatch.delenv('DSS_CERB_PY', raising=False)
 	with pytest.raises(RuntimeError, match='set DSS_CERB_PY'):

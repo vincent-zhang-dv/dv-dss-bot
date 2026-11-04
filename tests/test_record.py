@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from dss import __main__ as cli
-from dss import cerb, jira, record, runner
+from dss import cerb, code, jira, record, runner
 
 EXAMPLE = json.loads(record.SCHEMA_FILE.with_name('triage_record.example.json').read_text('utf-8'))
 PROJECT = r'\\server\projects\ACME\DVT1234_2026-10-20_WI_Well-1'
@@ -234,6 +234,16 @@ def test_past_issues_are_searched_before_the_investigation(tools, status, proble
 	assert len(found) == len(problems)
 	for problem, word in zip(found, problems, strict=True):
 		assert problem.startswith('trace: ') and word in problem
+
+
+def test_a_trial_notes_a_cerberus_refresh_that_failed(sources, monkeypatch):
+	note = 'prod Cerberus not unpacked, so cerb_client_info may fail: no wheel'
+	monkeypatch.setattr(code, 'refresh', lambda: [note])
+	prompts: list = []
+	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), prompts))
+	assert result['notes'] == [note]
+	assert f'Code could not read:\n- {note}' in prompts[0]
+	assert '**Code could not read**\n- prod Cerberus not unpacked' in result['thread']  # reviewer
 
 
 def test_a_trial_that_skips_past_issues_fails_the_check(sources):

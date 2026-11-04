@@ -4,19 +4,24 @@
 folders through the project index (the Everything HTTP server over the project share), approved
 for read-only use on DSS tickets: they send only GET requests, and only for paths inside the
 indexed share. The login comes from DV_PROJECT_INDEX_USER and DV_PROJECT_INDEX_PASSWORD.
-`prod_version` reads DV_CERB_PROD_DIR (the folder analysts install Cerberus from). Settings are
-read at each call, so a `.env` file loaded after this module is imported still applies.
+`prod_version` reads DV_CERB_PROD_DIR (the folder analysts install Cerberus from). With
+DSS_CERB_PROD_CODE, `client_info` runs the Cerberus of that prod wheel (:func:`prod_code`), not
+the developer checkout the venv is installed from. Settings are read at each call, so a `.env`
+file loaded after this module is imported still applies.
 """
 
 import base64
+import importlib.metadata
 import json
 import ntpath
 import os
 import re
+import shutil
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 
 from dss.worker import run_in
@@ -61,6 +66,13 @@ def client_info(path: str) -> dict:
 		found['strings'] = strings.to_dict('records')
 		found['joints'] = record.to_dict('records')
 	return found
+
+
+def cerberus_found() -> dict:
+	"""Where this python's Cerberus comes from, and its version. Runs in the Cerberus venv."""
+	import cerberus
+
+	return {'file': cerberus.__file__, 'version': importlib.metadata.version('cerberus')}
 
 
 def workbook(path: str, sheet: str = '') -> dict:
@@ -333,6 +345,38 @@ def prod_version() -> str:
 	return max(found, key=_version_key)
 
 
+def prod_code() -> str:
+	"""The folder holding the prod wheel's Cerberus, unpacked on first use; empty when
+	DSS_CERB_PROD_CODE is not set.
+
+	Code run in the Cerberus venv imports Cerberus from here first (:func:`dss.worker.run_in`), so
+	it is the Cerberus analysts installed. The venv's own packages still serve its dependencies.
+	Each version gets its own folder, so a new prod wheel is unpacked once, next to the old one.
+	"""
+	root = os.environ.get('DSS_CERB_PROD_CODE', '')
+	if not root:
+		return ''
+	version = prod_version()
+	folder = Path(root, version)
+	if not (folder / 'cerberus' / '__init__.py').exists():
+		_unpack(_prod_dir() / f'cerberus-{version}-py3-none-any.whl', version, folder)
+	return str(folder)
+
+
+def _unpack(wheel: Path, version: str, folder: Path) -> None:
+	"""The Cerberus package and its metadata from *wheel*, into *folder*, which appears whole."""
+	partial = folder.with_name(folder.name + '.partial')
+	shutil.rmtree(partial, ignore_errors=True)
+	with zipfile.ZipFile(wheel) as archive:
+		names = []
+		for name in archive.namelist():
+			if name.startswith(('cerberus/', f'cerberus-{version}.dist-info/')):
+				names.append(name)
+		archive.extractall(partial, names)
+	shutil.rmtree(folder, ignore_errors=True)  # a folder left without its package
+	partial.rename(folder)
+
+
 def _index_url() -> str:
 	return _setting('DV_PROJECT_INDEX_URL', DEFAULT_INDEX_URL).rstrip('/')
 
@@ -425,13 +469,13 @@ def _no_answer(url: str, error: Exception) -> str:
 def register(server) -> None:
 	@server.tool()
 	def cerb_client_info(path: str) -> dict:
-		"""Well info, casing strings and joints of a `client_info.xlsm`, as Cerberus reads them.
-		*path* is a local file or one on the project share."""
+		"""Well info, casing strings and joints of a `client_info.xlsm`, as Cerberus reads them (the
+		prod wheel's Cerberus, when the bot has it). *path* is a local file or one on the share."""
 		if path.startswith('\\\\'):
 			local = local_copy(path)
 		else:
 			local = Path(path).resolve()
-		return run_in('cerb', __name__, 'client_info', path=str(local))
+		return run_in('cerb', __name__, 'client_info', first_path=prod_code(), path=str(local))
 
 	@server.tool()
 	def cerb_find_project(dvt: int) -> dict:

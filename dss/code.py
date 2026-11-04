@@ -2,22 +2,29 @@
 
 Every call reads one commit, never the working tree, so answers match the Cerberus analysts run
 and not whatever branch the checkout has open. The commit is DV_CERB_REF, else the
-`release: v<prod version>` commit on origin/master. Fetch the checkout to see new releases.
-History tools (`code_log_s`, `code_log`, `code_branches`, `code_contains`) also look at remote
-branches and the analyst's build, to find fixes that exist but are not released.
+`release: v<prod version>` commit on origin/master. History tools (`code_log_s`, `code_log`,
+`code_branches`, `code_contains`) also look at remote branches and the analyst's build, to find
+fixes that exist but are not released.
+
+The repo is the bot's own clone (DSS_CERB_GIT, made by `python -m dss cerberus`), which
+:func:`refresh` fetches before each triage, so new releases and branches are seen. Without it the
+tools read the developer's checkout (DSS_CERB_CWD), as fresh as its last fetch.
 """
 
 import os
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from dss import cerb
-from dss.worker import app_dir
+from dss.worker import app_dir, run_in
 
 MAX_LINES = 200
 MAX_COMMITS = 20
 GIT_TIMEOUT_S = 60
+CLONE_TIMEOUT_S = 900  # the repo is about 200 MB
+REPO_URL = 'https://github.com/darkvisiontech/DataDHPython.git'
 COMMIT = re.compile(r'[0-9a-f]{7,40}')
 VERSION = re.compile(r'[0-9]+(\.[0-9]+)*([+.][0-9A-Za-z.]+)?')  # 1.0.4, 1.0.4+uat20261031
 BRANCH = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]*')  # develop-v1.1-release, origin/DTN-3726-x
@@ -186,6 +193,89 @@ def contains(commit: str, version: str) -> str:
 	return f'Cerberus {version} ({build}) does not include {change}'
 
 
+def repo_dir() -> str:
+	"""The Cerberus repo the tools read: the bot's clone (DSS_CERB_GIT), else the developer's
+	checkout (DSS_CERB_CWD)."""
+	return os.environ.get('DSS_CERB_GIT') or app_dir('cerb')
+
+
+def clone() -> bool:
+	"""Make the bot's clone at DSS_CERB_GIT, with no working files; False when it is there."""
+	folder = Path(os.environ['DSS_CERB_GIT'])
+	if (folder / '.git').exists():
+		return False
+	folder.parent.mkdir(parents=True, exist_ok=True)
+	_run(
+		'clone',
+		'--no-checkout',
+		'--quiet',
+		REPO_URL,
+		str(folder),
+		cwd=str(folder.parent),
+		timeout=CLONE_TIMEOUT_S,
+	)
+	return True
+
+
+def fetch() -> None:
+	"""Bring the bot's clone up to date: every branch, with the deleted ones dropped. Only the
+	bot's own clone is fetched, never a developer's checkout."""
+	if not os.environ.get('DSS_CERB_GIT'):
+		raise RuntimeError("only the bot's own clone is fetched; set DSS_CERB_GIT")
+	done = _run('fetch', '--prune', '--quiet', 'origin')
+	if done.returncode:  # _run lets exit code 1 through; for a fetch it is a failure
+		raise RuntimeError(f'git fetch failed: {done.stderr.strip()[-500:]}')
+
+
+def refresh() -> list[str]:
+	"""Bring the bot's Cerberus copies up to date before a triage; what failed, as notes.
+
+	Fetches the clone when DSS_CERB_GIT is set, and unpacks a new prod wheel when
+	DSS_CERB_PROD_CODE is set (:func:`dss.cerb.prod_code`). A failure never stops the triage:
+	the tools read what is there.
+	"""
+	notes = []
+	if os.environ.get('DSS_CERB_GIT'):
+		try:
+			fetch()
+		except Exception as error:  # noqa: BLE001 - the last fetch still serves
+			notes.append(
+				f'Cerberus clone not updated, so the newest commits may be missing: {error}'
+			)
+	try:
+		cerb.prod_code()
+	except Exception as error:  # noqa: BLE001 - only cerb_client_info needs it
+		notes.append(f'prod Cerberus not unpacked, so cerb_client_info may fail: {error}')
+	return notes
+
+
+def setup() -> list[str]:
+	"""Make or update the bot's Cerberus copies (`python -m dss cerberus`), then say what each
+	tool reads, one line each."""
+	lines = []
+	if os.environ.get('DSS_CERB_GIT'):
+		if clone():
+			lines.append(f'cloned Cerberus into {os.environ["DSS_CERB_GIT"]}')
+	else:
+		lines.append('DSS_CERB_GIT is not set: the code tools read the developer checkout')
+	lines.extend(refresh())
+	version = cerb.prod_version()
+	release = _git('log', '-1', '--format=%h %ad | %s', '--date=short', prod_ref()).strip()
+	lines.append(f'code tools: {repo_dir()}, prod {version} = {release}')
+	fetched = Path(repo_dir(), '.git', 'FETCH_HEAD')
+	if fetched.exists():
+		when = datetime.fromtimestamp(fetched.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+		lines.append(f'last fetch: {when}')
+	unpacked = cerb.prod_code()
+	found = run_in('cerb', 'dss.cerb', 'cerberus_found', first_path=unpacked)
+	lines.append(f'cerb_client_info runs Cerberus {found["version"]} from {found["file"]}')
+	if not unpacked:
+		lines.append(f'warning: that is the checkout, not prod {version}; set DSS_CERB_PROD_CODE')
+	elif not found['file'].startswith(unpacked) or found['version'] != version:
+		lines.append(f'warning: that is not the prod {version} unpacked in {unpacked}')
+	return lines
+
+
 def files(ref: str) -> list[str]:
 	"""Every file path in the Cerberus repo at *ref*."""
 	return _git('ls-tree', '-r', '--name-only', ref).splitlines()
@@ -201,15 +291,18 @@ def _git(*args: str) -> str:
 	return _run(*args).stdout
 
 
-def _run(*args: str) -> subprocess.CompletedProcess:
-	"""One read-only git command in the Cerberus checkout; exit code 1 means no or false."""
+def _run(*args: str, cwd: str = '', timeout: float = GIT_TIMEOUT_S) -> subprocess.CompletedProcess:
+	"""One git command in the Cerberus repo (:func:`repo_dir`) or *cwd*. Only reads, apart from
+	the bot's own clone taking in what it fetches. Exit code 1 means no or false."""
+	if not cwd:
+		cwd = repo_dir()
 	done = subprocess.run(
 		['git', *args],
-		cwd=app_dir('cerb'),
+		cwd=cwd,
 		capture_output=True,
 		encoding='utf-8',
 		errors='replace',
-		timeout=GIT_TIMEOUT_S,
+		timeout=timeout,
 		check=False,
 	)
 	if done.returncode > 1:  # git grep exits with 1 when nothing matches

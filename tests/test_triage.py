@@ -11,11 +11,32 @@ from types import SimpleNamespace
 import pytest
 
 from dss import __main__ as cli
-from dss import runner, server, slack, triage
+from dss import code, runner, server, slack, triage
 
 
 def reply(text: str = '  **DSS-1234 · Plot is wrong**  ', **usage) -> dict:
 	return {'result': text, 'total_cost_usd': 0.25, 'usage': usage}
+
+
+def test_cerberus_is_refreshed_first_and_a_failure_is_told_to_claude(monkeypatch):
+	prompts, refreshed = [], []
+
+	def ask(prompt, trace=None):
+		prompts.append(prompt)
+		return reply()
+
+	def refresh():
+		refreshed.append(len(prompts))  # before Claude is asked
+		return ['Cerberus clone not updated, so the newest commits may be missing: offline']
+
+	monkeypatch.setattr(code, 'refresh', refresh)
+	triage.triage('DSS-1234', '2026-10-21_09-30-00', ask=ask)
+	assert refreshed == [0]
+	note = '\n\nCode could not read:\n- Cerberus clone not updated, so the newest commits may be'
+	assert note in prompts[0]
+	monkeypatch.setattr(code, 'refresh', list)  # nothing failed: no section
+	triage.triage('DSS-1234', '2026-10-21_09-30-00', ask=ask)
+	assert 'Code could not read' not in prompts[1]
 
 
 def test_prompt_carries_the_ticket_its_time_and_the_workflow_post():

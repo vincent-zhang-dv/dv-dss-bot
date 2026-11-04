@@ -20,7 +20,7 @@ from pathlib import Path
 
 import jsonschema  # type: ignore[import-untyped]
 
-from dss import cerb, jira, runner, triage
+from dss import cerb, code, jira, runner, triage
 from dss.worker import ROOT
 
 SCHEMA_ID = 'dss-triage/2'
@@ -68,6 +68,7 @@ def trial(key: str, posted: str, post: str = '', ask=None, thread_ts: str = '') 
 	if ask is None:
 		ask = functools.partial(runner.run_reply, system=system_prompt())
 	ticket, notes = build_ticket(key, posted)
+	notes += code.refresh()
 	asked = prompt(key, posted, ticket, notes, post, thread_ts)
 	trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
 	answer = triage.run(key, posted, asked, ask, trace=trace)
@@ -190,14 +191,11 @@ def prompt(
 ) -> str:
 	"""The trial's prompt: the bot's ticket and time, the `dss_ticket` block, the Slack thread
 	and the post."""
-	noted = ''
-	if notes:
-		noted = '\n\nCode could not read:\n- ' + '\n- '.join(notes)
 	return PROMPT.format(
 		key=key,
 		posted=posted,
 		ticket=json.dumps(ticket, indent=1),
-		notes=noted,
+		notes=triage.noted(notes),
 		thread=triage.slack_thread(thread_ts),
 		post=triage.workflow_post(post),
 	)

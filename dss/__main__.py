@@ -5,6 +5,7 @@
 	python -m dss trial DSS-1234 [--posted ...] [--post-file ...] [--thread ...]
 	                                                                 # the same as a checked record
 	python -m dss eval out/eval/golden.jsonl out/eval/<run> [--judge] # score saved answers
+	python -m dss cerberus                                           # set up the bot's Cerberus
 	python -m dss slack                                              # the bot (see dss.slack)
 	python -m dss mcp                                                # the tools over stdio (MCP)
 
@@ -58,6 +59,9 @@ def main() -> None:
 	evaluate.add_argument(
 		'--judge', action='store_true', help='also ask Haiku whether each answer found the outcome'
 	)
+	commands.add_parser(
+		'cerberus', help="set up or update the bot's own Cerberus copies and show what they hold"
+	)
 	commands.add_parser('slack', help='run the Slack bot')
 	commands.add_parser('mcp', help='serve the triage tools over stdio (MCP)')
 	args = parser.parse_args()
@@ -70,6 +74,15 @@ def main() -> None:
 		from dss.slack import main as bot
 
 		bot()
+	elif args.command == 'cerberus':
+		from dss import code
+
+		try:
+			lines = code.setup()
+		except Exception as error:  # one readable line instead of a traceback
+			raise SystemExit(f'cannot set up Cerberus: {error}') from error
+		for line in lines:
+			print(line)
 	elif args.command == 'eval':
 		from dss import eval as scoring
 

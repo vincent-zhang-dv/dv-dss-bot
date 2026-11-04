@@ -15,8 +15,11 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1].resolve()
 MARK = '@@dss@@'
 APPS = ('cerb',)  # Cerberus (DataDHPython)
+# argv: this repo (last on the import path), then any folders that go first, ahead even of the
+# working folder, which `python -c` puts first and which is the developer's checkout for Cerberus
 _CHILD = (
-	'import importlib, json, sys; sys.path.append(sys.argv[1]); call = json.load(sys.stdin); '
+	'import importlib, json, sys; sys.path.append(sys.argv[1]); sys.path[:0] = sys.argv[2:]; '
+	'call = json.load(sys.stdin); '
 	'function = getattr(importlib.import_module(call["module"]), call["func"]); '
 	'result = function(**call["kwargs"]); '
 	f'print("\\n{MARK}" + json.dumps(result, default=str), flush=True)'
@@ -28,10 +31,18 @@ def app_dir(app: str) -> str:
 	return _setting(app, 'CWD')
 
 
-def run_in(app: str, module: str, func: str, timeout: float = 900, **kwargs):
-	"""``module.func(**kwargs)`` run by *app*'s python; its JSON result."""
+def run_in(app: str, module: str, func: str, timeout: float = 900, first_path: str = '', **kwargs):
+	"""``module.func(**kwargs)`` run by *app*'s python; its JSON result.
+
+	*first_path*, when given, comes first on the child's import path, before the working folder
+	and the venv's own packages: the prod Cerberus (:func:`dss.cerb.prod_code`) instead of the
+	developer's checkout.
+	"""
+	command = [_setting(app, 'PY'), '-c', _CHILD, str(ROOT)]
+	if first_path:
+		command.append(first_path)
 	done = subprocess.run(
-		[_setting(app, 'PY'), '-c', _CHILD, str(ROOT)],
+		command,
 		input=json.dumps({'module': module, 'func': func, 'kwargs': kwargs}),
 		check=False,
 		capture_output=True,

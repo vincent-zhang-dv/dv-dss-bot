@@ -110,6 +110,19 @@ uv run python -m dss eval out/eval/golden.jsonl out/eval/2026-10-30_baseline --j
 
 The golden set has one JSON line per closed DSS ticket with its known resolution: the ticket and its time, the gate that should settle it, the outcome in one line, the evidence the run should read, phrases of known false leads, the Toolbox Name and Investigation Outcome, and where the answer comes from. `docs/golden.example.jsonl` is a made-up row to copy; the real rows hold client data and live in the git-ignored `out/eval/`. The run folder holds each ticket's answer as `<key>.md` and its trace as `<key>_<run time>.jsonl`. For each ticket, `eval` prints and saves (`scores.jsonl` in the run folder) whether the run read each evidence item, whether every Jira key, Confluence page and code `file:line` under Checked exists (looked up read-only, code at the commit the trace shows), any false lead found, whether Suggested labels name the Jira labels, and the length. `--judge` adds a locked-down Haiku (`claude -p` with no tools) saying whether the answer reached the outcome; each judgement is one more run under your login.
 
+### The bot's Cerberus
+
+The bot reads the Cerberus analysts run, not whatever branch a developer has checked out:
+
+- `code_*` read the bot's own clone (`DSS_CERB_GIT`) at the commit of the version in the prod folder (`release: v1.0.4`), never a working tree. Each triage first fetches every branch, so new releases, fix branches and pushed UAT builds are seen. A UAT build made only on a developer's PC is invisible until it is pushed.
+- `cerb_client_info` runs Cerberus's own client info reader from the prod wheel itself, unpacked into `DSS_CERB_PROD_CODE/<version>` the first time a version is seen. The Cerberus venv still provides the dependencies; only Cerberus's own code comes from the wheel.
+
+```powershell
+uv run python -m dss cerberus   # clone if missing, fetch, unpack the prod wheel, and say what each tool reads
+```
+
+A fetch or an unpack that fails is told to Claude as a note and doesn't stop the triage.
+
 To try the tools by hand in Claude Code:
 
 ```powershell
@@ -155,7 +168,9 @@ All of them can go in `.env`; see [.env.example](.env.example).
 
 | Variable | Used for |
 |---|---|
-| `DSS_CERB_PY`, `DSS_CERB_CWD` | The Cerberus venv's python and checkout: `cerb_client_info` and `code_*`. |
+| `DSS_CERB_PY`, `DSS_CERB_CWD` | The Cerberus venv's python and checkout: `cerb_client_info` and `cerb_read_sheet` run in it; `code_*` read the checkout when `DSS_CERB_GIT` is not set. |
+| `DSS_CERB_GIT` | The bot's own Cerberus clone, read by `code_*` and fetched before each triage. |
+| `DSS_CERB_PROD_CODE` | Where the prod wheel is unpacked, one folder per version, so `cerb_client_info` runs the Cerberus analysts installed. |
 | `DV_PROJECT_INDEX_USER`, `DV_PROJECT_INDEX_PASSWORD` | Login for the project index. Sent as HTTP Basic auth over plain HTTP. |
 | `DV_PROJECT_INDEX_URL`, `DV_PROJECT_INDEX_ROOT` | The index address and the share it indexes. Default `http://192.168.25.120` and `\\192.168.24.252\projects`. |
 | `DV_CERB_PROD_DIR` | The folder analysts install Cerberus from. Default `F:/DarkVision Dropbox/Analysis/CERBERUS/prod`. |
