@@ -1,5 +1,41 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-04 (night): todo titles, links and a shorter footer (Vincent, with Claude)
+- **Asked by Vincent:**
+  - number the todos 1., 2. (Slack letters a list inside a bullet a., b.);
+  - drop `dss-triage/3` and "not posted in the DSS thread · the DSS post" from the footer;
+  - link DSS and DTN tickets and GitHub commits, branches, PRs and releases, with no previews
+    except the DSS post's;
+  - replace Actions with "Bot Summary", "<analyst's Slack name> Todos", "Data Dev Todos" and
+    "Draft Reply", leaving out a todo list with nothing in it.
+- **Done** (branch `source-gaps`):
+  - Each todo list is a top-level numbered list under a bold title. The analyst's title is their
+    Slack display name as plain text: a mention could notify them of a draft. The Jira reporter
+    stands in without Slack (the `trial` CLI). No `'s`, as many names end in s.
+  - The headline's key links to the DSS post, which gives the snapshot below the post. The
+    footer is "Draft by Claude · tokens · cost · time".
+  - `code.web_links` finds commits (checked with `rev-parse`), remote branches (a branch's PR
+    when GitHub's pull refs, read with `ls-remote`, name its tip), "Cerberus x.y" releases (the
+    release commit's PR) and "PR #N" or "(#N)". `master` is not linked. A failed lookup becomes a
+    note, and the post goes out with Jira links only.
+  - The Draft Reply links only Jira tickets: analysts cannot open GitHub.
+  - `unfurl_links` stays at Slack's default. `False` also hid the DSS post's preview (tried in the
+    test channel); Jira and GitHub links show no preview at the default. `unfurl_media` is off.
+- **Checked:**
+  - 190 tests pass; ruff is clean apart from the old SIM108s, FURB167s and SIM110.
+  - DSS-1247 re-posted in the new format (16:15): the DSS snapshot shows, nothing else unfurls.
+  - The links of DSS-1247 found in 1.2 s; the DTN-3726 branch links to PR #1018 and
+    `develop-v1.1-release` to the 1.1 release PR #978.
+  - A test run of DSS-1237 (posted 2026-10-31; 58 turns, 181 s, $1.39) in the new format. Its
+    verdict leaned on a rerun log a developer put on the share after the ticket: the thread is
+    cut at the post, but the share and Jira are read as they are now.
+- **Live:** the bot restarted at 16:44 with the new format, still posting to
+  #data-dev-support-assist-test.
+- **Not done:**
+  - "As posted" trials, which DSS-1237 showed matter for replaying old tickets.
+  - A logon task.
+  - Annika's OK on the destination, then `DSS_SLACK_POST_CHANNEL` back to #data-dev-support-assist.
+
 ### 2026-11-04 (evening): a shorter post, agreed with Annika (Vincent, with Claude)
 - **Feedback from Vincent and Annika on the first posts:**
   - say each thing once;
@@ -35,7 +71,7 @@
   - The bot restarted with both changes; 187 tests pass.
 - **Not done:**
   - "As posted" trials: hide sources newer than the post, so old tickets don't find later fixes.
-  - The PR lookup from git pull refs, with links.
+  - The PR lookup from git pull refs, with links (done that night).
   - Merging `source-gaps`.
   - A logon task.
   - Annika's OK on the destination.

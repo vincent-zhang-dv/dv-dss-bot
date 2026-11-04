@@ -141,8 +141,9 @@ The bot runs on the `ddev-support-bot` app (Socket Mode, the `message.groups` an
 
 Each analysis is a checked record, as in trial mode, posted to `DSS_SLACK_POST_CHANNEL` (#data-dev-support-assist), or without that setting to `DSS_SLACK_REVIEWER`'s DM. The bot refuses #data-dev-support, or the watched channel, as a destination. New features are tried in #data-dev-support-assist-test.
 
-- **The post:** the headline (the verdict in a few words), Summary (the problem in one sentence), Actions for the analyst and for the developers (including the questions to ask and the checks that would settle what is not proved), and the Reply to the analyst last, in plain words with no code.
+- **The post:** the headline (the verdict in a few words, its ticket key linked to the DSS post), Bot Summary (the problem in one sentence), numbered todos for the analyst (headed by their Slack name) and for the data developers (including the questions to ask and the checks that would settle what is not proved), and the Draft Reply to the analyst last, in plain words with no code. A todo list with nothing in it is left out.
 - **Its thread:** why (the cause and where it lives), past issues, evidence with the tool call behind each fact, a DTN draft, confidence, and the Jira class and labels.
+- **Links:** DSS and DTN keys link to Jira; Cerberus commits, branches, PRs and releases link to GitHub, a branch or release to its PR when there is one (`code.web_links`, from the bot's clone and GitHub's pull refs). The Draft Reply links only Jira tickets, since analysts can't open GitHub. Slack previews only the DSS post below the post.
 
 The bot waits 15 seconds after the post before it triages (`TRIAGE_DELAY_S`). The workflow posts the analyst's "Screenshot of error" within a second, and waiting longer would let the developers' own first answers into the thread the triage reads. `slack_thread` downloads the screenshots, which needs the `files:read` scope.
 

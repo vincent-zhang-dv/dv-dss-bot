@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from dss import record, slack
+from dss import code, record, slack
 from dss.store import AnswerStore
 
 CHANNEL, DEVELOPERS = slack.CHANNEL, 'CDEVELOPERS'
@@ -78,6 +78,7 @@ def ticket_facts(monkeypatch):
 		return ticket, []
 
 	monkeypatch.setattr(record, 'build_ticket', build_ticket)
+	monkeypatch.setattr(code, 'web_links', lambda text: {})
 	for name in ('JIRA_URL', 'CONFLUENCE_URL', 'DSS_SLACK_POST_CHANNEL', 'DSS_SLACK_REVIEWER'):
 		monkeypatch.delenv(name, raising=False)
 
@@ -103,14 +104,18 @@ def test_a_new_ticket_is_triaged_as_a_record_and_posted_to_the_developers(tmp_pa
 	decision, proof = bot.client.sent('chat_postMessage')
 	assert decision['channel'] == proof['channel'] == DEVELOPERS  # nothing in the DSS channel
 	head = 'DSS-1234 · Input problem: casing ID differs from the tally · proved'
-	assert decision['text'] == head  # the first line, for notifications
+	assert decision['text'] == head  # the first line without its link, for notifications
 	(block,) = decision['blocks']
 	assert block['type'] == 'markdown'
-	assert block['text'].startswith(f'**{head}**\n**Summary:** ')
-	assert (
-		'_Triage (dss-triage/3) · draft by Claude for the data developers, not posted in the DSS '
-		'thread · [the DSS post](https://slack/p1) · DSS-1234 · 1,234 tokens · ≈ $0.02'
-	) in block['text']
+	# the key links to the DSS post, which Slack shows below; no other link shows a preview
+	assert block['text'].startswith(
+		'**[DSS-1234](https://slack/p1) · Input problem: casing ID differs from the tally · proved**'
+		'\n**Bot Summary:** '
+	)
+	# the analyst's Slack name, as text: a mention would notify them of the draft
+	assert '\n**uana Todos:**\n1. Set the ID' in block['text'] and '<@UANA' not in block['text']
+	assert '\n\n_Draft by Claude · 1,234 tokens · ≈ $0.02 · ' in block['text']
+	assert decision['unfurl_media'] is False and 'unfurl_links' not in decision
 	assert proof['thread_ts'] == '900.0' and proof['blocks'][0]['text'].startswith('**Why:** ')
 	saved = bot.store.get(CHANNEL, '1792523850.5')
 	assert saved['ticket'] == 'DSS-1234' and saved['tokens'] == 1234 and saved['problems'] == []
@@ -121,7 +126,9 @@ def test_a_record_that_fails_the_check_is_still_posted(tmp_path):
 	bot = desk(tmp_path, FakeClaude(answer='I could not finish the triage.'))
 	bot.on_message(ticket())
 	decision, proof = bot.client.sent('chat_postMessage')
-	assert decision['blocks'][0]['text'].startswith('**DSS-1234 · the trial answer failed the')
+	assert decision['blocks'][0]['text'].startswith(
+		'**[DSS-1234](https://slack/p1) · the trial answer failed the'
+	)
 	assert 'I could not finish the triage.' in proof['blocks'][0]['text']
 
 

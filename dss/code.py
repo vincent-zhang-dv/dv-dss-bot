@@ -25,10 +25,18 @@ MAX_COMMITS = 20
 GIT_TIMEOUT_S = 60
 CLONE_TIMEOUT_S = 900  # the repo is about 200 MB
 REPO_URL = 'https://github.com/darkvisiontech/DataDHPython.git'
+GITHUB_URL = REPO_URL.removesuffix('.git')
 COMMIT = re.compile(r'[0-9a-f]{7,40}')
 VERSION = re.compile(r'[0-9]+(\.[0-9]+)*([+.][0-9A-Za-z.]+)?')  # 1.0.4, 1.0.4+uat20261031
 BRANCH = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]*')  # develop-v1.1-release, origin/DTN-3726-x
 DATE = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}')
+# What web_links looks for in a post's text
+NAMED_COMMIT = re.compile(r'\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b')  # not 2026110
+NAMED_RELEASE = re.compile(r'\bCerberus v?([0-9]+(?:\.[0-9]+){1,3})(?![+\w]|\.\w)', re.IGNORECASE)
+NAMED_PULL = re.compile(r'(?:\bPR |\()#([0-9]+)\b')  # PR #1018, 'release: 1.1 (#978)'
+WORD = re.compile(r'[\w./-]+')
+BRANCH_MARK = re.compile(r'[-/._0-9]')  # in a branch name such as DTN-3726-fix, not in a word
+PULL_SUBJECT = re.compile(r'\(#([0-9]+)\)$')  # a squash merge's subject ends with its PR
 
 
 def prod_ref() -> str:
@@ -209,6 +217,87 @@ def contains(commit: str, version: str) -> str:
 	if included:
 		return f'Cerberus {version} ({build}) includes {change}'
 	return f'Cerberus {version} ({build}) does not include {change}'
+
+
+def web_links(text: str) -> dict[str, str]:
+	"""GitHub links for the commits, branches, PRs and releases *text* names, by the name as
+	written. Commits, branches and releases are linked only when the checkout has them.
+
+	A release (Cerberus 1.1) and a branch link to their PR when there is one, else to the commit
+	or the branch.
+	"""
+	links = {}
+	for name in set(NAMED_COMMIT.findall(text)):
+		found = _run('rev-parse', '--verify', '--quiet', f'{name}^{{commit}}').stdout.strip()
+		if found:
+			links[name] = f'{GITHUB_URL}/commit/{found}'
+	releases = {}
+	for match in NAMED_RELEASE.finditer(text):
+		releases[match[0]] = match[1]
+	for name, version in releases.items():
+		try:
+			ref = release_ref(version)
+		except LookupError:
+			continue  # not released yet, or not fetched
+		links[name] = _change_url(ref)
+	for number in NAMED_PULL.findall(text):
+		links[f'#{number}'] = f'{GITHUB_URL}/pull/{number}'
+	links.update(_branch_links(text))
+	return links
+
+
+def _change_url(ref: str) -> str:
+	"""The PR that *ref* merged, from its subject, else the commit."""
+	subject = _git('log', '-1', '--format=%s', ref).strip()
+	merged = PULL_SUBJECT.search(subject)
+	if merged:
+		return f'{GITHUB_URL}/pull/{merged[1]}'
+	return f'{GITHUB_URL}/commit/{_git("rev-parse", ref).strip()}'
+
+
+def _branch_links(text: str) -> dict[str, str]:
+	"""Links for the remote branches *text* names: the PR whose head is the branch's tip, else the
+	branch. A plain word counts only with origin/ before it. master is not linked: it is named in
+	most answers, and its page says nothing about them."""
+	tips = {}
+	refs = _git('for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/remotes/origin')
+	for line in refs.splitlines():
+		commit, name = line.split(' ', 1)
+		if name.startswith('origin/') and name not in ('origin/HEAD', 'origin/master'):
+			tips[name.removeprefix('origin/')] = commit
+	named = {}
+	for word in WORD.findall(text):
+		word = word.rstrip('./')
+		name = word.removeprefix('origin/')
+		if name == word and not BRANCH_MARK.search(word):
+			continue
+		if name in tips:
+			named[word] = name
+	if not named:
+		return {}
+	heads = _pull_heads()
+	links = {}
+	for word, name in named.items():
+		if tips[name] in heads:
+			links[word] = f'{GITHUB_URL}/pull/{heads[tips[name]]}'
+		else:
+			links[word] = f'{GITHUB_URL}/tree/{name}'
+	return links
+
+
+def _pull_heads() -> dict[str, int]:
+	"""The newest PR whose head is each commit, from GitHub's pull refs; empty when GitHub is out
+	of reach, and the branches link to themselves."""
+	try:
+		found = _git('ls-remote', 'origin', 'refs/pull/*/head')
+	except (RuntimeError, subprocess.TimeoutExpired):
+		return {}
+	heads: dict[str, int] = {}
+	for line in found.splitlines():
+		commit, ref = line.split('\t')
+		number = int(ref.split('/')[2])
+		heads[commit] = max(number, heads.get(commit, 0))
+	return heads
 
 
 def repo_dir() -> str:

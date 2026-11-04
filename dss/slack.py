@@ -31,6 +31,7 @@ from dss.worker import ROOT
 
 CHANNEL = 'C0793LJ1KDM'  # #data-dev-support
 TICKET = re.compile(r'created (DSS-\d+)')  # what the support-request workflows post
+CREATOR = re.compile(r'<@([A-Z0-9]+)(\|[^>]*)?>\s*created DSS-')  # the analyst who asked
 CATCH_UP_S = 24 * 3600  # on start, triage tickets posted this recently that were missed
 # The workflow posts the analyst's screenshot within a second of the ticket; waiting longer would
 # let the developers' own first answers into the thread the triage reads.
@@ -38,6 +39,8 @@ TRIAGE_DELAY_S = 15
 SEEN_S = 600  # an event seen this recently is a redelivery; Slack resends unacknowledged events
 MARKDOWN_CHARS = 12_000  # Slack's limit for the Markdown block of one message
 ENV = ('DSS_SLACK_BOT_TOKEN', 'DSS_SLACK_APP_TOKEN')
+LABEL = 'Draft by Claude'  # starts the post's footer, before what the triage cost
+MARKDOWN_LINK = re.compile(r'\[([^\]\n]*)\]\([^)\s]*\)')
 
 log = logging.getLogger(__name__)
 
@@ -118,14 +121,23 @@ class SlackDesk:
 			self.sleep(wait)
 		# Cerberus names telemetry logs by local start time; the triage compares against this
 		posted = datetime.fromtimestamp(float(ts)).strftime(TIME_FORMAT)
-		link = self._link(channel, ts)
-		label = (
-			f'Triage ({record.SCHEMA_ID}) · draft by Claude for the data developers, '
-			f'not posted in the DSS thread · [the DSS post]({link})'
-		)
+		link = self._link(channel, ts)  # the headline's key; Slack shows the DSS post below
 		post = self.names.plain(event['text'])
+		analyst = ''  # the Jira reporter stands in
+		creator = CREATOR.search(event['text'])
+		if creator and self.names.name(creator[1]) != creator[1]:
+			analyst = self.names.name(creator[1])  # a name, not a mention, which would notify them
 		try:
-			result = record.trial(key, posted, post, self.ask, thread_ts=ts, label=label)
+			result = record.trial(
+				key,
+				posted,
+				post,
+				self.ask,
+				thread_ts=ts,
+				label=LABEL,
+				ticket_link=link,
+				analyst=analyst,
+			)
 		except Exception as error:  # noqa: BLE001 - the developers must hear about every failure
 			self._post(f':warning: Could not triage [{key}]({link}): {explain(error)}')
 			return
@@ -169,13 +181,19 @@ class SlackDesk:
 			return f'https://slack.com/archives/{channel}/p{ts.replace(".", "")}'
 
 	def _post(self, text: str, thread_ts: str = '') -> str:
-		"""*text* (Markdown) to the destination, in the thread *thread_ts* when given; its ts."""
+		"""*text* (Markdown) to the destination, in the thread *thread_ts* when given; its ts.
+
+		Slack previews the link to the DSS post and no Jira or GitHub link. unfurl_links stays at
+		Slack's default: False hides the DSS post's preview too.
+		"""
 		if self.destination in (self.channel, CHANNEL):  # checked at start too; never post there
 			raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
+		first = MARKDOWN_LINK.sub(r'\1', text.splitlines()[0]).replace('**', '')
 		message = {
 			'channel': self.destination,
-			'text': text.splitlines()[0].replace('**', '')[:300],  # for notifications
+			'text': first[:300],  # for notifications
 			'blocks': [{'type': 'markdown', 'text': text[:MARKDOWN_CHARS]}],
+			'unfurl_media': False,
 		}
 		if thread_ts:
 			message['thread_ts'] = thread_ts

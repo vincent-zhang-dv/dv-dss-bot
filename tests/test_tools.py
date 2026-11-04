@@ -1044,6 +1044,30 @@ def test_the_bots_clone_is_read_and_fetched_before_each_triage(released, bot_clo
 	assert 'origin/DTN-9-work-new-fix' in code.branches('DTN-9')
 
 
+def test_web_links_name_only_what_the_clone_has(released, bot_clone):
+	fix = git(released, 'rev-parse', 'origin/master').strip()
+	tip = git(released, 'commit-tree', 'origin/master^{tree}', '-p', fix, '-m', 'Fix it').strip()
+	git(released, 'update-ref', 'refs/heads/DTN-9-work-fix', tip)
+	git(released, 'update-ref', 'refs/pull/980/head', tip)  # its PR, as GitHub keeps it
+	git(released, 'branch', 'DTN-8-work-old', fix)  # no PR
+	code.fetch()
+	text = (
+		f'Fix {fix[:9]} is on DTN-9-work-fix and DTN-8-work-old, not origin/master or master. '
+		'Cerberus 1.0.4 lacks it, Cerberus 1.1 is not out, PR #981 waits. 2026110 abc1234def.'
+	)
+	url = code.GITHUB_URL
+	assert code.web_links(text) == {
+		fix[:9]: f'{url}/commit/{fix}',
+		'DTN-9-work-fix': f'{url}/pull/980',
+		'DTN-8-work-old': f'{url}/tree/DTN-8-work-old',
+		'Cerberus 1.0.4': f'{url}/pull/975',  # 'release: v1.0.4 (#975)'
+		'#981': f'{url}/pull/981',
+	}
+	git(bot_clone, 'remote', 'set-url', 'origin', str(released.parent / 'gone'))
+	links = code.web_links('DTN-9-work-fix')  # no pull refs: the branch serves
+	assert links == {'DTN-9-work-fix': f'{url}/tree/DTN-9-work-fix'}
+
+
 def test_a_developer_checkout_is_never_fetched(released, monkeypatch):
 	monkeypatch.delenv('DSS_CERB_GIT', raising=False)
 	assert code.refresh() == []  # no clone of its own: nothing to fetch
