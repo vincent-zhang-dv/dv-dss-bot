@@ -1,5 +1,50 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-04 (evening): the sources the bot could not see (Vincent, with Claude)
+- **Why:** a live probe of every source (Jira, Confluence, project index, telemetry, git, Slack)
+  found all of them up. What the tools could not see:
+  - Jira comments and fix versions;
+  - PDF and Word files;
+  - images on the share;
+  - files over 50 MB;
+  - data files.
+- **Done** (branch `source-gaps`, one commit each):
+  1. `jira_get_issue` adds:
+     - resolution;
+     - fix versions, released or not, with dates;
+     - the newest 10 comments;
+     - attachment names.
+
+     `jira_search` adds resolution and fix versions.
+  2. `cerb_read_document`: the text of `.pdf` and `.docx`, page by page (pypdf and python-docx
+     in the Cerberus venv).
+  3. `cerb_read_image`: images on the share, and the pictures embedded in a PDF page. Scaled to
+     1568 px, logos left out.
+  4. Copies stream to disk up to `DV_PROJECT_INDEX_MAX_MB` (default 1 GB; Vincent to confirm),
+     are reused for 15 minutes, and are deleted after a day.
+  5. `cerb_read_table` (Parquet; SQLite read-only) and `cerb_read_caliper` (`.dvcaliper` and
+     caliper `.npy`, by the prod Cerberus's reader).
+     - A `.dvcaliper` window is read by HTTP ranges, so a 4 GB file is never copied: header,
+       binary search on depth, then only the window.
+     - Pickles and `Thumbs.db` are refused.
+- **Checked:**
+  - 177 tests pass. Ruff is clean apart from the old SIM108.
+  - Live:
+    - DTN-3726 shows its fix version (CERBERUS v1.1, not released) and the developer's comment.
+    - The 2D log intro pages PDF: its text, and page 2's overview plot as an image, with the
+      repeated "0.2".
+    - A 496 MB Word file and a 282 MB PDF (943 pages) copied in 2-4 s and reused.
+    - A Parquet file of 1,451 rows x 155 columns.
+    - DSS-1241's 4 GB wall-loss caliper: summary in 2 s, and the window at 15026 ft in 3 s.
+      It shows the breach (0.007722 m = 0.304 in) at 15026.25 ft, inside a ring of shallower
+      loss around most of the pipe.
+  - All 14 `.db` files in three projects were `Thumbs.db`.
+- **Not done:**
+  - Not pushed.
+  - Open PR titles (needs a GitHub token), other Slack channels (invites), UAT builds pushed.
+  - Word files' embedded pictures.
+  - Jira attachment downloads (the download redirects to another host with the login).
+
 ### 2026-11-04 (afternoon): Slack thread live, and the bot's own Cerberus (Vincent, with Claude)
 - **Merged:** PR #8 (`trial-followups`: threads and screenshots, workbooks, past issues first).
 - **Slack:**
