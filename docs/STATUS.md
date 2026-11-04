@@ -1,5 +1,37 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-04 (evening): a shorter post, agreed with Annika (Vincent, with Claude)
+- **Feedback from Vincent and Annika on the first posts:**
+  - say each thing once;
+  - give analysts the answer, not the internals;
+  - "Reported" and "Request" were the same;
+  - name exact data, not "here";
+  - don't state what the reader can tell already;
+  - combine the actions and the notes (Annika).
+- **Done** (branch `source-gaps`; record `dss-triage/3`):
+  - The post: a headline with the verdict in a few words, then Summary.
+  - Then Actions for the analyst and for the developers. Questions become "Answer" actions;
+    what is not proved becomes "Confirm" checks.
+  - The Reply comes last: at most 3 sentences, solution first, exact facts. No code, functions
+    or line numbers, and no release unless a DTN fix version names it. The check refuses `.py`,
+    `cerberus/` paths and line numbers in it.
+  - The thread: why, past issues, evidence, DTN draft, confidence, class.
+- **Also fixed:** DSS-1242's first trial lost its answer to an `AttributeError` in the trace
+  check, on a malformed `triage` block. That check now tolerates it, and any error while checking
+  or rendering becomes a listed problem, with the traceback and the answer saved.
+- **Checked:**
+  - 185 tests pass; ruff is clean; the system prompt is 17,786 characters.
+  - The DSS-1242 trial (`dss-triage/2`, likely, $0.40) was laid out by hand in the new format to
+    agree it.
+- **Live:** the bot restarted, posting to #data-dev-support-assist-test (`DSS_SLACK_POST_CHANNEL`
+  set to the test channel in `.env`) until the format is checked on new tickets.
+- **Not done:**
+  - "As posted" trials: hide sources newer than the post, so old tickets don't find later fixes.
+  - The PR lookup from git pull refs, with links.
+  - Merging `source-gaps`.
+  - A logon task.
+  - Annika's OK on the destination.
+
 ### 2026-11-04 (late afternoon): the bot goes live in the developers' channel (Vincent, with Claude)
 - **Decided by Vincent:**
   1. Triage 15 s after the post (the workflow's screenshot lands within a second).
