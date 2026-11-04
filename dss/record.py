@@ -52,16 +52,21 @@ MARKDOWN_MARK = re.compile(r'([\\*_~<>\[\]])')  # shown as typed once escaped: \
 MAX_PROBLEMS = 10  # schema problems listed in the DM
 PROBLEM_CHARS = 300
 RAW_CHARS = 3000  # of a refused answer, in the thread
+TRIAL_LABEL = f'Trial ({SCHEMA_ID}) · draft by Claude, for you only'
+LIST_ITEM = re.compile(r'(\d+\.|-) ')
 
 
-def trial(key: str, posted: str, post: str = '', ask=None, thread_ts: str = '') -> dict:
+def trial(
+	key: str, posted: str, post: str = '', ask=None, thread_ts: str = '', label: str = TRIAL_LABEL
+) -> dict:
 	"""One trial triage of *key*, checked, rendered and saved in TRIAL_DIR.
 
 	*posted*, *post* and *thread_ts* are as for :func:`dss.triage.triage`. *ask* defaults to
-	:func:`dss.runner.run_reply` with the record system prompt (faked in tests). Returns what was
-	saved: `ticket`, `notes` (what code could not read), `record` (None when the answer had no
-	JSON), `problems` (empty when the record passed the check), `dm` and `thread` (Markdown),
-	Claude's raw `text`, its cost, and `file`.
+	:func:`dss.runner.run_reply` with the record system prompt (faked in tests). *label* starts
+	the DM's footer; the Slack bot gives its own. Returns what was saved: `ticket`, `notes` (what
+	code could not read), `record` (None when the answer had no JSON), `problems` (empty when the
+	record passed the check), `dm` and `thread` (Markdown), Claude's raw `text`, its cost, and
+	`file`.
 	"""
 	if not jira.ISSUE_KEY.fullmatch(key):
 		raise ValueError(f'{key!r} is not an issue key like DSS-1234')
@@ -81,7 +86,7 @@ def trial(key: str, posted: str, post: str = '', ask=None, thread_ts: str = '') 
 		dm, thread = render(record, notes)
 	usage = f'{answer["tokens"]:,} tokens · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
 	# the blank line keeps the footer out of a quoted reply above it
-	dm += f'\n\n_Trial ({SCHEMA_ID}) · draft by Claude, for you only · {_link(key)} · {usage}_'
+	dm += f'\n\n_{label} · {_link(key)} · {usage}_'
 	TRIAL_DIR.mkdir(parents=True, exist_ok=True)
 	path = TRIAL_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.json'
 	result = {
@@ -331,7 +336,7 @@ def _decision(record: dict) -> str:
 			lines.append(f'**Escalate ({kind}), draft to send:**\n{_quote(escalate["draft"])}\n')
 	if answer.get('reply'):
 		lines.append(f'**Suggested reply:**\n{_quote(answer["reply"])}')
-	return '\n'.join(lines)
+	return _joined(lines)
 
 
 def _proof(record: dict, notes: list[str]) -> str:
@@ -372,7 +377,18 @@ def _proof(record: dict, notes: list[str]) -> str:
 		lines.append(f'**Labels to set:** {labels}')
 	lines.append(f'**Facts read by code:** {_facts(ticket)}')
 	_bullets(lines, 'Code could not read', notes)
-	return '\n'.join(lines)
+	return _joined(lines)
+
+
+def _joined(lines: list[str]) -> str:
+	"""*lines* as Markdown, with a blank line between a list and the heading after it: without
+	one, the heading joins the last item and the next list goes on with its numbers."""
+	text = []
+	for index, line in enumerate(lines):
+		if index and line.startswith('**') and LIST_ITEM.match(lines[index - 1]):
+			text.append('')
+		text.append(line)
+	return '\n'.join(text)
 
 
 def _bullets(lines: list[str], title: str, items: list[str], escape: bool = True) -> None:

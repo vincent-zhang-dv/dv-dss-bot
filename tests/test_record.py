@@ -267,6 +267,8 @@ def test_the_dm_decides_and_the_thread_proves_without_repeats(sources):
 	assert '**Request:** fix · in Defect Summary, joint 57 · expected 21% wall loss' in dm
 	assert f'> {answer["reply"]}' in dm
 	assert thread.startswith('**Past issues**\n1. DSS-1100 (explained, applies: partly): Wall')
+	# a blank line ends each list, or the next heading joins its last item and numbers run on
+	assert 'on its own\n\n**Evidence**\n1. Casing Record row 3' in thread
 	assert '- reported: 19.97% (Defect Summary, joint 57)' in thread
 	assert '- first difference: casing ID' in thread
 	assert '**Labels to set:** Outcome User Error' in thread  # the Toolbox Name is already set
