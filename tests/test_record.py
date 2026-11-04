@@ -282,11 +282,11 @@ def test_the_post_decides_and_the_thread_proves_without_repeats(sources):
 	assert dm.startswith(
 		'**DSS-1234 · Input problem: casing ID differs from the tally · proved**\n'
 		f'**Summary:** {answer["what"]}\n'
-		'**Actions**\n'
-		'**Analyst:** Set the ID in DVT1234\\_client\\_info.xlsm, Casing Record row 3, to 4.55 in '
+		'**Actions:**\n'
+		'- **Analyst:** Set the ID in DVT1234\\_client\\_info.xlsm, Casing Record row 3, to 4.55 in '
 		'and rerun the Defect Summary\n'
-		'**Developers:** none\n'
-		f'**Reply**\n> {answer["reply"]}\n\n_Trial'  # the reply comes last, then the footer
+		'- **Developers:** none\n'
+		f'\n**Reply**\n> {answer["reply"]}\n\n_Trial'  # the reply comes last, then the footer
 	)
 	for text in (answer['what'], answer['reply']):
 		assert dm.count(text) == 1 and text not in thread
@@ -318,12 +318,19 @@ def test_questions_and_what_is_not_proved_become_actions(sources):
 	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
 	assert result['problems'] == []
 	dm, thread = result['dm'], result['thread']
-	assert f'**Analyst:** Answer: {QUESTION["ask"]}\n' in dm
+	assert f'- **Analyst:** Answer: {QUESTION["ask"]}\n' in dm
 	assert (
-		f'**Developers:**\n1. Raise a DTN ticket (draft in the thread)\n2. Confirm: {check}' in dm
-	)
+		'- **Developers:**\n  1. Raise a DTN ticket (draft in the thread)\n'
+		f'  2. Confirm: {check}\n\n**Reply**'  # a blank line ends the nested list
+	) in dm
 	assert check not in thread  # said once, as an action
 	assert f'- {QUESTION["ask"]}: settles {QUESTION["settles"]}' in thread
+
+
+def test_a_check_that_starts_with_confirm_says_it_once(sources):
+	text = answer_text(status='likely', not_proved=['Confirm the wheel was built from ab952f341'])
+	dm = record.trial('DSS-1234', POSTED, ask=claude(text, []))['dm']
+	assert '- **Developers:** Confirm: the wheel was built from ab952f341\n' in dm
 
 
 def test_claude_text_shows_as_written(sources):
@@ -366,7 +373,7 @@ def test_empty_fields_are_left_out(sources):
 	assert result['problems'] == []
 	dm, thread = result['dm'], result['thread']
 	assert dm.startswith('**DSS-1234 · One question for the analyst · needs info**\n')
-	assert f'**Analyst:** Answer: {QUESTION["ask"]}\n**Developers:** none\n\n_Trial' in dm
+	assert f'- **Analyst:** Answer: {QUESTION["ask"]}\n- **Developers:** none\n\n_Trial' in dm
 	assert 'Reply' not in dm
 	for label in ('Why:', 'Evidence', 'Details', 'DTN'):
 		assert label not in thread

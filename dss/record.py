@@ -54,7 +54,7 @@ MAX_PROBLEMS = 10  # schema problems listed in the DM
 PROBLEM_CHARS = 300
 RAW_CHARS = 3000  # of a refused answer, in the thread
 TRIAL_LABEL = f'Trial ({SCHEMA_ID}) · draft by Claude, for you only'
-LIST_ITEM = re.compile(r'(\d+\.|-) ')
+LIST_ITEM = re.compile(r'\s*(\d+\.|-) ')  # a list item, nested ones too
 
 
 def trial(
@@ -323,12 +323,14 @@ def _decision(record: dict) -> str:
 	"""
 	ticket, answer = record['dss_ticket'], record['triage']
 	head = f'**{ticket["key"]} · {_text(answer["headline"])} · {_words(answer["status"])}**'
-	lines = [head, f'**Summary:** {_text(answer["what"])}', '**Actions**']
+	lines = [head, f'**Summary:** {_text(answer["what"])}', '**Actions:**']
 	analyst = list(answer['actions']['analyst'])
 	for question in answer.get('questions') or []:
 		analyst.append(f'Answer: {question["ask"]}')
 	developers = list(answer['actions']['developers'])
 	for check in answer.get('not_proved') or []:
+		if check.lower().startswith('confirm '):  # "Confirm: Confirm the ..." says it twice
+			check = check[len('confirm ') :]
 		developers.append(f'Confirm: {check}')
 	_actions(lines, 'Analyst', analyst)
 	_actions(lines, 'Developers', developers)
@@ -338,15 +340,15 @@ def _decision(record: dict) -> str:
 
 
 def _actions(lines: list[str], who: str, items: list[str]) -> None:
-	"""*who*'s actions: none, one on the same line, or a numbered list."""
+	"""*who*'s bullet under Actions: none, one action after it, or a numbered list inside it."""
 	if not items:
-		lines.append(f'**{who}:** none')
+		lines.append(f'- **{who}:** none')
 	elif len(items) == 1:
-		lines.append(f'**{who}:** {_text(items[0])}')
+		lines.append(f'- **{who}:** {_text(items[0])}')
 	else:
-		lines.append(f'**{who}:**')
+		lines.append(f'- **{who}:**')
 		for number, item in enumerate(items, 1):
-			lines.append(f'{number}. {_text(item)}')
+			lines.append(f'  {number}. {_text(item)}')
 
 
 def _proof(record: dict, notes: list[str]) -> str:

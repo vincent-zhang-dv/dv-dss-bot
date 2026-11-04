@@ -887,6 +887,19 @@ def test_code_reads_another_commit_when_told_and_says_what_is_missing(released, 
 		code.read('cerberus/plots.py')
 
 
+def test_a_wheel_with_a_build_number_finds_its_release_commit(released):
+	git(released, 'commit', '-q', '--allow-empty', '-m', 'release: 1.1 (#978)')
+	git(released, 'update-ref', 'refs/remotes/origin/master', 'HEAD')
+	release = git(released, 'rev-parse', '--short', 'HEAD').strip()
+	(released.parent / 'cerberus-1.1.0.68-py3-none-any.whl').touch()  # 1.1, build 68
+	assert code.prod_ref() == release
+	assert code._release_names('1.1.0.68') == ['1.1.0.68', '1.1.0', '1.1']
+	assert code._release_names('1.1.1.70') == ['1.1.1.70', '1.1.1']  # a real patch stays
+	(released.parent / 'cerberus-1.1.1.70-py3-none-any.whl').touch()  # not released in git yet
+	with pytest.raises(LookupError, match=r'no "release: v1\.1\.1\.70" \(or 1\.1\.1\) commit'):
+		code.prod_ref()
+
+
 def test_code_history_search_skips_text_filters_on_binary_files(released):
 	# A text filter for .docx that fails, as Git for Windows' astextplain did on Office lock files
 	(released / '.gitattributes').write_bytes(b'*.docx diff=broken\n')

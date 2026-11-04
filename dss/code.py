@@ -39,15 +39,33 @@ def prod_ref() -> str:
 
 
 def release_ref(version: str) -> str:
-	"""The `release: v<version>` commit on origin/master."""
-	subject = f'--grep=^release: v?{re.escape(version)} '
-	found = _git('log', 'origin/master', '-1', '--format=%h', '-E', subject).strip()
-	if not found:
-		raise LookupError(
-			f'no "release: v{version}" commit on origin/master; fetch the Cerberus checkout '
-			'or set DV_CERB_REF'
-		)
-	return found
+	"""The `release: v<version>` commit on origin/master, the version as the wheel names it or as
+	the release commit does (:func:`_release_names`)."""
+	names = _release_names(version)
+	for name in names:
+		subject = f'--grep=^release: v?{re.escape(name)} '
+		found = _git('log', 'origin/master', '-1', '--format=%h', '-E', subject).strip()
+		if found:
+			return found
+	looked_for = f'"release: v{version}"'
+	if len(names) > 1:
+		looked_for += f' (or {", ".join(names[1:])})'
+	raise LookupError(
+		f'no {looked_for} commit on origin/master; fetch the Cerberus checkout or set DV_CERB_REF'
+	)
+
+
+def _release_names(version: str) -> list[str]:
+	"""How a release commit may name *version*: as the wheel does (1.1.0.68), without the build
+	number (1.1.0), and without a zero patch (1.1). A real patch (1.1.1) is never dropped."""
+	parts = version.split('.')
+	names = [version]
+	if len(parts) == 4:
+		parts = parts[:3]
+		names.append('.'.join(parts))
+	if len(parts) == 3 and parts[2] == '0':
+		names.append('.'.join(parts[:2]))
+	return names
 
 
 def version_ref(version: str) -> str:
