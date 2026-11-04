@@ -25,6 +25,14 @@
     agree it.
 - **Live:** the bot restarted, posting to #data-dev-support-assist-test (`DSS_SLACK_POST_CHANNEL`
   set to the test channel in `.env`) until the format is checked on new tickets.
+  - Its first live ticket, DSS-1247 (44 s, $0.23): known issue DTN-3726, fixed in 1.1.
+  - The run exposed a gap: Cerberus 1.1 went to prod today as `cerberus-1.1.0.68`, but the
+    release commit is `release: 1.1 (#978)`, so `prod_ref` found nothing.
+    - The lookup now also tries the version without the build number and without a zero patch.
+    - All 444 files of the 1.1.0.68 wheel match `ab952f341`.
+  - Actions now render as bullets (Analyst, Developers), with a numbered list inside. Slack
+    letters the inner list a., b.
+  - The bot restarted with both changes; 187 tests pass.
 - **Not done:**
   - "As posted" trials: hide sources newer than the post, so old tickets don't find later fixes.
   - The PR lookup from git pull refs, with links.
