@@ -1,5 +1,36 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-04 (late afternoon): the bot goes live in the developers' channel (Vincent, with Claude)
+- **Decided by Vincent:**
+  1. Triage 15 s after the post (the workflow's screenshot lands within a second).
+  2. The live bot uses the checked record.
+  3. Analyses go to #data-dev-support-assist; new features and debugging go to
+     #data-dev-support-assist-test; nothing goes to #data-dev-support until the replies are
+     consistently good.
+- **Done** (branch `source-gaps`):
+  - `SlackDesk` runs `record.trial` and posts the decision to `DSS_SLACK_POST_CHANNEL`, with the
+    proof in its thread, as Markdown blocks. Without that setting it posts to the reviewer's DM.
+  - It refuses #data-dev-support, or the watched channel, as a destination, at start and on every
+    post.
+  - A blank line now ends each list in the DM and thread, so "Evidence" numbers from 1 (Slack had
+    run on from "Past issues").
+  - CLAUDE.md, README and `.env.example` updated.
+- **Live:**
+  - `ddev-support-bot` has Socket Mode, an app-level token and the message events (set up by
+    Vincent as a collaborator).
+  - The bot started on Vincent's PC about 14:00 and connected. DSS-1245 and DSS-1246 were marked
+    done first, so it starts with the next new ticket.
+  - It runs as a background task of a Claude Code session, so it stops when that session ends,
+    until a logon task runs it.
+- **Checked:**
+  - 176 tests pass; ruff is clean on the changed files.
+  - One Markdown-block post to the test channel rendered bold, code and escapes correctly.
+- **Not done:**
+  - Merge `source-gaps`.
+  - A Windows logon task, so the bot survives the session.
+  - Annika's OK on the destination change (CLAUDE.md says both owners).
+  - The first live ticket end to end.
+
 ### 2026-11-04 (evening): the sources the bot could not see (Vincent, with Claude)
 - **Why:** a live probe of every source (Jira, Confluence, project index, telemetry, git, Slack)
   found all of them up. What the tools could not see:
