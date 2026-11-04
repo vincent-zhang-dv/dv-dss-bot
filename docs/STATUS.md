@@ -1,5 +1,45 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-04 (afternoon): Slack thread live, and the bot's own Cerberus (Vincent, with Claude)
+- **Merged:** PR #8 (`trial-followups`: threads and screenshots, workbooks, past issues first).
+- **Slack:**
+  - `.env` here has the bot token of Annika's `ddev-support-bot` app, and no app token, so no
+    live bot can start on this PC.
+  - The bot was invited to #data-dev-support. These reads worked:
+    - the channel's history;
+    - the threads of DSS-1240 to DSS-1245, with 10 screenshots downloaded (one checked by eye).
+  - One test post to #data-dev-support-assist-test, Vincent's test channel, at his request.
+    Nothing was written to #data-dev-support.
+  - The app lacks `channels:read` (the bot can't list its channels; not needed).
+- **The bot's Cerberus** (branch `cerberus-prod-copy`, at Vincent's request):
+  - `DSS_CERB_GIT`: the bot's own clone. `code_*` read it, and each triage fetches every branch
+    first (`code.refresh`). Unset, they read the developer checkout as before.
+  - `DSS_CERB_PROD_CODE`: the prod wheel's Cerberus is unpacked there, one folder per version.
+    `cerb_client_info` imports it first, so it runs the Cerberus analysts installed, not the
+    checkout's branch. The venv still provides the dependencies; installing the wheel's 62
+    (GPU, Qt, two internal packages) was not worth it.
+  - A failed fetch or unpack is told to Claude as a note and doesn't stop the triage.
+  - `python -m dss cerberus` sets both up and says what each tool reads.
+  - Found while checking it live: `python -c` puts its working folder (the checkout) ahead of
+    `PYTHONPATH`. The worker now puts the prod folder first itself, and the tests use a decoy
+    checkout.
+  - `.gitignore` now also covers `.env.*` and `*.swp`: an editor swap file of `.env` had
+    appeared, holding the tokens.
+- **Checked:**
+  - 163 tests pass; ruff clean on the changed files apart from the two old SIM108s.
+  - Live on this PC (`F:\git\dss-bot-cerberus`):
+    - the clone and a fetch;
+    - prod 1.0.4 = `ff8a0091e`;
+    - `cerb_client_info` loads from `prod\1.0.4\cerberus`;
+    - two real projects' client info (19 and 292 joints) parse identically with the prod copy
+      and the 1.1.0 checkout.
+- **Not done:**
+  - Not committed.
+  - The live listener: an app token, Socket Mode and `message.groups` events on Annika's app,
+    agreed with her so only one listener runs.
+  - UAT builds must be pushed for the bot's clone to see them.
+  - Still open: the triage delay (5 min vs about 15 s), and the first trial with `--thread`.
+
 ### 2026-11-04: trial on DSS-1243 and a demo of visible investigations (Vincent, with Claude)
 - **Checked:**
   - A trial on DSS-1243 (two "0.2 in" labels on the eccentricity scale), from the post only. It
