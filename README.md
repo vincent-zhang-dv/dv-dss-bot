@@ -29,7 +29,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | Tool | Reads |
 |---|---|
 | `slack_thread` | The ticket's Slack thread: the workflow's post and every reply, oldest first, with screenshots as images and text files as text. Only threads of "created DSS-…" posts in the watched channel. |
-| `jira_get_issue`, `jira_search` | A ticket's triage fields, and similar tickets. |
+| `jira_get_issue`, `jira_search` | A ticket's triage fields, with its resolution, fix versions (released or not), newest comments and attachment names; and similar tickets with their resolution and fix versions. |
 | `cerb_find_project`, `cerb_list`, `cerb_read_text` | The DVT's project folder, a folder's entries, and a text file in 400-line pages, through the project index. |
 | `cerb_last_session` | The reporter's newest Cerberus telemetry log before the ticket: version, failed script runs, last saved config. |
 | `cerb_client_info` | A `client_info.xlsm` as Cerberus reads it. |

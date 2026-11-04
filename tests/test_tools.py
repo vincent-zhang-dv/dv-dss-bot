@@ -37,6 +37,31 @@ def test_jira_issue_keeps_only_plain_triage_fields():
 			],
 			'customfield_10824': {'value': 'CERB-PE', 'id': '9'},
 			'customfield_13664': 1234.0,
+			'resolution': {'name': 'Done', 'id': '1'},
+			'fixVersions': [
+				{'name': 'CERBERUS v1.1', 'released': False, 'releaseDate': '2026-11-03'},
+				{'name': 'CERBERUS v1.0.4', 'released': True, 'releaseDate': '2026-10-09'},
+				{'name': 'Backlog', 'released': False},
+			],
+			'comment': {
+				'total': 12,
+				'comments': [
+					{
+						'author': {'displayName': f'Dev {number}'},
+						'created': f'2026-10-{number + 10}T11:04:58.443-0700',
+						'body': f'Comment {number}',
+					}
+					for number in range(1, 13)
+				],
+			},
+			'attachment': [
+				{
+					'filename': 'plot.png',
+					'mimeType': 'image/png',
+					'size': 2048,
+					'created': '2026-10-27T15:43:15.061-0700',
+				}
+			],
 		},
 	}
 	found = jira.compact(issue, jira.TICKET_FIELDS)
@@ -45,7 +70,23 @@ def test_jira_issue_keeps_only_plain_triage_fields():
 	assert found['links'] == ['causes DTN-2: Fix it']
 	assert len(found['description']) == jira.DESCRIPTION_CHARS
 	assert found['outcome'] is None
+	assert found['resolution'] == 'Done'
+	assert found['fix_versions'] == [
+		'CERBERUS v1.1 (not released, due 2026-11-03)',
+		'CERBERUS v1.0.4 (released 2026-10-09)',
+		'Backlog (not released)',
+	]
+	assert found['comments'][0] == '(2 older comments left out)'  # the newest 10 are kept
+	assert found['comments'][1] == '2026-10-13 Dev 3: Comment 3'
+	assert found['comments'][-1] == '2026-10-22 Dev 12: Comment 12'
+	assert found['attachments'] == ['plot.png (image/png, 2 KB, 2026-10-27)']
 	assert jira.plain([{'value': 'CERB-WI'}, {'name': 'Done'}, 7]) == ['CERB-WI', 'Done', 7]
+
+
+def test_long_jira_comments_are_cut():
+	issue = {'key': 'DTN-1', 'fields': {'comment': {'comments': [{'body': 'x' * 5000}]}}}
+	(comment,) = jira.compact(issue, jira.TICKET_FIELDS)['comments']
+	assert comment == ' unknown: ' + 'x' * jira.COMMENT_CHARS
 
 
 def test_jira_rejects_a_key_before_connecting():
@@ -85,6 +126,8 @@ def test_jira_asks_only_for_the_triage_fields(jira_site):
 			'key': 'DSS-7',
 			'summary': 'Old plot',
 			'status': None,
+			'resolution': None,
+			'fix_versions': [],
 			'created': '2026-01-02',
 			'toolbox': None,
 			'outcome': None,
