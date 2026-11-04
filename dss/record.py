@@ -15,6 +15,7 @@ import json
 import ntpath
 import re
 import string
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -77,13 +78,19 @@ def trial(
 	asked = prompt(key, posted, ticket, notes, post, thread_ts)
 	trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
 	answer = triage.run(key, posted, asked, ask, trace=trace)
-	record, problems = assemble(ticket, answer['text'])
-	if record is not None:
-		problems += order_problems(record, traced_tools(trace))
-	if record is None or problems:
+	record, crash = None, ''
+	try:
+		record, problems = assemble(ticket, answer['text'])
+		if record is not None:
+			problems += order_problems(record, traced_tools(trace))
+		if record is None or problems:
+			dm, thread = render_refused(key, problems, answer['text'])
+		else:
+			dm, thread = render(record, notes)
+	except Exception as error:  # noqa: BLE001 - a paid answer is never lost to a bug in this code
+		crash = traceback.format_exc()
+		problems = [f'the answer could not be checked or rendered: {type(error).__name__}: {error}']
 		dm, thread = render_refused(key, problems, answer['text'])
-	else:
-		dm, thread = render(record, notes)
 	usage = f'{answer["tokens"]:,} tokens · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
 	# the blank line keeps the footer out of a quoted reply above it
 	dm += f'\n\n_{label} · {_link(key)} · {usage}_'
@@ -104,6 +111,8 @@ def trial(
 		'trace': str(trace),
 		'file': str(path),
 	}
+	if crash:
+		result['crash'] = crash
 	path.write_text(json.dumps(result, indent=1), encoding='utf-8')
 	return result
 
@@ -272,8 +281,11 @@ def order_problems(record: dict, tools: list[str]) -> list[str]:
 		problems.append(
 			'trace: no jira_search for past DSS and DTN tickets before the investigation'
 		)
-	cerberus_issue = record.get('triage', {}).get('status') != 'not_cerberus'
-	if cerberus_issue and not HISTORY_TOOLS & set(before):
+	status = ''
+	answer = record.get('triage')
+	if isinstance(answer, dict):  # a malformed block is already a schema problem
+		status = answer.get('status', '')
+	if status != 'not_cerberus' and not HISTORY_TOOLS & set(before):
 		problems.append(
 			'trace: no git history search (code_log_s, code_log or code_branches) before the '
 			'investigation'

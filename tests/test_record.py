@@ -246,6 +246,29 @@ def test_a_trial_notes_a_cerberus_refresh_that_failed(sources, monkeypatch):
 	assert '**Code could not read**\n- prod Cerberus not unpacked' in result['thread']  # reviewer
 
 
+def test_a_malformed_block_is_a_problem_not_a_crash(sources):
+	text = json.dumps({'triage': 'proved, see above', 'class': EXAMPLE['class']})
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
+	assert any(problem.startswith('triage:') for problem in result['problems'])
+	assert 'crash' not in result
+	assert record.order_problems({'triage': 'x'}, list(IN_ORDER)) == []
+
+
+def test_a_rendering_bug_never_loses_the_answer(sources, monkeypatch):
+	def broken(record, notes):
+		raise AttributeError("'str' object has no attribute 'get'")
+
+	monkeypatch.setattr(record, 'render', broken)
+	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), []))
+	(problem,) = result['problems']
+	assert problem.startswith('the answer could not be checked or rendered: AttributeError')
+	assert 'Traceback' in result['crash']
+	assert result['record']['triage'] == EXAMPLE['triage']  # checked before the crash, so kept
+	assert result['dm'].startswith('**DSS-1234 · the trial answer failed the record check**')
+	assert answer_text()[:100] in result['thread']  # the paid answer is shown and saved
+	assert json.loads(Path(result['file']).read_text(encoding='utf-8'))['text'] == answer_text()
+
+
 def test_a_trial_that_skips_past_issues_fails_the_check(sources):
 	text = answer_text()
 	result = record.trial('DSS-1234', POSTED, ask=claude(text, [], tools=('code_read',)))
