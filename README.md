@@ -139,7 +139,10 @@ claude mcp add dss -- uv run -q --directory <this repo> python -m dss mcp
 
 The bot runs on the `ddev-support-bot` app (Socket Mode, the `message.groups` and `message.channels` events, an app-level token with `connections:write`), with the `DSS_SLACK_*` variables set. Slack hands each event to one of an app's open connections, so only one listener may run on the app.
 
-Each analysis is a checked record, as in trial mode. The decision goes to `DSS_SLACK_POST_CHANNEL`, #data-dev-support-assist, with the proof in its thread. Without that setting it goes to `DSS_SLACK_REVIEWER`'s DM. The bot refuses #data-dev-support, or the watched channel, as a destination. New features are tried in #data-dev-support-assist-test.
+Each analysis is a checked record, as in trial mode, posted to `DSS_SLACK_POST_CHANNEL` (#data-dev-support-assist), or without that setting to `DSS_SLACK_REVIEWER`'s DM. The bot refuses #data-dev-support, or the watched channel, as a destination. New features are tried in #data-dev-support-assist-test.
+
+- **The post:** the headline (the verdict in a few words), Summary (the problem in one sentence), Actions for the analyst and for the developers (including the questions to ask and the checks that would settle what is not proved), and the Reply to the analyst last, in plain words with no code.
+- **Its thread:** why (the cause and where it lives), past issues, evidence with the tool call behind each fact, a DTN draft, confidence, and the Jira class and labels.
 
 The bot waits 15 seconds after the post before it triages (`TRIAGE_DELAY_S`). The workflow posts the analyst's "Screenshot of error" within a second, and waiting longer would let the developers' own first answers into the thread the triage reads. `slack_thread` downloads the screenshots, which needs the `files:read` scope.
 

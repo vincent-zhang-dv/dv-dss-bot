@@ -36,7 +36,6 @@ def test_schema_and_example_are_valid():
 	('section', 'field', 'value'),
 	[
 		('triage', 'evidence', []),
-		('triage', 'do_now', None),
 		('triage', 'cause', None),
 		('triage', 'status', 'likely'),  # nothing under not_proved
 		('triage', 'status', 'needs_info'),  # no questions
@@ -48,11 +47,24 @@ def test_status_sets_what_is_required(section, field, value):
 	assert errors(with_value(section, field, value))
 
 
-@pytest.mark.parametrize('field', ['request', 'prior_art'])
-def test_the_request_and_past_issues_are_required(field):
+@pytest.mark.parametrize('field', ['headline', 'request', 'prior_art', 'actions'])
+def test_the_post_and_the_search_for_past_issues_are_required(field):
 	record = copy.deepcopy(EXAMPLE)
 	del record['triage'][field]
 	assert errors(record)
+
+
+@pytest.mark.parametrize(
+	'reply',
+	[
+		'It fails in cerberus/modules/completions/histogram_plots.py.',
+		'base_histogram in histogram_plots.py cannot compute the bins.',
+		'The labels are set at line 99.',
+	],
+)
+def test_the_reply_carries_no_implementation_details(reply):
+	assert errors(with_value('triage', 'reply', reply))
+	assert errors(with_value('triage', 'reply', 'Stage design 7x4 has no measured volume.')) == []
 
 
 def test_settling_on_a_past_issue_needs_one_that_applies():
@@ -68,7 +80,7 @@ def test_needs_info_with_a_question_needs_no_cause():
 		status='needs_info',
 		cause=None,
 		evidence=[],
-		do_now=None,
+		actions={'analyst': [], 'developers': []},
 		details={},
 		questions=[
 			{
@@ -92,6 +104,8 @@ def test_needs_info_with_a_question_needs_no_cause():
 		('triage', 'escalate', {'kind': 'bug'}),  # neither a DTN ticket nor a draft
 		('triage', 'request', {'output': None, 'expected': None, 'asks': 'help'}),
 		('triage', 'settled_at', 'record'),  # step 1 is the request since dss-triage/2
+		('triage', 'headline', 'x' * 61),  # a few words, not a sentence
+		('triage', 'actions', {'analyst': [], 'developers': [], 'it': []}),
 	],
 )
 def test_values_outside_the_lists_are_refused(section, field, value):

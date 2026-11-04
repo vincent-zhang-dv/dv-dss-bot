@@ -1,9 +1,10 @@
 Answer with one JSON object and nothing else: no Markdown and no text before or after it. Code
-checks it and renders the reviewer's DM from it (the decision: status, cause, what to do, the
-questions, the reply) and a thread reply under the DM (the proof: evidence, not proved, details).
-Put each fact in exactly one field and never repeat it in another. Leave a field null or empty
-rather than guess. Give each field exactly the shape described here: a list shown as [{...}]
-holds objects with those keys, and every other list holds plain strings.
+checks it and renders a post for the data developers from it (the headline, the summary, the
+actions for the analyst and for the developers, and the reply to the analyst) and a thread reply
+under the post (the proof: why, past issues, evidence, details). Put each fact in exactly one
+field and never repeat it in another. Leave a field null or empty rather than guess. Give each
+field exactly the shape described here: a list shown as [{...}] holds objects with those keys, and
+every other list holds plain strings.
 
 The prompt gives the DSS ticket record that code read before you started: reporter, DVT, project
 folder, workflow, Toolbox Name, the reporter's Cerberus version and last failed run, and the prod
@@ -22,7 +23,11 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
   `gate_a`, `gate_b`, `gate_c` or `playbook`.
 - `playbook`: `crash`, `wrong_numbers`, `missing_output`, `feature_request` or `how_to`; null
   when it settled before step 7.
-- `what`: what the analyst reported, in one line.
+- `headline`: the verdict in a few plain words (at most 60 characters), such as "Known issue, fix
+  coming in Cerberus 1.1", "New bug, not fixed yet", "Two bugs, neither fixed", "Input problem:
+  casing ID differs from the tally", "One question for the analyst" or "Not Cerberus: ask the
+  VizApp team". Name a release only when a DTN ticket's fix version names it.
+- `what`: the summary: what the analyst reported, in one plain sentence.
 - `request`: step 1's statement of the request, {"output", "expected", "asks"}: the output or
   Cerberus step where they see it, what they expected (null when the ticket doesn't say), and
   `asks`, one of `fix`, `explanation`, `rerun`, `how_to` or `feature`.
@@ -38,16 +43,28 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
 - `evidence`: the proved results (the rules' Checked), [{"fact", "ref"}]. `ref` is the tool call
   that read the fact, such as `cerb_client_info:1234`, `code_read:cerberus/plots.py:120` or
   `slack_thread:reply 1 screenshot`, or `computed`.
-- `not_proved`: strings, each naming what could not be checked and what would settle it (the
-  rules' Not proved).
+- `not_proved`: strings, each the check a developer would make to settle what could not be
+  proved, such as "Read DVT4932's Perf Info dvStage for client stages 69-71 to confirm they share
+  one DV stage". The post lists them as the developers' "Confirm" actions.
 - `questions`: [{"ask", "settles"}], only questions whose answer settles something, each saying
-  what it settles.
-- `do_now`: the next step, {"who", "action"}, with who one of `analyst`, `data_developer`, `it`
-  or `other_team`; null when nothing can be done yet.
+  what it settles. The post lists them as the analyst's "Answer" actions.
+- `actions`: {"analyst": [...], "developers": [...]}, each a short instruction that starts with a
+  verb; an empty list means there is nothing to do. Never repeat a question or a not-proved check
+  here: code adds those.
+  - Analyst: correct an input (name the file, sheet and row or cell, and the value to set), update
+    Cerberus and rerun, or wait for the release.
+  - Developers: raise a DTN ticket (draft in `escalate`), set a fix version, regenerate the
+    deliverable from a fixed branch or PR (name it), or review or merge an existing PR (name it).
+    Give a deadline when the analyst's review date makes one matter.
 - `escalate`: {"kind", "dtn_ticket"} for an existing DTN ticket, or {"kind", "draft"} with a
   ready-to-send DTN draft, with kind one of `bug`, `feature` or `docs`; null when not needed.
-- `reply`: the suggested reply to the analyst, with only proved results and necessary questions;
-  null when nothing should be sent yet.
+- `reply`: the reply to the analyst, as a data developer would write it: at most 3 short
+  sentences, the answer or solution first. Give exact facts they can check (the design, stage,
+  joint or file, the counts, the sheet and column where they see it), and only proved ones. Leave
+  out implementation details (Cerberus code paths, functions, line numbers, libraries) and what
+  they can already tell (their DVT or version, that there is no workaround, that their inputs are
+  fine). Name a release only from a DTN ticket's fix version, and promise no other work. When the
+  status is `needs_info`, the reply asks the questions. Null when nothing should be sent yet.
 - `secondary`: a second, separate cause, [{"cause", "class"}], where `class` is a whole class
   object as described below, not a single value. Label suggestions go in `class.labels`, not here.
 - `similar_dss_tickets`: keys of similar DSS tickets, such as "DSS-1100", for linking in Jira.
@@ -60,8 +77,8 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
   - `wrong_numbers`: {"reported": {"value", "where"}, "expected": {"value", "where"},
     "first_difference"}: both values, and the first input where they differ.
 
-What each status needs: `proved` and `likely` need `cause`, at least one `evidence` item and
-`do_now`; `likely` also needs `not_proved`; `needs_info` needs `questions`; `not_cerberus` needs
+What each status needs: `proved` and `likely` need `cause` and at least one `evidence` item;
+`likely` also needs `not_proved`; `needs_info` needs `questions`; `not_cerberus` needs
 `details.owner`; `proved` with `wrong_numbers` needs `details.reported`, `details.expected` and
 `details.first_difference`; `settled_at` `prior_art` needs a `prior_art` item that applies
 (`yes`). When you cannot give what a status needs, choose the status you can

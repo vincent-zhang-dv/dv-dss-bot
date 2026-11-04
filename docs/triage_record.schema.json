@@ -6,7 +6,7 @@
 	"required": ["schema", "dss_ticket", "triage", "class"],
 	"additionalProperties": false,
 	"properties": {
-		"schema": {"const": "dss-triage/2"},
+		"schema": {"const": "dss-triage/3"},
 		"dss_ticket": {"$ref": "#/$defs/dss_ticket"},
 		"triage": {"$ref": "#/$defs/triage"},
 		"class": {"$ref": "#/$defs/class"},
@@ -38,11 +38,22 @@
 		"triage": {
 			"description": "Claude's answer; the DM and its thread reply are rendered from it.",
 			"type": "object",
-			"required": ["status", "confidence", "settled_at", "what", "request", "prior_art"],
+			"required": ["status", "confidence", "settled_at", "headline", "what", "request", "prior_art", "actions"],
 			"additionalProperties": false,
 			"properties": {
 				"status": {"enum": ["proved", "likely", "needs_info", "not_cerberus"]},
 				"confidence": {"enum": ["high", "medium", "low"]},
+				"headline": {"$ref": "#/$defs/text", "maxLength": 60, "description": "The verdict in a few plain words."},
+				"actions": {
+					"description": "What each side should do; an empty list means nothing.",
+					"type": "object",
+					"required": ["analyst", "developers"],
+					"additionalProperties": false,
+					"properties": {
+						"analyst": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+						"developers": {"type": "array", "items": {"$ref": "#/$defs/text"}}
+					}
+				},
 				"settled_at": {"enum": ["request", "prior_art", "gate_a", "gate_b", "gate_c", "playbook"]},
 				"playbook": {"enum": ["crash", "wrong_numbers", "missing_output", "feature_request", "how_to", null]},
 				"what": {"$ref": "#/$defs/text"},
@@ -109,15 +120,6 @@
 						}
 					}
 				},
-				"do_now": {
-					"type": ["object", "null"],
-					"required": ["who", "action"],
-					"additionalProperties": false,
-					"properties": {
-						"who": {"enum": ["analyst", "data_developer", "it", "other_team"]},
-						"action": {"$ref": "#/$defs/text"}
-					}
-				},
 				"escalate": {
 					"description": "An existing DTN ticket, or a ready-to-send draft. A person sends it.",
 					"type": ["object", "null"],
@@ -130,7 +132,11 @@
 						"draft": {"$ref": "#/$defs/text"}
 					}
 				},
-				"reply": {"type": ["string", "null"]},
+				"reply": {
+					"description": "To the analyst: no Cerberus code paths, .py files or line numbers.",
+					"type": ["string", "null"],
+					"not": {"type": "string", "pattern": "\\.py\\b|cerberus[/\\\\]|\\blines? [0-9]+"}
+				},
 				"secondary": {
 					"type": "array",
 					"items": {
@@ -181,11 +187,10 @@
 		},
 		"answered": {
 			"description": "What proved and likely answers must give.",
-			"required": ["cause", "evidence", "do_now"],
+			"required": ["cause", "evidence"],
 			"properties": {
 				"cause": {"$ref": "#/$defs/text"},
-				"evidence": {"minItems": 1},
-				"do_now": {"type": "object"}
+				"evidence": {"minItems": 1}
 			}
 		},
 		"class": {

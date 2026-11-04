@@ -102,18 +102,16 @@ def test_a_new_ticket_is_triaged_as_a_record_and_posted_to_the_developers(tmp_pa
 	assert '*Client:* ACME' in claude.prompts[0]  # the workflow's post goes along
 	decision, proof = bot.client.sent('chat_postMessage')
 	assert decision['channel'] == proof['channel'] == DEVELOPERS  # nothing in the DSS channel
-	head = 'DSS-1234 · proved · high confidence · wrong numbers · input data · CERB-WI'
+	head = 'DSS-1234 · Input problem: casing ID differs from the tally · proved'
 	assert decision['text'] == head  # the first line, for notifications
 	(block,) = decision['blocks']
 	assert block['type'] == 'markdown'
-	assert block['text'].startswith('**DSS-1234 · proved · high confidence · wrong numbers')
+	assert block['text'].startswith(f'**{head}**\n**Summary:** ')
 	assert (
-		'_Triage (dss-triage/2) · draft by Claude for the data developers, not posted in the DSS '
+		'_Triage (dss-triage/3) · draft by Claude for the data developers, not posted in the DSS '
 		'thread · [the DSS post](https://slack/p1) · DSS-1234 · 1,234 tokens · ≈ $0.02'
 	) in block['text']
-	assert proof['thread_ts'] == '900.0' and proof['blocks'][0]['text'].startswith(
-		'**Past issues**'
-	)
+	assert proof['thread_ts'] == '900.0' and proof['blocks'][0]['text'].startswith('**Why:** ')
 	saved = bot.store.get(CHANNEL, '1792523850.5')
 	assert saved['ticket'] == 'DSS-1234' and saved['tokens'] == 1234 and saved['problems'] == []
 	assert saved['trial'].endswith('.json')

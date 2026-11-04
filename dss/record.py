@@ -1,4 +1,4 @@
-"""Trial mode: one triage as a checked record (`dss-triage/2`) instead of free Markdown.
+"""Trial mode: one triage as a checked record (`dss-triage/3`) instead of free Markdown.
 
 Code reads the `dss_ticket` block before Claude starts. Claude follows the same steps and rules as
 the bot (`triage.md`) but answers with the `triage` and `class` blocks (`triage_record.md`). Code
@@ -24,7 +24,7 @@ import jsonschema  # type: ignore[import-untyped]
 from dss import cerb, code, jira, runner, triage
 from dss.worker import ROOT
 
-SCHEMA_ID = 'dss-triage/2'
+SCHEMA_ID = 'dss-triage/3'
 SCHEMA_FILE = ROOT / 'docs' / 'triage_record.schema.json'
 KNOWN_CAUSES_FILE = ROOT / 'docs' / 'known_causes.json'
 ANSWER_FILE = Path(__file__).with_name('triage_record.md')  # replaces triage.md's answer section
@@ -316,44 +316,47 @@ def render_refused(key: str, problems: list[str], text: str) -> tuple[str, str]:
 
 
 def _decision(record: dict) -> str:
-	ticket, answer, planning = record['dss_ticket'], record['triage'], record['class']
-	head = [ticket['key'], _words(answer['status']), f'{answer["confidence"]} confidence']
-	head.append(_words(answer.get('playbook') or answer['settled_at']))
-	if planning.get('cause_family'):
-		head.append(_words(planning['cause_family']))
-	if ticket.get('toolbox'):
-		head.append(ticket['toolbox'])
-	lines = [f'**{" · ".join(head)}**', f'**Reported:** {_text(answer["what"])}']
-	lines.append(f'**Request:** {_request(answer["request"])}')
-	if answer.get('cause'):
-		lines.append(f'**Cause:** {_text(answer["cause"])}')
-	if answer.get('where'):
-		lines.append(f'**Where:** {_where(answer["where"])}')
-	do_now = answer.get('do_now')
-	if do_now:
-		lines.append(f'**Do now ({_words(do_now["who"])}):** {_text(do_now["action"])}')
-	questions = answer.get('questions') or []
-	if questions:
-		lines.append('**Ask the analyst:**')
-		for number, question in enumerate(questions, 1):
-			ask, settles = _text(question['ask']), _text(question['settles'])
-			lines.append(f'{number}. {ask} (settles: {settles})')
-	escalate = answer.get('escalate')
-	if escalate:
-		kind = _words(escalate['kind'])
-		if escalate.get('dtn_ticket'):
-			lines.append(f'**Escalate ({kind}):** {escalate["dtn_ticket"]}')
-		if escalate.get('draft'):
-			# the blank line ends the quote; Markdown would run the next line into it
-			lines.append(f'**Escalate ({kind}), draft to send:**\n{_quote(escalate["draft"])}\n')
+	"""The post: headline, summary, each side's actions, and the reply to the analyst last.
+
+	The analyst's questions are their "Answer" actions, and what is not proved is the developers'
+	"Confirm" actions, so each is said once.
+	"""
+	ticket, answer = record['dss_ticket'], record['triage']
+	head = f'**{ticket["key"]} · {_text(answer["headline"])} · {_words(answer["status"])}**'
+	lines = [head, f'**Summary:** {_text(answer["what"])}', '**Actions**']
+	analyst = list(answer['actions']['analyst'])
+	for question in answer.get('questions') or []:
+		analyst.append(f'Answer: {question["ask"]}')
+	developers = list(answer['actions']['developers'])
+	for check in answer.get('not_proved') or []:
+		developers.append(f'Confirm: {check}')
+	_actions(lines, 'Analyst', analyst)
+	_actions(lines, 'Developers', developers)
 	if answer.get('reply'):
-		lines.append(f'**Suggested reply:**\n{_quote(answer["reply"])}')
+		lines.append(f'**Reply**\n{_quote(answer["reply"])}')
 	return _joined(lines)
+
+
+def _actions(lines: list[str], who: str, items: list[str]) -> None:
+	"""*who*'s actions: none, one on the same line, or a numbered list."""
+	if not items:
+		lines.append(f'**{who}:** none')
+	elif len(items) == 1:
+		lines.append(f'**{who}:** {_text(items[0])}')
+	else:
+		lines.append(f'**{who}:**')
+		for number, item in enumerate(items, 1):
+			lines.append(f'{number}. {_text(item)}')
 
 
 def _proof(record: dict, notes: list[str]) -> str:
 	ticket, answer, planning = record['dss_ticket'], record['triage'], record['class']
 	lines = []
+	if answer.get('cause'):
+		why = _text(answer['cause'])
+		if answer.get('where'):
+			why += f' ({_where(answer["where"])})'
+		lines.append(f'**Why:** {why}')
 	past = answer['prior_art']
 	if past:
 		lines.append('**Past issues**')
@@ -368,7 +371,18 @@ def _proof(record: dict, notes: list[str]) -> str:
 		lines.append('**Evidence**')
 		for number, item in enumerate(evidence, 1):
 			lines.append(f'{number}. {_text(item["fact"])} (`{item["ref"]}`)')
-	_bullets(lines, 'Not proved', answer.get('not_proved') or [])
+	settles = []
+	for question in answer.get('questions') or []:
+		settles.append(f'{question["ask"]}: settles {question["settles"]}')
+	_bullets(lines, 'What the questions settle', settles)
+	escalate = answer.get('escalate')
+	if escalate:
+		kind = _words(escalate['kind'])
+		if escalate.get('dtn_ticket'):
+			lines.append(f'**DTN ({kind}):** {escalate["dtn_ticket"]}')
+		if escalate.get('draft'):
+			# the blank line ends the quote; Markdown would run the next line into it
+			lines.append(f'**DTN draft ({kind}):**\n{_quote(escalate["draft"])}\n')
 	details = []
 	for name, value in (answer.get('details') or {}).items():
 		if name != 'playbook':
@@ -380,10 +394,11 @@ def _proof(record: dict, notes: list[str]) -> str:
 		secondary.append(f'{_text(finding["cause"])} ({planning})')
 	_bullets(lines, 'Also found', secondary, escape=False)
 	_bullets(lines, 'Could not read', answer.get('flags') or [])
-	similar = answer.get('similar_dss_tickets') or []
-	if similar:
-		lines.append(f'**Similar DSS tickets:** {", ".join(similar)}')
-	lines.append(f"**Class** (Claude's proposal): {_planning(planning, with_family=False)}")
+	settled = f'{answer["confidence"]} confidence, settled at {_words(answer["settled_at"])}'
+	if answer.get('playbook'):
+		settled += f' ({_words(answer["playbook"])} playbook)'
+	lines.append(f'**Confidence:** {settled}')
+	lines.append(f"**Class** (Claude's proposal): {_planning(planning, with_family=True)}")
 	labels = _labels(planning.get('labels') or {}, ticket)
 	if labels:
 		lines.append(f'**Labels to set:** {labels}')
