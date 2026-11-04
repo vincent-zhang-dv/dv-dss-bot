@@ -9,8 +9,10 @@ import sys
 import tempfile
 import urllib.error
 import urllib.parse
+import zipfile
 from datetime import datetime, timedelta
 from email.message import Message
+from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -609,6 +611,106 @@ def test_history_tools_find_a_fix_and_whether_a_build_has_it(released, mcp_call)
 		code.contains(fix, '1.0.4+uat2')
 	failed, text = mcp_call('code_contains', {'commit': fix, 'version': 'prod'})
 	assert not failed and 'does not include' in text
+
+
+def fake_wheel(folder, version):
+	"""A made-up Cerberus wheel in the prod folder *folder*: the package, its metadata and a
+	file outside both."""
+	path = folder / f'cerberus-{version}-py3-none-any.whl'
+	with zipfile.ZipFile(path, 'w') as archive:
+		archive.writestr('cerberus/__init__.py', f'RELEASE = {version!r}\n')
+		archive.writestr('cerberus/modules/__init__.py', '')
+		meta = f'Metadata-Version: 2.1\nName: cerberus\nVersion: {version}\n'
+		archive.writestr(f'cerberus-{version}.dist-info/METADATA', meta)
+		archive.writestr('scripts/not_cerberus.py', '')
+	return path
+
+
+def test_the_prod_wheel_is_unpacked_once_per_version(tmp_path, monkeypatch):
+	prod, code_dir = tmp_path / 'prod', tmp_path / 'prod_code'
+	prod.mkdir()
+	fake_wheel(prod, '1.0.4')
+	monkeypatch.setenv('DV_CERB_PROD_DIR', str(prod))
+	monkeypatch.delenv('DSS_CERB_PROD_CODE', raising=False)
+	assert cerb.prod_code() == ''  # not set up: the venv's own Cerberus
+	monkeypatch.setenv('DSS_CERB_PROD_CODE', str(code_dir))
+	folder = Path(cerb.prod_code())
+	assert folder == code_dir / '1.0.4'
+	assert (folder / 'cerberus' / '__init__.py').read_text() == "RELEASE = '1.0.4'\n"
+	assert (folder / 'cerberus-1.0.4.dist-info' / 'METADATA').exists()
+	assert not (folder / 'scripts').exists()
+	unpacked_at = (folder / 'cerberus' / '__init__.py').stat().st_mtime_ns
+	assert cerb.prod_code() == str(folder)
+	assert (folder / 'cerberus' / '__init__.py').stat().st_mtime_ns == unpacked_at  # not again
+	fake_wheel(prod, '1.0.5')  # a new release goes next to the old one
+	assert cerb.prod_code() == str(code_dir / '1.0.5')
+	assert (code_dir / '1.0.4' / 'cerberus').exists()
+
+
+def test_client_info_runs_the_prod_cerberus_not_the_venvs(tmp_path, monkeypatch):
+	prod = tmp_path / 'prod'
+	prod.mkdir()
+	fake_wheel(prod, '1.0.4')
+	monkeypatch.setenv('DV_CERB_PROD_DIR', str(prod))
+	monkeypatch.setenv('DSS_CERB_PROD_CODE', str(tmp_path / 'prod_code'))
+	monkeypatch.setenv('DSS_CERB_PY', sys.executable)
+	checkout = tmp_path / 'checkout'  # the developer's checkout, with its own Cerberus
+	(checkout / 'cerberus').mkdir(parents=True)
+	(checkout / 'cerberus' / '__init__.py').write_text("RELEASE = 'dev'\n", encoding='utf-8')
+	monkeypatch.setenv('DSS_CERB_CWD', str(checkout))
+	found = cerb.run_in('cerb', 'dss.cerb', 'cerberus_found', first_path=cerb.prod_code())
+	assert found['version'] == '1.0.4'
+	assert found['file'] == str(tmp_path / 'prod_code' / '1.0.4' / 'cerberus' / '__init__.py')
+
+
+@pytest.fixture
+def bot_clone(released, tmp_path, monkeypatch):
+	"""The bot's own clone (DSS_CERB_GIT) of *released*, standing in for GitHub."""
+	git(released, 'update-ref', 'refs/heads/master', 'origin/master')  # GitHub's master
+	monkeypatch.setattr(code, 'REPO_URL', str(released))
+	clone = tmp_path / 'bot' / 'DataDHPython'
+	monkeypatch.setenv('DSS_CERB_GIT', str(clone))
+	monkeypatch.delenv('DSS_CERB_PROD_CODE', raising=False)
+	assert code.clone() is True
+	return clone
+
+
+def test_the_bots_clone_is_read_and_fetched_before_each_triage(released, bot_clone):
+	assert code.clone() is False  # there already
+	assert code.repo_dir() == str(bot_clone)
+	assert 'y = data.round(2)' in code.read('cerberus/plots.py')  # the release, from the clone
+	assert 'Stop rounding' in code.log('cerberus', all_branches=True)
+	git(released, 'branch', 'DTN-9-work-new-fix', 'origin/master')  # pushed to GitHub
+	assert 'nothing found' in code.branches('DTN-9')
+	assert code.refresh() == []
+	assert 'origin/DTN-9-work-new-fix' in code.branches('DTN-9')
+	git(bot_clone, 'remote', 'set-url', 'origin', str(released.parent / 'gone'))
+	(note,) = code.refresh()  # GitHub out of reach: the last fetch still serves
+	assert note.startswith('Cerberus clone not updated, so the newest commits may be missing')
+	assert 'origin/DTN-9-work-new-fix' in code.branches('DTN-9')
+
+
+def test_a_developer_checkout_is_never_fetched(released, monkeypatch):
+	monkeypatch.delenv('DSS_CERB_GIT', raising=False)
+	assert code.refresh() == []  # no clone of its own: nothing to fetch
+	with pytest.raises(RuntimeError, match="only the bot's own clone is fetched"):
+		code.fetch()
+
+
+def test_setup_says_what_each_tool_reads(released, bot_clone, tmp_path, monkeypatch):
+	(tmp_path / 'cerberus-1.0.4-py3-none-any.whl').unlink()
+	fake_wheel(tmp_path, '1.0.4')  # the prod folder of the released fixture
+	monkeypatch.setenv('DSS_CERB_PROD_CODE', str(tmp_path / 'prod_code'))
+	monkeypatch.setenv('DSS_CERB_PY', sys.executable)
+	lines = code.setup()
+	assert lines[0].startswith(f'code tools: {bot_clone}, prod 1.0.4 = ')
+	assert 'release: v1.0.4' in lines[0]
+	assert lines[1].startswith('last fetch: ')
+	assert lines[2] == (
+		'cerb_client_info runs Cerberus 1.0.4 from '
+		+ str(tmp_path / 'prod_code' / '1.0.4' / 'cerberus' / '__init__.py')
+	)
+	assert len(lines) == 3  # no warning
 
 
 def test_long_code_answers_are_cut_with_a_hint(monkeypatch):

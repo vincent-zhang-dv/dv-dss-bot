@@ -8,4 +8,7 @@ __pycache__/
 
 # secrets and client data: never commit
 .env
+.env.*
+!.env.example
+*.swp
 out/

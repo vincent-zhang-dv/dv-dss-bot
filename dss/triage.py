@@ -10,13 +10,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from dss import runner
+from dss import code, runner
 from dss.worker import ROOT
 
 TIME_FORMAT = '%Y-%m-%d_%H-%M-%S'  # local time, as Cerberus names its telemetry logs
 MAX_POST = 8000
 PROMPT = """New ticket {key}, posted {posted} (local time).
-Format with plain Markdown (paragraphs, lists, `code`); no tables wider than 4 columns.{thread}{post}"""
+Format with plain Markdown (paragraphs, lists, `code`); no tables wider than 4 columns.{notes}\
+{thread}{post}"""
 USAGE_KEYS = (
 	'input_tokens',
 	'output_tokens',
@@ -36,12 +37,24 @@ def triage(
 	*posted* is the ticket time in TIME_FORMAT; the triage looks for the reporter's Cerberus
 	session before it. *post* is the support-request workflow's message, when there is one, and
 	*thread_ts* its Slack ts, which `slack_thread` reads. *ask* is :func:`dss.runner.run_reply`
-	(faked in tests).
+	(faked in tests). The bot's Cerberus copies are brought up to date first (:func:`dss.code.refresh`).
 	"""
 	prompt = PROMPT.format(
-		key=key, posted=posted, thread=slack_thread(thread_ts), post=workflow_post(post)
+		key=key,
+		posted=posted,
+		notes=noted(code.refresh()),
+		thread=slack_thread(thread_ts),
+		post=workflow_post(post),
 	)
 	return run(key, posted, prompt, ask)
+
+
+def noted(notes: list[str]) -> str:
+	"""What code could not read or bring up to date, as a prompt section; empty when nothing
+	failed."""
+	if not notes:
+		return ''
+	return '\n\nCode could not read:\n- ' + '\n- '.join(notes)
 
 
 def slack_thread(thread_ts: str) -> str:
