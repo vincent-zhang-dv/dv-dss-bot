@@ -27,8 +27,12 @@ TICKET_FIELDS = {
 	'summary': 'summary',
 	'description': 'description',
 	'status': 'status',
+	'resolution': 'resolution',
+	'fix_versions': 'fixVersions',
 	'reporter': 'reporter',
 	'links': 'issuelinks',
+	'comments': 'comment',
+	'attachments': 'attachment',
 	'project_path': 'customfield_10823',
 	'toolbox': 'customfield_10824',
 	'outcome': 'customfield_10825',
@@ -38,12 +42,16 @@ TICKET_FIELDS = {
 HISTORY_FIELDS = {
 	'summary': 'summary',
 	'status': 'status',
+	'resolution': 'resolution',
+	'fix_versions': 'fixVersions',
 	'created': 'created',
 	'toolbox': 'customfield_10824',
 	'outcome': 'customfield_10825',
 }
 MAX_RESULTS = 20
 DESCRIPTION_CHARS = 4000
+MAX_COMMENTS = 10  # the newest: a long discussion ends with what was found and done
+COMMENT_CHARS = 1500
 
 
 class JiraError(RuntimeError):
@@ -71,6 +79,47 @@ def _links(links: list[dict] | None) -> list[str]:
 	return found
 
 
+def _versions(versions: list[dict] | None) -> list[str]:
+	"""Fix versions as "CERBERUS v1.1 (not released, due 2026-11-03)"."""
+	found = []
+	for version in versions or []:
+		if version.get('released'):
+			state = 'released'
+			if version.get('releaseDate'):
+				state += f' {version["releaseDate"]}'
+		else:
+			state = 'not released'
+			if version.get('releaseDate'):
+				state += f', due {version["releaseDate"]}'
+		found.append(f'{version.get("name")} ({state})')
+	return found
+
+
+def _comments(field: dict | None) -> list[str]:
+	"""The newest MAX_COMMENTS comments, oldest first, as "<date> <author>: <text>"."""
+	comments = (field or {}).get('comments') or []
+	found = []
+	if len(comments) > MAX_COMMENTS:
+		found.append(f'({len(comments) - MAX_COMMENTS} older comments left out)')
+	for comment in comments[-MAX_COMMENTS:]:
+		author = plain(comment.get('author')) or 'unknown'
+		text = str(comment.get('body') or '')[:COMMENT_CHARS]
+		found.append(f'{str(comment.get("created", ""))[:10]} {author}: {text}')
+	return found
+
+
+def _attachments(attachments: list[dict] | None) -> list[str]:
+	"""Attached files as "name (type, size, date)"."""
+	found = []
+	for attachment in attachments or []:
+		size = int(attachment.get('size') or 0) // 1024
+		created = str(attachment.get('created', ''))[:10]
+		found.append(
+			f'{attachment.get("filename")} ({attachment.get("mimeType")}, {size:,} KB, {created})'
+		)
+	return found
+
+
 def compact(issue: dict, fields: dict[str, str]) -> dict:
 	"""*issue* (Jira REST JSON) as {name: plain value} for the *fields* asked for."""
 	raw = issue.get('fields') or {}
@@ -79,6 +128,12 @@ def compact(issue: dict, fields: dict[str, str]) -> dict:
 		value = raw.get(field_id)
 		if name == 'links':
 			found[name] = _links(value)
+		elif name == 'fix_versions':
+			found[name] = _versions(value)
+		elif name == 'comments':
+			found[name] = _comments(value)
+		elif name == 'attachments':
+			found[name] = _attachments(value)
 		elif name == 'description' and value:
 			found[name] = str(value)[:DESCRIPTION_CHARS]
 		else:
@@ -158,12 +213,14 @@ def _base() -> str:
 def register(server) -> None:
 	@server.tool()
 	def jira_get_issue(key: str) -> dict:
-		"""One ticket's triage fields: summary, description, status, reporter, links, Project
-		Path, Toolbox Name, Investigation Outcome, client and DVT."""
+		"""One ticket's triage fields: summary, description, status, resolution, fix versions
+		(released or not), reporter, links, the newest comments (where developers write the cause
+		and the fix), attachment names, Project Path, Toolbox Name, Investigation Outcome, client
+		and DVT."""
 		return get_issue(key)
 
 	@server.tool()
 	def jira_search(jql: str, limit: int = 10) -> list[dict]:
-		"""Tickets matching *jql* (at most 20) with summary, status, created, Toolbox Name and
-		Investigation Outcome. Use it to find similar past tickets."""
+		"""Tickets matching *jql* (at most 20) with summary, status, resolution, fix versions,
+		created, Toolbox Name and Investigation Outcome. Use it to find similar past tickets."""
 		return search(jql, limit)

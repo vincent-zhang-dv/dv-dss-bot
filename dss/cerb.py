@@ -11,13 +11,17 @@ file loaded after this module is imported still applies.
 """
 
 import base64
+import contextlib
 import importlib.metadata
+import io
 import json
 import ntpath
 import os
 import re
 import shutil
+import struct
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,7 +36,11 @@ DEFAULT_INDEX_ROOT = r'\\192.168.24.252\projects'
 DEFAULT_PROD_DIR = 'F:/DarkVision Dropbox/Analysis/CERBERUS/prod'
 INDEX_ENV = ('DV_PROJECT_INDEX_USER', 'DV_PROJECT_INDEX_PASSWORD')
 TIMEOUT_S = 60
-MAX_FETCH_BYTES = 50 * 2**20  # one file is held in memory
+MAX_FETCH_BYTES = 50 * 2**20  # a file read as text is held in memory
+DEFAULT_MAX_COPY_MB = 1024  # a copy streams to disk (DV_PROJECT_INDEX_MAX_MB)
+CHUNK_BYTES = 2**20
+COPY_FRESH_S = 15 * 60  # a copy this new is used again: paging through a file downloads it once
+COPY_KEEP_S = 24 * 3600  # older copies are deleted
 MAX_LISTED = 500
 # All of a project's telemetry logs are listed, then filtered by login here. Add login terms to
 # the search if a project's telemetry folder grows past this.
@@ -44,6 +52,28 @@ SHEET_ROWS = 100  # rows per page of a sheet
 SHEET_CHARS = 30_000  # per page too: a statistics row runs to about 400 characters
 CELL_CHARS = 200
 TOP_ROWS = 3  # shown before a later page or the rows a filter found, for the column names
+DOCUMENTS = ('.pdf', '.docx')  # what pypdf and python-docx open; not the old binary .doc
+DOC_PAGES = 20  # pages per answer
+DOC_CHARS = 30_000  # per answer too
+WORD_PART_CHARS = 3000  # a Word file has no pages, so its text is cut into parts about this long
+IMAGES = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tif', '.tiff', '.webp')  # what Pillow opens
+MAX_IMAGE_SIDE = 1568  # pixels on the long side; Claude scales larger images down anyway
+MAX_IMAGE_BYTES = 3_500_000  # a bigger PNG is sent as JPEG
+MIN_PICTURE_PIXELS = 200 * 200  # smaller pictures in a PDF are logos and icons
+MAX_PAGE_PICTURES = 6  # each costs Claude about 1.5-3k tokens
+TABLES = ('.parquet', '.db', '.sqlite', '.sqlite3')
+CALIPERS = ('.dvcaliper', '.npy')  # what Cerberus's DHCaliper loads
+PICKLES = ('.pkl', '.pickle')  # loading one runs code stored in it: never read
+MAX_TABLE_ROWS = 100_000  # rows handed over from the Cerberus venv; the pages come from these
+MAX_CALIPER_ROWS = 60  # slices listed for a depth window, evenly spread
+MAX_PEAK_ROWS = 10  # and the slices with the highest values, which an even spread can miss
+METRES_PER_FOOT = 0.3048
+# A .dvcaliper is two int64s (elements, slices), then slices x (1 + elements) float32s, depth
+# first in each slice. A depth window is read by HTTP ranges, so a 4 GB file is never copied.
+CALIPER_HEADER = struct.Struct('<2q')
+CALIPER_VALUE = struct.Struct('<f')
+MAX_WINDOW_SLICES = 20_000
+PARTIAL_CONTENT = 206
 WHEEL = re.compile(r'cerberus-(\d+(?:\.\d+)+)-py3-none-any\.whl')
 # <login>_telemetry_<local start time>_<pid>.log, see cerberus/modules/telemetry/config.py
 TELEMETRY_LOG = re.compile(r'(.+)_telemetry_(\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d)_\d+\.log')
@@ -66,6 +96,220 @@ def client_info(path: str) -> dict:
 		found['strings'] = strings.to_dict('records')
 		found['joints'] = record.to_dict('records')
 	return found
+
+
+def document(path: str) -> dict:
+	"""The text of the PDF or Word file at *path*: one entry per PDF page, or per part of about
+	WORD_PART_CHARS of a Word file (paragraphs and table rows in order).
+
+	Runs in the Cerberus venv (pypdf, python-docx), through `cerb_read_document`.
+	"""
+	if path.lower().endswith('.pdf'):
+		from pypdf import PdfReader
+
+		pages = []
+		for page in PdfReader(path).pages:
+			pages.append(page.extract_text() or '')
+		return {'unit': 'page', 'parts': pages}
+	from docx import Document
+	from docx.table import Table
+
+	lines = []
+	for block in Document(path).iter_inner_content():
+		if isinstance(block, Table):
+			for row in block.rows:
+				cells = []
+				for cell in row.cells:
+					cells.append(cell.text.strip())
+				lines.append(' | '.join(cells))
+		elif block.text.strip():
+			lines.append(block.text)
+	parts = ['']
+	for line in lines:
+		if parts[-1] and len(parts[-1]) + len(line) > WORD_PART_CHARS:
+			parts.append('')
+		parts[-1] += line + '\n'
+	return {'unit': 'part', 'parts': parts}
+
+
+def pictures(path: str, page: int = 0) -> dict:
+	"""The image at *path*, or the pictures in page *page* of the PDF at *path*, each scaled to
+	at most MAX_IMAGE_SIDE pixels and base64-encoded. Pictures under MIN_PICTURE_PIXELS (logos)
+	are left out, and at most MAX_PAGE_PICTURES are kept.
+
+	Runs in the Cerberus venv (Pillow, pypdf), through `cerb_read_image`.
+	"""
+	from PIL import Image
+
+	pages = 0
+	found = []
+	if path.lower().endswith('.pdf'):
+		from pypdf import PdfReader
+
+		reader = PdfReader(path)
+		pages = len(reader.pages)
+		if not 1 <= page <= pages:
+			raise ValueError(f'the PDF has {pages} pages; page {page} is not one of them')
+		for embedded in reader.pages[page - 1].images:
+			width, height = embedded.image.size
+			if width * height >= MIN_PICTURE_PIXELS:
+				found.append(embedded.image)
+	else:
+		found.append(Image.open(path))
+	encoded = []
+	for picture in found[:MAX_PAGE_PICTURES]:
+		encoded.append(_encoded(picture))
+	return {'pages': pages, 'found': len(found), 'images': encoded}
+
+
+def _encoded(picture) -> dict:
+	"""A Pillow image as base64 PNG, or JPEG when the PNG is over MAX_IMAGE_BYTES, scaled down
+	to MAX_IMAGE_SIDE on the long side."""
+	original = picture.size
+	picture.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))  # only shrinks, keeps the shape
+	if picture.mode not in ('RGB', 'RGBA', 'L'):
+		picture = picture.convert('RGB')
+	buffer = io.BytesIO()
+	picture.save(buffer, 'PNG')
+	kind = 'png'
+	if buffer.tell() > MAX_IMAGE_BYTES:
+		buffer = io.BytesIO()
+		picture.convert('RGB').save(buffer, 'JPEG', quality=85)
+		kind = 'jpeg'
+	data = base64.b64encode(buffer.getvalue()).decode()
+	return {'format': kind, 'size': list(original), 'shown': list(picture.size), 'data': data}
+
+
+def table(path: str, name: str = '') -> dict:
+	"""The rows of the Parquet file at *path*, or of table *name* of the SQLite file at *path*,
+	as cells: the column names, then up to MAX_TABLE_ROWS rows. A SQLite file without *name*
+	gives its tables and their row counts.
+
+	Runs in the Cerberus venv (pandas and pyarrow; sqlite3, read-only), through `cerb_read_table`.
+	"""
+	if path.lower().endswith('.parquet'):
+		import pandas
+
+		frame = pandas.read_parquet(path)
+		cells = [[str(column) for column in frame.columns]]
+		for values in frame.head(MAX_TABLE_ROWS).itertuples(index=False):
+			cells.append(_json_row(values))
+		return {'rows': len(frame), 'cells': cells}
+	import sqlite3
+
+	connection = sqlite3.connect(Path(path).as_uri() + '?mode=ro', uri=True)
+	try:
+		tables = []
+		try:
+			listed = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+		except sqlite3.DatabaseError as error:
+			raise ValueError(f'{Path(path).name} is not a SQLite file: {error}') from error
+		for (found,) in listed:
+			tables.append(found)
+		if not name:
+			counts = []
+			for found in sorted(tables):
+				counts.append([found, _row_count(connection, found)])
+			return {'tables': counts}
+		if name not in tables:
+			raise ValueError(f'no table {name!r}; the tables are: {", ".join(sorted(tables))}')
+		quoted = name.replace('"', '""')  # a table name from the file itself, checked above
+		cursor = connection.execute(f'SELECT * FROM "{quoted}"')
+		cells = [[column[0] for column in cursor.description]]
+		for values in cursor.fetchmany(MAX_TABLE_ROWS):
+			cells.append(_json_row(values))
+		return {'rows': _row_count(connection, name), 'cells': cells}
+	finally:
+		connection.close()
+
+
+def _row_count(connection, name: str) -> int:
+	quoted = name.replace('"', '""')  # a table name from the file itself
+	return connection.execute(f'SELECT COUNT(*) FROM "{quoted}"').fetchone()[0]
+
+
+def _json_row(values) -> list:
+	row = []
+	for value in values:
+		row.append(_json_cell(value))
+	return row
+
+
+def caliper(path: str, depth_from: float = 0, depth_to: float = 0) -> dict:
+	"""A caliper file (.dvcaliper, or a caliper .npy) as Cerberus reads it: its type, units, size
+	and depth range. With *depth_to* above *depth_from* (metres, as Cerberus stores depths), also
+	slices of that window, MAX_CALIPER_ROWS evenly spread and the MAX_PEAK_ROWS with the highest
+	values, each as its depth and the min, mean and max over its elements, and a picture of the
+	whole window.
+
+	Runs in the Cerberus venv with the prod Cerberus first (:func:`prod_code`), through
+	`cerb_read_caliper`.
+	"""
+	import warnings
+
+	import numpy
+	from cerberus.modules.integrity.caliper import DHCaliper
+
+	found = DHCaliper(filepath=path)
+	found.load_data(memmap=True)
+	depths = numpy.asarray(found.depths, dtype=float)
+	result = {
+		'type': str(found.caliper_type),
+		'units': found.units,
+		'slices': found.slices,
+		'elements': found.elems,
+		'depths': [float(numpy.nanmin(depths)), float(numpy.nanmax(depths))],
+	}
+	if depth_to <= depth_from:
+		return result
+	inside = numpy.flatnonzero((depths >= depth_from) & (depths <= depth_to))
+	result['window_slices'] = len(inside)
+	if not len(inside):
+		return result
+	window = slice(int(inside[0]), int(inside[-1]) + 1)  # depths ascend, so the window is one run
+	values = numpy.asarray(found.values[window], dtype=float)
+	spread = numpy.linspace(0, len(values) - 1, min(len(values), MAX_CALIPER_ROWS)).round()
+	picks = set(spread.astype(int).tolist())
+	rows = []
+	with warnings.catch_warnings():  # an all-empty slice gives NaN, which is the answer
+		warnings.simplefilter('ignore', RuntimeWarning)
+		peaks = numpy.nan_to_num(numpy.nanmax(values, axis=1), nan=-numpy.inf)
+		picks.update(numpy.argsort(-peaks)[:MAX_PEAK_ROWS].tolist())
+		for pick in sorted(picks):
+			row = values[pick]
+			nans = int(numpy.isnan(row).sum())
+			low, mean, high = numpy.nanmin(row), numpy.nanmean(row), numpy.nanmax(row)
+			rows.append([float(depths[window][pick]), float(low), float(mean), float(high), nans])
+	result['rows'] = rows
+	result['image'] = _window_picture(values, depths[window], found.units)
+	return result
+
+
+def _window_picture(values, depths, units) -> dict:
+	"""A caliper window as a picture: depth across, elements down, the value as colour."""
+	import matplotlib
+
+	matplotlib.use('Agg')
+	from matplotlib import pyplot
+	from PIL import Image
+
+	figure, axes = pyplot.subplots(figsize=(12, 4), dpi=100)
+	shown = axes.imshow(
+		values.T,
+		aspect='auto',
+		origin='lower',
+		extent=(float(depths[0]), float(depths[-1]), 0, values.shape[1]),
+		interpolation='nearest',
+	)
+	axes.ticklabel_format(axis='x', style='plain', useOffset=False)  # 4580.1, not 0.1 + 4.58e3
+	axes.set_xlabel('Depth (m)')
+	axes.set_ylabel('Element')
+	figure.colorbar(shown, ax=axes, label=str((units or {}).get('values', 'value')))
+	buffer = io.BytesIO()
+	figure.savefig(buffer, format='png', bbox_inches='tight')
+	pyplot.close(figure)
+	buffer.seek(0)
+	return _encoded(Image.open(buffer))
 
 
 def cerberus_found() -> dict:
@@ -248,6 +492,247 @@ def read_sheet(path: str, sheet: str = '', first_row: int = 1, contains: str = '
 	return f'{name} [{sheet}]: {sheet_page(cells, first_row, contains)}'
 
 
+def read_document(path: str, first: int = 1, contains: str = '') -> str:
+	"""Pages of a PDF, or parts of a Word file, on the share, from page *first* on.
+
+	The file is copied through the index and read in the Cerberus venv (:func:`document`). See
+	:func:`document_page` for what an answer holds.
+	"""
+	if not path.lower().endswith(DOCUMENTS):
+		raise ValueError(f'{path} is not a .pdf or .docx file')
+	if ntpath.basename(path).startswith('~$'):
+		raise ValueError(
+			f'{path} is the lock file Word keeps while the file is open; read the file'
+		)
+	found = run_in('cerb', __name__, 'document', path=str(local_copy(path)))
+	return (
+		f'{ntpath.basename(path)}: {document_page(found["parts"], found["unit"], first, contains)}'
+	)
+
+
+def read_image(path: str, page: int = 0) -> list:
+	"""An image on the share, or the pictures in one page of a PDF on the share, for Claude to
+	look at: a line saying what follows, then the images (:func:`pictures`)."""
+	from mcp.server.mcpserver import Image  # not in the Cerberus venv, which imports this module
+
+	name = ntpath.basename(path)
+	lower = path.lower()
+	if not lower.endswith((*IMAGES, '.pdf')):
+		raise ValueError(f'{path} is not an image ({", ".join(IMAGES)}) or a PDF')
+	if lower.endswith('.pdf') and page < 1:
+		raise ValueError('give the PDF page whose pictures to show, from 1')
+	found = run_in('cerb', __name__, 'pictures', path=str(local_copy(path)), page=page)
+	sizes = []
+	for image in found['images']:
+		sizes.append(f'{image["size"][0]}x{image["size"][1]}')
+	if found['pages']:
+		line = f'{name}, page {page} of {found["pages"]}: {found["found"]} pictures'
+		if not found['images']:
+			line += ' (only logos or icons, or none); cerb_read_document reads its text'
+		elif found['found'] > len(found['images']):
+			line += f', the first {len(found["images"])} shown'
+	else:
+		line = f'{name}'
+	if sizes:
+		line += f' ({", ".join(sizes)} pixels)'
+	parts: list = [line]
+	for image in found['images']:
+		parts.append(Image(data=base64.b64decode(image['data']), format=image['format']))
+	return parts
+
+
+def read_table(path: str, table_name: str = '', first_row: int = 1, contains: str = '') -> str:
+	"""A Parquet file, or a table of a SQLite file, on the share: pages of rows as for sheets
+	(:func:`sheet_page`), row 1 being the column names. A SQLite file without *table_name* gives
+	its tables."""
+	lower = path.lower()
+	if lower.endswith(PICKLES):
+		raise ValueError(
+			f'{path} is a pickle; loading one runs code stored in it, so it is never read'
+		)
+	if not lower.endswith(TABLES):
+		raise ValueError(f'{path} is not a .parquet or SQLite (.db, .sqlite) file')
+	name = ntpath.basename(path)
+	if name.lower() == 'thumbs.db':
+		raise ValueError(f"{path} is Windows' cache of picture thumbnails, not a SQLite file")
+	found = run_in('cerb', __name__, 'table', path=str(local_copy(path)), name=table_name)
+	if 'tables' in found:
+		parts = []
+		for found_name, rows in found['tables']:
+			parts.append(f'"{found_name}" {rows:,} rows')
+		return f'{name}: {len(found["tables"])} tables: {"; ".join(parts)}.'
+	label = name
+	if table_name:
+		label += f' [{table_name}]'
+	text = (
+		f'{label}: row 1 holds the column names. {sheet_page(found["cells"], first_row, contains)}'
+	)
+	if found['rows'] > MAX_TABLE_ROWS:
+		text += f'\nOnly the first {MAX_TABLE_ROWS:,} of {found["rows"]:,} rows can be paged.'
+	return text
+
+
+def caliper_piece(path: str, depth_from: float = 0, depth_to: float = 0) -> tuple[dict, Path, bool]:
+	"""A .dvcaliper on the share, read by HTTP ranges: its size and depth range, and a small
+	.dvcaliper of its own holding only the slices from *depth_from* to *depth_to* (m), or only
+	its first slice when no window is asked for or the window is empty. The last value says
+	whether the piece is the window.
+
+	The window is found by a binary search on depth, four bytes per step, in either depth order.
+	"""
+	inside = _inside_index(path)
+	url_path = _url_path(inside)
+	elements, slices = CALIPER_HEADER.unpack(_get(url_path, part=(0, CALIPER_HEADER.size - 1)))
+	row = (elements + 1) * CALIPER_VALUE.size
+	read = {}
+
+	def depth_of(index: int) -> float:
+		if index not in read:
+			start = CALIPER_HEADER.size + index * row
+			found = _get(url_path, part=(start, start + CALIPER_VALUE.size - 1))
+			(read[index],) = CALIPER_VALUE.unpack(found)
+		return read[index]
+
+	first, last = depth_of(0), depth_of(slices - 1)
+	facts = {'slices': slices, 'elements': elements, 'depths': [min(first, last), max(first, last)]}
+	start, count, window = 0, 1, False
+	if depth_to > depth_from:
+		if first <= last:
+			start = _first_index(depth_of, slices, lambda depth: depth >= depth_from)
+			stop = _first_index(depth_of, slices, lambda depth: depth > depth_to)
+		else:
+			start = _first_index(depth_of, slices, lambda depth: depth <= depth_to)
+			stop = _first_index(depth_of, slices, lambda depth: depth < depth_from)
+		facts['window_slices'] = stop - start
+		most = min(MAX_WINDOW_SLICES, MAX_FETCH_BYTES // row)
+		if stop - start > most:
+			raise ValueError(
+				f'{depth_from}-{depth_to} m holds {stop - start:,} slices; ask for at most '
+				f'{most:,} (a narrower window)'
+			)
+		if stop > start:
+			count, window = stop - start, True
+		else:
+			start = 0
+	offset = CALIPER_HEADER.size + start * row
+	data = _get(url_path, part=(offset, offset + count * row - 1))
+	name = (
+		f'{start}_{count}_{ntpath.basename(inside)}'  # the name keeps what Cerberus reads from it
+	)
+	piece = Path(tempfile.gettempdir(), 'dv_project_index', 'caliper pieces', name)
+	piece.parent.mkdir(parents=True, exist_ok=True)
+	piece.write_bytes(CALIPER_HEADER.pack(elements, count) + data)
+	return facts, piece, window
+
+
+def _first_index(depth_of, slices: int, passed) -> int:
+	"""The first slice whose depth has *passed*, by binary search; *slices* when none has.
+	*passed* turns true once along the file's depth order and stays true."""
+	low, high = 0, slices
+	while low < high:
+		middle = (low + high) // 2
+		if passed(depth_of(middle)):
+			high = middle
+		else:
+			low = middle + 1
+	return low
+
+
+def read_caliper(path: str, depth_from: float = 0, depth_to: float = 0) -> list:
+	"""A caliper file on the share as Cerberus reads it (:func:`caliper`): a summary, and for a
+	depth window (metres) its slices as text and a picture."""
+	from mcp.server.mcpserver import Image  # not in the Cerberus venv, which imports this module
+
+	lower = path.lower()
+	if lower.endswith(PICKLES):
+		raise ValueError(
+			f'{path} is a pickle; loading one runs code stored in it, so it is never read'
+		)
+	if not lower.endswith(CALIPERS):
+		raise ValueError(f'{path} is not a .dvcaliper or .npy caliper file')
+	if lower.endswith('.dvcaliper'):  # read by ranges: only the window is fetched
+		facts, piece, window = caliper_piece(path, depth_from, depth_to)
+		asked = (0, 0)
+		if window:
+			asked = (depth_from, depth_to)
+		found = run_in(
+			'cerb',
+			__name__,
+			'caliper',
+			first_path=prod_code(),
+			path=str(piece),
+			depth_from=asked[0],
+			depth_to=asked[1],
+		)
+		found.update(facts)  # the whole file's size and depths, not the piece's
+	else:
+		found = run_in(
+			'cerb',
+			__name__,
+			'caliper',
+			first_path=prod_code(),
+			path=str(local_copy(path)),
+			depth_from=depth_from,
+			depth_to=depth_to,
+		)
+	low, high = found['depths']
+	feet = f'{low / METRES_PER_FOOT:.1f}-{high / METRES_PER_FOOT:.1f} ft'
+	size = f'{found["slices"]:,} slices x {found["elements"]} elements'
+	depths = f'depth {low:.2f}-{high:.2f} m ({feet}), units {found["units"]}'
+	lines = [f'{ntpath.basename(path)}: {found["type"]}, {size}, {depths}']
+	if depth_to <= depth_from:
+		lines.append(
+			'Give depth_from and depth_to (m) to see the slices and a picture of a window.'
+		)
+		return ['\n'.join(lines)]
+	lines.append(f'{found.get("window_slices", 0):,} slices from {depth_from} to {depth_to} m.')
+	rows = found.get('rows', [])
+	if rows:
+		lines.append(
+			f'{len(rows)} of them, evenly spread plus the {MAX_PEAK_ROWS} highest, by depth: '
+			'depth, min, mean, max, empty elements'
+		)
+		for depth, smallest, mean, largest, nans in rows:
+			feet = depth / METRES_PER_FOOT
+			values = f'{smallest:.4g}\t{mean:.4g}\t{largest:.4g}\t{nans}'
+			lines.append(f'{depth:.3f} m ({feet:.2f} ft)\t{values}')
+	parts: list = ['\n'.join(lines)]
+	if found.get('image'):
+		parts.append(Image(data=base64.b64decode(found['image']['data']), format='png'))
+	return parts
+
+
+def document_page(parts: list[str], unit: str, first: int = 1, contains: str = '') -> str:
+	"""A line saying what the answer holds, then each page (or part) from *first* on, up to
+	DOC_PAGES and DOC_CHARS, under a `--- page n` line. With *contains*, only pages holding that
+	text (any case) count. A page with no text is said to be one, likely an image."""
+	numbers = []
+	for number in range(max(first, 1), len(parts) + 1):
+		if not contains or contains.lower() in parts[number - 1].lower():
+			numbers.append(number)
+	shown, size = [], 0
+	for number in numbers:
+		text = parts[number - 1].strip()
+		if shown and (len(shown) >= DOC_PAGES or size + len(text) > DOC_CHARS):
+			break
+		shown.append(number)
+		size += len(text)
+	head = f'{len(parts)} {unit}s'
+	if contains:
+		head += f', {len(numbers)} from {unit} {max(first, 1)} on contain "{contains}"'
+	lines = [head + '.']
+	for number in shown:
+		text = parts[number - 1].strip()
+		if not text:
+			text = f'(no text on this {unit}: likely an image, which this tool cannot show)'
+		lines.append(f'--- {unit} {number}\n{text[:DOC_CHARS]}')
+	if len(shown) < len(numbers):
+		lines.append(f'More from first={numbers[len(shown)]}.')
+	else:
+		lines.append('End of document.')
+	return '\n'.join(lines)
+
+
 def sheet_page(cells: list[list], first_row: int = 1, contains: str = '') -> str:
 	"""A line saying what the page holds, then its rows: Excel's row number and the cells,
 	tab-separated, one row per line.
@@ -323,13 +808,37 @@ def _row_line(number: int, texts: list[str]) -> str:
 
 
 def local_copy(path: str) -> Path:
-	"""Download *path* from the share into the temp folder, for tools that need a file on disk."""
+	"""*path* from the share, copied into the temp folder for the tools that need a file on disk.
+
+	The copy streams to disk, so files up to DV_PROJECT_INDEX_MAX_MB (default 1 GB) can be read.
+	A copy made in the last COPY_FRESH_S is used again, so paging through a big file downloads it
+	once (a change to the file on the share in that time is not seen); copies older than
+	COPY_KEEP_S are deleted.
+	"""
 	inside = _inside_index(path)
 	relative = inside[len(_index_root()) + 1 :]
-	target = Path(tempfile.gettempdir(), 'dv_project_index', relative)
+	copies = Path(tempfile.gettempdir(), 'dv_project_index')
+	_prune(copies)
+	target = copies / relative
+	if target.exists() and time.time() - target.stat().st_mtime < COPY_FRESH_S:
+		return target
 	target.parent.mkdir(parents=True, exist_ok=True)
-	target.write_bytes(_fetch(inside))
+	_get(_url_path(inside), into=target)
 	return target
+
+
+def _prune(copies: Path) -> None:
+	"""Delete copies older than COPY_KEEP_S, and the folders they leave empty."""
+	if not copies.exists():
+		return
+	cutoff = time.time() - COPY_KEEP_S
+	for path in copies.rglob('*'):
+		if path.is_file() and path.stat().st_mtime < cutoff:
+			path.unlink(missing_ok=True)
+	for path in sorted(copies.rglob('*'), reverse=True):  # a folder after everything in it
+		if path.is_dir() and not any(path.iterdir()):
+			with contextlib.suppress(OSError):  # another triage is copying into it right now
+				path.rmdir()
 
 
 def prod_version() -> str:
@@ -424,12 +933,50 @@ def _search(query: str, count: int = MAX_LISTED) -> list[dict]:
 
 
 def _fetch(path: str) -> bytes:
-	parts = _inside_index(path).lstrip('\\').split('\\')
-	return _get('/%5C%5C' + '/'.join(urllib.parse.quote(part, safe='') for part in parts))
+	return _get(_url_path(_inside_index(path)))
 
 
-def _get(url_path: str) -> bytes:
-	"""GET from the project index, the only request this module sends."""
+def _url_path(inside: str) -> str:
+	"""The index's URL path of a file on the share."""
+	parts = inside.lstrip('\\').split('\\')
+	return '/%5C%5C' + '/'.join(urllib.parse.quote(part, safe='') for part in parts)
+
+
+def _max_copy_bytes() -> int:
+	text = _setting('DV_PROJECT_INDEX_MAX_MB', str(DEFAULT_MAX_COPY_MB))
+	try:
+		return int(text) * 2**20
+	except ValueError as error:
+		raise ValueError(f'DV_PROJECT_INDEX_MAX_MB must be a number of MB, not {text!r}') from error
+
+
+def _stream(response, target: Path, limit: int) -> None:
+	"""*response* into *target*, CHUNK_BYTES at a time, at most *limit* bytes; a copy that is
+	too big or breaks off leaves nothing behind."""
+	partial = target.with_name(target.name + '.partial')
+	size = 0
+	try:
+		with partial.open('wb') as file:
+			while True:
+				chunk = response.read(CHUNK_BYTES)
+				if not chunk:
+					break
+				size += len(chunk)
+				if size > limit:
+					raise RuntimeError(
+						f'the file is over {limit // 2**20} MB, the most this bot copies '
+						'(DV_PROJECT_INDEX_MAX_MB)'
+					)
+				file.write(chunk)
+		partial.replace(target)
+	finally:
+		partial.unlink(missing_ok=True)
+
+
+def _get(url_path: str, into: Path | None = None, part: tuple[int, int] | None = None) -> bytes:
+	"""GET from the project index, the only request this module sends. The answer is returned,
+	up to MAX_FETCH_BYTES, or with *into* streamed to that file (:func:`_stream`). *part*, the
+	first and last byte, asks for only those bytes of the file (an HTTP range)."""
 	missing = []
 	for name in INDEX_ENV:
 		if not os.environ.get(name):
@@ -438,13 +985,19 @@ def _get(url_path: str) -> bytes:
 		raise RuntimeError(f'the project index is not set up here: set {", ".join(missing)}')
 	url = _index_url()
 	login = f'{os.environ[INDEX_ENV[0]]}:{os.environ[INDEX_ENV[1]]}'
-	request = urllib.request.Request(
-		url + url_path,
-		headers={'Authorization': 'Basic ' + base64.b64encode(login.encode()).decode()},
-	)
+	headers = {'Authorization': 'Basic ' + base64.b64encode(login.encode()).decode()}
+	if part is not None:
+		headers['Range'] = f'bytes={part[0]}-{part[1]}'
+	request = urllib.request.Request(url + url_path, headers=headers)
 	try:
 		with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-			data = response.read(MAX_FETCH_BYTES + 1)
+			if part is not None and response.status != PARTIAL_CONTENT:
+				raise RuntimeError('the project index does not serve parts of files')
+			if into is None:
+				data = response.read(MAX_FETCH_BYTES + 1)
+			else:
+				_stream(response, into, _max_copy_bytes())
+				data = b''
 	except urllib.error.HTTPError as error:
 		reason = {
 			401: 'the project index refused the login',
@@ -454,7 +1007,9 @@ def _get(url_path: str) -> bytes:
 	except (urllib.error.URLError, TimeoutError) as error:
 		raise RuntimeError(_no_answer(url, error)) from error
 	if len(data) > MAX_FETCH_BYTES:
-		raise RuntimeError(f'the file is over {MAX_FETCH_BYTES // 2**20} MB, too big to read here')
+		raise RuntimeError(
+			f'the file is over {MAX_FETCH_BYTES // 2**20} MB, too big to read as text here'
+		)
 	return data
 
 
@@ -467,6 +1022,8 @@ def _no_answer(url: str, error: Exception) -> str:
 
 
 def register(server) -> None:
+	from mcp.server.mcpserver import Image  # not at the top: the Cerberus venv imports this module
+
 	@server.tool()
 	def cerb_client_info(path: str) -> dict:
 		"""Well info, casing strings and joints of a `client_info.xlsm`, as Cerberus reads them (the
@@ -501,6 +1058,42 @@ def register(server) -> None:
 		sheet's top 3 rows first for the column names, and where the next page starts.
 		*contains* keeps only the rows with a cell containing that text."""
 		return read_sheet(path, sheet, first_row, contains)
+
+	@server.tool()
+	def cerb_read_document(path: str, first: int = 1, contains: str = '') -> str:
+		"""The text of a .pdf or .docx on the project share, such as a deliverable report or the
+		2D log intro pages: up to 20 pages from page *first* (a Word file comes in parts of about
+		3,000 characters), and where the next answer starts. *contains* keeps only the pages
+		with that text. Pages that are only an image show no text."""
+		return read_document(path, first, contains)
+
+	@server.tool()
+	def cerb_read_image(path: str, page: int = 0) -> list[str | Image]:
+		"""Look at an image on the project share (.png, .jpg and other bitmaps, such as a plot in
+		Deliverables), or at the pictures in page *page* of a PDF on the share (plots that
+		cerb_read_document cannot read, like the 2D log overview plots). Large images are scaled
+		to 1568 pixels; logos are left out."""
+		return read_image(path, page)
+
+	@server.tool()
+	def cerb_read_table(path: str, table: str = '', first_row: int = 1, contains: str = '') -> str:
+		"""A .parquet file (such as calibs_dataframe.parquet), or a table of a SQLite .db file,
+		on the project share: up to 100 rows from *first_row*, row 1 being the column names, and
+		where the next page starts. A .db file without *table* lists its tables. *contains*
+		keeps only the rows with a cell containing that text. Pickle files are never read."""
+		return read_table(path, table, first_row, contains)
+
+	@server.tool()
+	def cerb_read_caliper(
+		path: str, depth_from: float = 0, depth_to: float = 0
+	) -> list[str | Image]:
+		"""A .dvcaliper (or caliper .npy) file on the project share, read by the prod Cerberus:
+		its type, units, slices, elements and depth range. With *depth_from* and *depth_to* in
+		metres (ft x 0.3048), also up to 60 slices of that window evenly spread plus the 10 with
+		the highest values, each with the min, mean and max over its elements, and a picture of
+		the window (depth across, elements down). Big files are read in parts: only the window is
+		fetched, at most 20,000 slices."""
+		return read_caliper(path, depth_from, depth_to)
 
 	@server.tool()
 	def cerb_last_session(project: str, user: str, before: str = '') -> dict:

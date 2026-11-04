@@ -1,5 +1,157 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-04 (night): todo titles, links and a shorter footer (Vincent, with Claude)
+- **Asked by Vincent:**
+  - number the todos 1., 2. (Slack letters a list inside a bullet a., b.);
+  - drop `dss-triage/3` and "not posted in the DSS thread · the DSS post" from the footer;
+  - link DSS and DTN tickets and GitHub commits, branches, PRs and releases, with no previews
+    except the DSS post's;
+  - replace Actions with "Bot Summary", "<analyst's Slack name> Todos", "Data Dev Todos" and
+    "Draft Reply", leaving out a todo list with nothing in it.
+- **Done** (branch `source-gaps`):
+  - Each todo list is a top-level numbered list under a bold title. The analyst's title is their
+    Slack display name as plain text: a mention could notify them of a draft. The Jira reporter
+    stands in without Slack (the `trial` CLI). No `'s`, as many names end in s.
+  - The headline's key links to the DSS post, which gives the snapshot below the post. The
+    footer is "Draft by Claude · tokens · cost · time".
+  - `code.web_links` finds commits (checked with `rev-parse`), remote branches (a branch's PR
+    when GitHub's pull refs, read with `ls-remote`, name its tip), "Cerberus x.y" releases (the
+    release commit's PR) and "PR #N" or "(#N)". `master` is not linked. A failed lookup becomes a
+    note, and the post goes out with Jira links only.
+  - The Draft Reply links only Jira tickets: analysts cannot open GitHub.
+  - `unfurl_links` stays at Slack's default. `False` also hid the DSS post's preview (tried in the
+    test channel); Jira and GitHub links show no preview at the default. `unfurl_media` is off.
+- **Checked:**
+  - 190 tests pass; ruff is clean apart from the old SIM108s, FURB167s and SIM110.
+  - DSS-1247 re-posted in the new format (16:15): the DSS snapshot shows, nothing else unfurls.
+  - The links of DSS-1247 found in 1.2 s; the DTN-3726 branch links to PR #1018 and
+    `develop-v1.1-release` to the 1.1 release PR #978.
+  - A test run of DSS-1237 (posted 2026-10-31; 58 turns, 181 s, $1.39) in the new format. Its
+    verdict leaned on a rerun log a developer put on the share after the ticket: the thread is
+    cut at the post, but the share and Jira are read as they are now.
+- **Live:** the bot restarted at 16:44 with the new format, still posting to
+  #data-dev-support-assist-test.
+- **Not done:**
+  - "As posted" trials, which DSS-1237 showed matter for replaying old tickets.
+  - A logon task.
+  - Annika's OK on the destination, then `DSS_SLACK_POST_CHANNEL` back to #data-dev-support-assist.
+
+### 2026-11-04 (evening): a shorter post, agreed with Annika (Vincent, with Claude)
+- **Feedback from Vincent and Annika on the first posts:**
+  - say each thing once;
+  - give analysts the answer, not the internals;
+  - "Reported" and "Request" were the same;
+  - name exact data, not "here";
+  - don't state what the reader can tell already;
+  - combine the actions and the notes (Annika).
+- **Done** (branch `source-gaps`; record `dss-triage/3`):
+  - The post: a headline with the verdict in a few words, then Summary.
+  - Then Actions for the analyst and for the developers. Questions become "Answer" actions;
+    what is not proved becomes "Confirm" checks.
+  - The Reply comes last: at most 3 sentences, solution first, exact facts. No code, functions
+    or line numbers, and no release unless a DTN fix version names it. The check refuses `.py`,
+    `cerberus/` paths and line numbers in it.
+  - The thread: why, past issues, evidence, DTN draft, confidence, class.
+- **Also fixed:** DSS-1242's first trial lost its answer to an `AttributeError` in the trace
+  check, on a malformed `triage` block. That check now tolerates it, and any error while checking
+  or rendering becomes a listed problem, with the traceback and the answer saved.
+- **Checked:**
+  - 185 tests pass; ruff is clean; the system prompt is 17,786 characters.
+  - The DSS-1242 trial (`dss-triage/2`, likely, $0.40) was laid out by hand in the new format to
+    agree it.
+- **Live:** the bot restarted, posting to #data-dev-support-assist-test (`DSS_SLACK_POST_CHANNEL`
+  set to the test channel in `.env`) until the format is checked on new tickets.
+  - Its first live ticket, DSS-1247 (44 s, $0.23): known issue DTN-3726, fixed in 1.1.
+  - The run exposed a gap: Cerberus 1.1 went to prod today as `cerberus-1.1.0.68`, but the
+    release commit is `release: 1.1 (#978)`, so `prod_ref` found nothing.
+    - The lookup now also tries the version without the build number and without a zero patch.
+    - All 444 files of the 1.1.0.68 wheel match `ab952f341`.
+  - Actions now render as bullets (Analyst, Developers), with a numbered list inside. Slack
+    letters the inner list a., b.
+  - The bot restarted with both changes; 187 tests pass.
+- **Not done:**
+  - "As posted" trials: hide sources newer than the post, so old tickets don't find later fixes.
+  - The PR lookup from git pull refs, with links (done that night).
+  - Merging `source-gaps`.
+  - A logon task.
+  - Annika's OK on the destination.
+
+### 2026-11-04 (late afternoon): the bot goes live in the developers' channel (Vincent, with Claude)
+- **Decided by Vincent:**
+  1. Triage 15 s after the post (the workflow's screenshot lands within a second).
+  2. The live bot uses the checked record.
+  3. Analyses go to #data-dev-support-assist; new features and debugging go to
+     #data-dev-support-assist-test; nothing goes to #data-dev-support until the replies are
+     consistently good.
+- **Done** (branch `source-gaps`):
+  - `SlackDesk` runs `record.trial` and posts the decision to `DSS_SLACK_POST_CHANNEL`, with the
+    proof in its thread, as Markdown blocks. Without that setting it posts to the reviewer's DM.
+  - It refuses #data-dev-support, or the watched channel, as a destination, at start and on every
+    post.
+  - A blank line now ends each list in the DM and thread, so "Evidence" numbers from 1 (Slack had
+    run on from "Past issues").
+  - CLAUDE.md, README and `.env.example` updated.
+- **Live:**
+  - `ddev-support-bot` has Socket Mode, an app-level token and the message events (set up by
+    Vincent as a collaborator).
+  - The bot started on Vincent's PC about 14:00 and connected. DSS-1245 and DSS-1246 were marked
+    done first, so it starts with the next new ticket.
+  - It runs as a background task of a Claude Code session, so it stops when that session ends,
+    until a logon task runs it.
+- **Checked:**
+  - 176 tests pass; ruff is clean on the changed files.
+  - One Markdown-block post to the test channel rendered bold, code and escapes correctly.
+- **Not done:**
+  - Merge `source-gaps`.
+  - A Windows logon task, so the bot survives the session.
+  - Annika's OK on the destination change (CLAUDE.md says both owners).
+  - The first live ticket end to end.
+
+### 2026-11-04 (evening): the sources the bot could not see (Vincent, with Claude)
+- **Why:** a live probe of every source (Jira, Confluence, project index, telemetry, git, Slack)
+  found all of them up. What the tools could not see:
+  - Jira comments and fix versions;
+  - PDF and Word files;
+  - images on the share;
+  - files over 50 MB;
+  - data files.
+- **Done** (branch `source-gaps`, one commit each):
+  1. `jira_get_issue` adds:
+     - resolution;
+     - fix versions, released or not, with dates;
+     - the newest 10 comments;
+     - attachment names.
+
+     `jira_search` adds resolution and fix versions.
+  2. `cerb_read_document`: the text of `.pdf` and `.docx`, page by page (pypdf and python-docx
+     in the Cerberus venv).
+  3. `cerb_read_image`: images on the share, and the pictures embedded in a PDF page. Scaled to
+     1568 px, logos left out.
+  4. Copies stream to disk up to `DV_PROJECT_INDEX_MAX_MB` (default 1 GB; Vincent to confirm),
+     are reused for 15 minutes, and are deleted after a day.
+  5. `cerb_read_table` (Parquet; SQLite read-only) and `cerb_read_caliper` (`.dvcaliper` and
+     caliper `.npy`, by the prod Cerberus's reader).
+     - A `.dvcaliper` window is read by HTTP ranges, so a 4 GB file is never copied: header,
+       binary search on depth, then only the window.
+     - Pickles and `Thumbs.db` are refused.
+- **Checked:**
+  - 177 tests pass. Ruff is clean apart from the old SIM108.
+  - Live:
+    - DTN-3726 shows its fix version (CERBERUS v1.1, not released) and the developer's comment.
+    - The 2D log intro pages PDF: its text, and page 2's overview plot as an image, with the
+      repeated "0.2".
+    - A 496 MB Word file and a 282 MB PDF (943 pages) copied in 2-4 s and reused.
+    - A Parquet file of 1,451 rows x 155 columns.
+    - DSS-1241's 4 GB wall-loss caliper: summary in 2 s, and the window at 15026 ft in 3 s.
+      It shows the breach (0.007722 m = 0.304 in) at 15026.25 ft, inside a ring of shallower
+      loss around most of the pipe.
+  - All 14 `.db` files in three projects were `Thumbs.db`.
+- **Not done:**
+  - Not pushed.
+  - Open PR titles (needs a GitHub token), other Slack channels (invites), UAT builds pushed.
+  - Word files' embedded pictures.
+  - Jira attachment downloads (the download redirects to another host with the login).
+
 ### 2026-11-04 (afternoon): Slack thread live, and the bot's own Cerberus (Vincent, with Claude)
 - **Merged:** PR #8 (`trial-followups`: threads and screenshots, workbooks, past issues first).
 - **Slack:**

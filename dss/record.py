@@ -1,4 +1,4 @@
-"""Trial mode: one triage as a checked record (`dss-triage/2`) instead of free Markdown.
+"""Trial mode: one triage as a checked record (`dss-triage/3`) instead of free Markdown.
 
 Code reads the `dss_ticket` block before Claude starts. Claude follows the same steps and rules as
 the bot (`triage.md`) but answers with the `triage` and `class` blocks (`triage_record.md`). Code
@@ -15,6 +15,7 @@ import json
 import ntpath
 import re
 import string
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +24,7 @@ import jsonschema  # type: ignore[import-untyped]
 from dss import cerb, code, jira, runner, triage
 from dss.worker import ROOT
 
-SCHEMA_ID = 'dss-triage/2'
+SCHEMA_ID = 'dss-triage/3'
 SCHEMA_FILE = ROOT / 'docs' / 'triage_record.schema.json'
 KNOWN_CAUSES_FILE = ROOT / 'docs' / 'known_causes.json'
 ANSWER_FILE = Path(__file__).with_name('triage_record.md')  # replaces triage.md's answer section
@@ -52,16 +53,31 @@ MARKDOWN_MARK = re.compile(r'([\\*_~<>\[\]])')  # shown as typed once escaped: \
 MAX_PROBLEMS = 10  # schema problems listed in the DM
 PROBLEM_CHARS = 300
 RAW_CHARS = 3000  # of a refused answer, in the thread
+TRIAL_LABEL = 'Trial · draft by Claude, for you only'
+LIST_ITEM = re.compile(r'\s*(\d+\.|-) ')  # a list item, nested ones too
+LINKED_KEY = re.compile(r'\b(?:DSS|DTN)-[0-9]+\b')  # linked to Jira in the post and the thread
 
 
-def trial(key: str, posted: str, post: str = '', ask=None, thread_ts: str = '') -> dict:
+def trial(
+	key: str,
+	posted: str,
+	post: str = '',
+	ask=None,
+	thread_ts: str = '',
+	label: str = TRIAL_LABEL,
+	ticket_link: str = '',
+	analyst: str = '',
+) -> dict:
 	"""One trial triage of *key*, checked, rendered and saved in TRIAL_DIR.
 
 	*posted*, *post* and *thread_ts* are as for :func:`dss.triage.triage`. *ask* defaults to
-	:func:`dss.runner.run_reply` with the record system prompt (faked in tests). Returns what was
-	saved: `ticket`, `notes` (what code could not read), `record` (None when the answer had no
-	JSON), `problems` (empty when the record passed the check), `dm` and `thread` (Markdown),
-	Claude's raw `text`, its cost, and `file`.
+	:func:`dss.runner.run_reply` with the record system prompt (faked in tests). *label* starts
+	the DM's footer, the headline's key links to *ticket_link* (else to Jira), and *analyst* heads
+	the analyst's todos (else the Jira reporter); the Slack bot gives its own label, the DSS post
+	and the analyst's Slack name. Returns what was saved: `ticket`, `notes` (what
+	code could not read), `record` (None when the answer had no JSON), `problems` (empty when the
+	record passed the check), `dm` and `thread` (Markdown), Claude's raw `text`, its cost, and
+	`file`.
 	"""
 	if not jira.ISSUE_KEY.fullmatch(key):
 		raise ValueError(f'{key!r} is not an issue key like DSS-1234')
@@ -72,16 +88,22 @@ def trial(key: str, posted: str, post: str = '', ask=None, thread_ts: str = '') 
 	asked = prompt(key, posted, ticket, notes, post, thread_ts)
 	trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
 	answer = triage.run(key, posted, asked, ask, trace=trace)
-	record, problems = assemble(ticket, answer['text'])
-	if record is not None:
-		problems += order_problems(record, traced_tools(trace))
-	if record is None or problems:
-		dm, thread = render_refused(key, problems, answer['text'])
-	else:
-		dm, thread = render(record, notes)
+	record, crash = None, ''
+	try:
+		record, problems = assemble(ticket, answer['text'])
+		if record is not None:
+			problems += order_problems(record, traced_tools(trace))
+		if record is None or problems:
+			dm, thread = render_refused(key, problems, answer['text'], ticket_link)
+		else:
+			dm, thread = render(record, notes, links(record, notes), ticket_link, analyst)
+	except Exception as error:  # noqa: BLE001 - a paid answer is never lost to a bug in this code
+		crash = traceback.format_exc()
+		problems = [f'the answer could not be checked or rendered: {type(error).__name__}: {error}']
+		dm, thread = render_refused(key, problems, answer['text'], ticket_link)
 	usage = f'{answer["tokens"]:,} tokens · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
 	# the blank line keeps the footer out of a quoted reply above it
-	dm += f'\n\n_Trial ({SCHEMA_ID}) · draft by Claude, for you only · {_link(key)} · {usage}_'
+	dm += f'\n\n_{label} · {usage}_'
 	TRIAL_DIR.mkdir(parents=True, exist_ok=True)
 	path = TRIAL_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.json'
 	result = {
@@ -99,6 +121,8 @@ def trial(key: str, posted: str, post: str = '', ask=None, thread_ts: str = '') 
 		'trace': str(trace),
 		'file': str(path),
 	}
+	if crash:
+		result['crash'] = crash
 	path.write_text(json.dumps(result, indent=1), encoding='utf-8')
 	return result
 
@@ -267,8 +291,11 @@ def order_problems(record: dict, tools: list[str]) -> list[str]:
 		problems.append(
 			'trace: no jira_search for past DSS and DTN tickets before the investigation'
 		)
-	cerberus_issue = record.get('triage', {}).get('status') != 'not_cerberus'
-	if cerberus_issue and not HISTORY_TOOLS & set(before):
+	status = ''
+	answer = record.get('triage')
+	if isinstance(answer, dict):  # a malformed block is already a schema problem
+		status = answer.get('status', '')
+	if status != 'not_cerberus' and not HISTORY_TOOLS & set(before):
 		problems.append(
 			'trace: no git history search (code_log_s, code_log or code_branches) before the '
 			'investigation'
@@ -276,18 +303,58 @@ def order_problems(record: dict, tools: list[str]) -> list[str]:
 	return problems
 
 
-def render(record: dict, notes: list[str]) -> tuple[str, str]:
+def render(
+	record: dict,
+	notes: list[str],
+	links: dict[str, str] | None = None,
+	ticket_link: str = '',
+	analyst: str = '',
+) -> tuple[str, str]:
 	"""The DM (the decision) and its thread reply (the proof) of a checked *record*, in Markdown.
 
 	Each field is shown once, and empty fields are left out. *notes* are what code could not read.
-	Claude's text is escaped (:func:`_text`), so paths and names show as written.
+	Claude's text is escaped (:func:`_text`), so paths and names show as written. Each name in
+	*links* (:func:`links`) is linked below the headline, whose key links to *ticket_link*. The
+	reply to the analyst links only Jira tickets: analysts cannot open Cerberus on GitHub.
+	*analyst* (a Slack name) heads the analyst's todos.
 	"""
-	return _decision(record), _proof(record, notes)
+	decision, proof = _decision(record, ticket_link, analyst), _proof(record, notes)
+	if not links:
+		return decision, proof
+	tickets = {}
+	for name, url in links.items():
+		if LINKED_KEY.fullmatch(name):
+			tickets[name] = url
+	lines = decision.split('\n')
+	for index in range(1, len(lines)):  # the headline keeps only its key's link
+		if lines[index].startswith('> '):  # the reply
+			lines[index] = _linked(lines[index], tickets)
+		else:
+			lines[index] = _linked(lines[index], links)
+	return '\n'.join(lines), _linked(proof, links)
 
 
-def render_refused(key: str, problems: list[str], text: str) -> tuple[str, str]:
+def links(record: dict, notes: list[str]) -> dict[str, str]:
+	"""Where the names in *record* link: DSS and DTN keys to Jira, and Cerberus commits, branches,
+	PRs and releases to GitHub (:func:`dss.code.web_links`). When git fails, the reason is added to
+	*notes* and the post goes out without GitHub links."""
+	text = '\n'.join(_strings(record))
+	found = {}
+	if jira.setting('JIRA_URL'):
+		for key in LINKED_KEY.findall(text):
+			found[key] = jira.browse_url(key)
+	try:
+		found.update(code.web_links(text))
+	except Exception as error:  # noqa: BLE001 - a link is a convenience
+		notes.append(f'GitHub links not added: {error}')
+	return found
+
+
+def render_refused(
+	key: str, problems: list[str], text: str, ticket_link: str = ''
+) -> tuple[str, str]:
 	"""The DM listing why the answer was refused, and a thread reply with the answer as given."""
-	lines = [f'**{key} · the trial answer failed the record check**']
+	lines = [f'**{_key(key, ticket_link)} · the trial answer failed the record check**']
 	for problem in problems[:MAX_PROBLEMS]:
 		lines.append(f'- {_text(problem)}')
 	if len(problems) > MAX_PROBLEMS:
@@ -298,45 +365,50 @@ def render_refused(key: str, problems: list[str], text: str) -> tuple[str, str]:
 	return '\n'.join(lines), thread
 
 
-def _decision(record: dict) -> str:
-	ticket, answer, planning = record['dss_ticket'], record['triage'], record['class']
-	head = [ticket['key'], _words(answer['status']), f'{answer["confidence"]} confidence']
-	head.append(_words(answer.get('playbook') or answer['settled_at']))
-	if planning.get('cause_family'):
-		head.append(_words(planning['cause_family']))
-	if ticket.get('toolbox'):
-		head.append(ticket['toolbox'])
-	lines = [f'**{" · ".join(head)}**', f'**Reported:** {_text(answer["what"])}']
-	lines.append(f'**Request:** {_request(answer["request"])}')
-	if answer.get('cause'):
-		lines.append(f'**Cause:** {_text(answer["cause"])}')
-	if answer.get('where'):
-		lines.append(f'**Where:** {_where(answer["where"])}')
-	do_now = answer.get('do_now')
-	if do_now:
-		lines.append(f'**Do now ({_words(do_now["who"])}):** {_text(do_now["action"])}')
-	questions = answer.get('questions') or []
-	if questions:
-		lines.append('**Ask the analyst:**')
-		for number, question in enumerate(questions, 1):
-			ask, settles = _text(question['ask']), _text(question['settles'])
-			lines.append(f'{number}. {ask} (settles: {settles})')
-	escalate = answer.get('escalate')
-	if escalate:
-		kind = _words(escalate['kind'])
-		if escalate.get('dtn_ticket'):
-			lines.append(f'**Escalate ({kind}):** {escalate["dtn_ticket"]}')
-		if escalate.get('draft'):
-			# the blank line ends the quote; Markdown would run the next line into it
-			lines.append(f'**Escalate ({kind}), draft to send:**\n{_quote(escalate["draft"])}\n')
+def _decision(record: dict, ticket_link: str = '', analyst: str = '') -> str:
+	"""The post: headline, the bot's summary, each side's todos, and the draft reply last.
+
+	The analyst's questions are their "Answer" todos, and what is not proved is the developers'
+	"Confirm" todos, so each is said once. A side with nothing to do is left out. *analyst* is the
+	analyst's Slack name; the Jira reporter's name stands in without it.
+	"""
+	ticket, answer = record['dss_ticket'], record['triage']
+	key = _key(ticket['key'], ticket_link)
+	head = f'**{key} · {_text(answer["headline"])} · {_words(answer["status"])}**'
+	lines = [head, f'**Bot Summary:** {_text(answer["what"])}']
+	analyst_todos = list(answer['actions']['analyst'])
+	for question in answer.get('questions') or []:
+		analyst_todos.append(f'Answer: {question["ask"]}')
+	developer_todos = list(answer['actions']['developers'])
+	for check in answer.get('not_proved') or []:
+		if check.lower().startswith('confirm '):  # "Confirm: Confirm the ..." says it twice
+			check = check[len('confirm ') :]
+		developer_todos.append(f'Confirm: {check}')
+	_todos(lines, f'{analyst or ticket["reporter"]} Todos', analyst_todos)
+	_todos(lines, 'Data Dev Todos', developer_todos)
 	if answer.get('reply'):
-		lines.append(f'**Suggested reply:**\n{_quote(answer["reply"])}')
-	return '\n'.join(lines)
+		lines.append(f'**Draft Reply:**\n{_quote(answer["reply"])}')
+	return _joined(lines)
+
+
+def _todos(lines: list[str], title: str, items: list[str]) -> None:
+	"""*items* numbered under *title*, or nothing when there are none. The list is not nested in
+	a bullet, as Slack numbers a nested list with letters."""
+	if not items:
+		return
+	lines.append(f'**{_text(title)}:**')
+	for number, item in enumerate(items, 1):
+		lines.append(f'{number}. {_text(item)}')
 
 
 def _proof(record: dict, notes: list[str]) -> str:
 	ticket, answer, planning = record['dss_ticket'], record['triage'], record['class']
 	lines = []
+	if answer.get('cause'):
+		why = _text(answer['cause'])
+		if answer.get('where'):
+			why += f' ({_where(answer["where"])})'
+		lines.append(f'**Why:** {why}')
 	past = answer['prior_art']
 	if past:
 		lines.append('**Past issues**')
@@ -351,7 +423,18 @@ def _proof(record: dict, notes: list[str]) -> str:
 		lines.append('**Evidence**')
 		for number, item in enumerate(evidence, 1):
 			lines.append(f'{number}. {_text(item["fact"])} (`{item["ref"]}`)')
-	_bullets(lines, 'Not proved', answer.get('not_proved') or [])
+	settles = []
+	for question in answer.get('questions') or []:
+		settles.append(f'{question["ask"]}: settles {question["settles"]}')
+	_bullets(lines, 'What the questions settle', settles)
+	escalate = answer.get('escalate')
+	if escalate:
+		kind = _words(escalate['kind'])
+		if escalate.get('dtn_ticket'):
+			lines.append(f'**DTN ({kind}):** {escalate["dtn_ticket"]}')
+		if escalate.get('draft'):
+			# the blank line ends the quote; Markdown would run the next line into it
+			lines.append(f'**DTN draft ({kind}):**\n{_quote(escalate["draft"])}\n')
 	details = []
 	for name, value in (answer.get('details') or {}).items():
 		if name != 'playbook':
@@ -363,16 +446,50 @@ def _proof(record: dict, notes: list[str]) -> str:
 		secondary.append(f'{_text(finding["cause"])} ({planning})')
 	_bullets(lines, 'Also found', secondary, escape=False)
 	_bullets(lines, 'Could not read', answer.get('flags') or [])
-	similar = answer.get('similar_dss_tickets') or []
-	if similar:
-		lines.append(f'**Similar DSS tickets:** {", ".join(similar)}')
-	lines.append(f"**Class** (Claude's proposal): {_planning(planning, with_family=False)}")
+	settled = f'{answer["confidence"]} confidence, settled at {_words(answer["settled_at"])}'
+	if answer.get('playbook'):
+		settled += f' ({_words(answer["playbook"])} playbook)'
+	lines.append(f'**Confidence:** {settled}')
+	lines.append(f"**Class** (Claude's proposal): {_planning(planning, with_family=True)}")
 	labels = _labels(planning.get('labels') or {}, ticket)
 	if labels:
 		lines.append(f'**Labels to set:** {labels}')
 	lines.append(f'**Facts read by code:** {_facts(ticket)}')
 	_bullets(lines, 'Code could not read', notes)
-	return '\n'.join(lines)
+	return _joined(lines)
+
+
+def _linked(markdown: str, links: dict[str, str]) -> str:
+	"""*markdown* with each name in *links* made a link, outside code spans. Longer names go first,
+	so the branch DTN-3726-fix is not linked as the key DTN-3726."""
+	if not links:
+		return markdown
+	urls = {}
+	for name, url in links.items():
+		urls[_text(name)] = url  # the name as it shows in the escaped text
+	names = []
+	for name in sorted(urls, key=len, reverse=True):
+		names.append(re.escape(name))
+	pattern = re.compile(rf'(?<![\w./\\-])({"|".join(names)})(?![\w/-]|\.\w)')
+
+	def link(match: re.Match) -> str:
+		return f'[{match[1]}]({urls[match[1]]})'
+
+	parts = CODE_SPAN.split(markdown)
+	for index in range(0, len(parts), 2):  # the even parts lie outside code spans
+		parts[index] = pattern.sub(link, parts[index])
+	return ''.join(parts)
+
+
+def _joined(lines: list[str]) -> str:
+	"""*lines* as Markdown, with a blank line between a list and the heading after it: without
+	one, the heading joins the last item and the next list goes on with its numbers."""
+	text = []
+	for index, line in enumerate(lines):
+		if index and line.startswith('**') and LIST_ITEM.match(lines[index - 1]):
+			text.append('')
+		text.append(line)
+	return '\n'.join(text)
 
 
 def _bullets(lines: list[str], title: str, items: list[str], escape: bool = True) -> None:
@@ -493,10 +610,30 @@ def _choices(values: list) -> str:
 	return ', '.join(quoted)
 
 
+def _key(key: str, ticket_link: str) -> str:
+	"""The headline's *key*, linked to *ticket_link* (the DSS post), else to Jira."""
+	if ticket_link:
+		return f'[{key}]({ticket_link})'
+	return _link(key)
+
+
 def _link(key: str) -> str:
 	if not jira.setting('JIRA_URL'):
 		return key
 	return f'[{key}]({jira.browse_url(key)})'
+
+
+def _strings(value) -> list[str]:
+	"""Every string in *value*, a record or a part of one."""
+	if isinstance(value, str):
+		return [value]
+	if isinstance(value, dict):
+		value = list(value.values())
+	strings = []
+	if isinstance(value, list):
+		for part in value:
+			strings.extend(_strings(part))
+	return strings
 
 
 def _dvt(value) -> int | None:

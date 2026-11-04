@@ -71,6 +71,7 @@ def sources(monkeypatch):
 	monkeypatch.setattr(cerb, 'find_project', find_project)
 	monkeypatch.setattr(cerb, 'last_session', last_session)
 	monkeypatch.setattr(cerb, 'prod_version', lambda: '1.0.4')
+	monkeypatch.setattr(code, 'web_links', lambda text: {})
 	monkeypatch.delenv('JIRA_URL', raising=False)
 	monkeypatch.delenv('CONFLUENCE_URL', raising=False)
 	return calls
@@ -159,7 +160,6 @@ def test_the_trial_keeps_the_bots_steps_and_asks_for_the_record():
 		answer['settled_at']['enum'],
 		answer['playbook']['enum'],
 		answer['where']['properties']['kind']['enum'],
-		answer['do_now']['properties']['who']['enum'],
 		answer['escalate']['properties']['kind']['enum'],
 		planning['impact']['enum'],
 		planning['fix_type']['enum'],
@@ -246,6 +246,29 @@ def test_a_trial_notes_a_cerberus_refresh_that_failed(sources, monkeypatch):
 	assert '**Code could not read**\n- prod Cerberus not unpacked' in result['thread']  # reviewer
 
 
+def test_a_malformed_block_is_a_problem_not_a_crash(sources):
+	text = json.dumps({'triage': 'proved, see above', 'class': EXAMPLE['class']})
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
+	assert any(problem.startswith('triage:') for problem in result['problems'])
+	assert 'crash' not in result
+	assert record.order_problems({'triage': 'x'}, list(IN_ORDER)) == []
+
+
+def test_a_rendering_bug_never_loses_the_answer(sources, monkeypatch):
+	def broken(*args):
+		raise AttributeError("'str' object has no attribute 'get'")
+
+	monkeypatch.setattr(record, 'render', broken)
+	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), []))
+	(problem,) = result['problems']
+	assert problem.startswith('the answer could not be checked or rendered: AttributeError')
+	assert 'Traceback' in result['crash']
+	assert result['record']['triage'] == EXAMPLE['triage']  # checked before the crash, so kept
+	assert result['dm'].startswith('**DSS-1234 · the trial answer failed the record check**')
+	assert answer_text()[:100] in result['thread']  # the paid answer is shown and saved
+	assert json.loads(Path(result['file']).read_text(encoding='utf-8'))['text'] == answer_text()
+
+
 def test_a_trial_that_skips_past_issues_fails_the_check(sources):
 	text = answer_text()
 	result = record.trial('DSS-1234', POSTED, ask=claude(text, [], tools=('code_read',)))
@@ -253,26 +276,108 @@ def test_a_trial_that_skips_past_issues_fails_the_check(sources):
 	assert result['dm'].startswith('**DSS-1234 · the trial answer failed the record check**')
 
 
-def test_the_dm_decides_and_the_thread_proves_without_repeats(sources):
+def test_the_post_decides_and_the_thread_proves_without_repeats(sources):
 	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), []))
 	dm, thread = result['dm'], result['thread']
-	head = '**DSS-1234 · proved · high confidence · wrong numbers · input data · CERB-WI**'
-	assert dm.startswith(head)
 	answer = EXAMPLE['triage']
-	for text in (answer['what'], answer['cause'], answer['do_now']['action'], answer['reply']):
+	assert dm.startswith(
+		'**DSS-1234 · Input problem: casing ID differs from the tally · proved**\n'
+		f'**Bot Summary:** {answer["what"]}\n'
+		'**Ann Analyst Todos:**\n'  # the Jira reporter, with no Slack name given
+		'1. Set the ID in DVT1234\\_client\\_info.xlsm, Casing Record row 3, to 4.55 in '
+		'and rerun the Defect Summary\n'
+		'\n'  # a blank line ends the list, or the next title joins its last item
+		f'**Draft Reply:**\n> {answer["reply"]}\n\n_Trial'  # the reply comes last, then the footer
+	)
+	assert 'Data Dev Todos' not in dm  # nothing for them to do
+	for text in (answer['what'], answer['reply']):
 		assert dm.count(text) == 1 and text not in thread
-	for item in answer['evidence']:
-		assert thread.count(item['fact']) == 1 and item['fact'] not in dm
-	assert '**Where:** data file `DVT1234_client_info.xlsm`, Casing Record row 3' in dm
-	assert '**Request:** fix · in Defect Summary, joint 57 · expected 21% wall loss' in dm
-	assert f'> {answer["reply"]}' in dm
-	assert thread.startswith('**Past issues**\n1. DSS-1100 (explained, applies: partly): Wall')
+	for text in [answer['cause']] + [item['fact'] for item in answer['evidence']]:
+		assert thread.count(text) == 1 and text not in dm
+	assert thread.startswith(
+		f'**Why:** {answer["cause"]} (data file `DVT1234_client_info.xlsm`, Casing Record row 3)\n'
+		'**Past issues**\n1. DSS-1100 (explained, applies: partly): Wall'
+	)
+	# a blank line ends each list, or the next heading joins its last item and numbers run on
+	assert 'on its own\n\n**Evidence**\n1. Casing Record row 3' in thread
 	assert '- reported: 19.97% (Defect Summary, joint 57)' in thread
 	assert '- first difference: casing ID' in thread
+	assert '**Confidence:** high confidence, settled at playbook (wrong numbers playbook)' in thread
+	assert "**Class** (Claude's proposal): input data · feature `wi_wall_loss`" in thread
 	assert '**Labels to set:** Outcome User Error' in thread  # the Toolbox Name is already set
 	assert 'Cerberus 1.0.3 · prod 1.0.4 · last failed run: casing\\_tally: KeyError: ID' in thread
-	assert 'input data' not in thread  # the cause family is in the DM's first line
-	assert dm.endswith('DSS-1234 · 5,000 tokens · ≈ $0.30 · 0 s_')
+	assert dm.endswith('\n\n_Trial · draft by Claude, for you only · 5,000 tokens · ≈ $0.30 · 0 s_')
+
+
+def test_questions_and_what_is_not_proved_become_actions(sources):
+	check = 'Read the RAID run config to confirm which DVCalipers it used'
+	text = answer_text(
+		status='likely',
+		actions={'analyst': [], 'developers': ['Raise a DTN ticket (draft in the thread)']},
+		not_proved=[check],
+		questions=[QUESTION],
+	)
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
+	assert result['problems'] == []
+	dm, thread = result['dm'], result['thread']
+	assert f'**Ann Analyst Todos:**\n1. Answer: {QUESTION["ask"]}\n\n' in dm
+	assert (
+		'**Data Dev Todos:**\n1. Raise a DTN ticket (draft in the thread)\n'
+		f'2. Confirm: {check}\n\n**Draft Reply:**'
+	) in dm
+	assert check not in thread  # said once, as an action
+	assert f'- {QUESTION["ask"]}: settles {QUESTION["settles"]}' in thread
+
+
+def test_a_check_that_starts_with_confirm_says_it_once(sources):
+	text = answer_text(status='likely', not_proved=['Confirm the wheel was built from ab952f341'])
+	dm = record.trial('DSS-1234', POSTED, ask=claude(text, []))['dm']
+	assert '**Data Dev Todos:**\n1. Confirm: the wheel was built from ab952f341\n' in dm
+
+
+def test_tickets_and_cerberus_changes_are_linked_below_the_headline(sources, monkeypatch):
+	monkeypatch.setenv('JIRA_URL', 'https://jira.example')
+	github = {
+		'DTN-1234-work-fix': 'https://github.example/pull/7',  # the branch's PR
+		'ab952f341': 'https://github.example/commit/ab952f3410',
+		'Cerberus 1.1': 'https://github.example/pull/978',
+	}
+	monkeypatch.setattr(code, 'web_links', lambda text: github)
+	text = answer_text(
+		headline='Known issue DTN-1234',
+		actions={
+			'analyst': [],
+			'developers': ['Link DSS-1234 to DTN-1234; the fix DTN-1234-work-fix is ab952f341'],
+		},
+		cause='See `DTN-1234` and DSS-1100.',
+		reply='It is fixed in Cerberus 1.1 (DTN-1234).',
+	)
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []), ticket_link='https://slack/p1')
+	dm, thread = result['dm'], result['thread']
+	assert dm.startswith('**[DSS-1234](https://slack/p1) · Known issue DTN-1234 · proved**\n')
+	assert (
+		'1. Link [DSS-1234](https://jira.example/browse/DSS-1234) to '
+		'[DTN-1234](https://jira.example/browse/DTN-1234); the fix '
+		'[DTN-1234-work-fix](https://github.example/pull/7) is '
+		'[ab952f341](https://github.example/commit/ab952f3410)\n'
+	) in dm
+	# analysts cannot open GitHub, so their reply links only tickets
+	assert '> It is fixed in Cerberus 1.1 ([DTN-1234](https://jira.example/browse/DTN-1234)).' in dm
+	assert 'See `DTN-1234` and [DSS-1100](https://jira.example/browse/DSS-1100).' in thread
+	assert 'GitHub links not added' not in thread
+
+
+def test_a_failed_github_lookup_still_links_tickets(sources, monkeypatch):
+	monkeypatch.setenv('JIRA_URL', 'https://jira.example')
+
+	def web_links(text):
+		raise RuntimeError('git rev-parse failed: not a git repository')
+
+	monkeypatch.setattr(code, 'web_links', web_links)
+	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), []))
+	assert result['problems'] == []
+	assert '[DSS-1100](https://jira.example/browse/DSS-1100)' in result['thread']
+	assert '- GitHub links not added: git rev-parse failed' in result['thread']
 
 
 def test_claude_text_shows_as_written(sources):
@@ -280,17 +385,20 @@ def test_claude_text_shows_as_written(sources):
 		r'The page path <project>\cerberus\<scene>\x.pdf is too long, so __init__ fails at `a.py:9`'
 	)
 	text = answer_text(cause=cause, reply='Rerun it.\nThanks')
-	dm = record.trial('DSS-1234', POSTED, ask=claude(text, []))['dm']
-	assert r'\<project\>\\cerberus\\\<scene\>\\x.pdf' in dm  # Markdown would eat \< and <...>
-	assert r'so \_\_init\_\_ fails at `a.py:9`' in dm  # code spans stay as they are
-	assert '> Rerun it.\n> Thanks\n\n_Trial' in dm  # the footer is not part of the quoted reply
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
+	thread = result['thread']
+	assert r'\<project\>\\cerberus\\\<scene\>\\x.pdf' in thread  # Markdown would eat \< and <...>
+	assert r'so \_\_init\_\_ fails at `a.py:9`' in thread  # code spans stay as they are
+	assert '> Rerun it.\n> Thanks\n\n_Trial' in result['dm']  # the footer is not quoted with it
 
 
-def test_reply_is_not_part_of_the_escalation_draft(sources):
+def test_the_dtn_draft_is_in_the_thread_and_the_reply_ends_the_post(sources):
 	escalate = {'kind': 'bug', 'draft': 'The header text overlaps.'}
 	text = answer_text(escalate=escalate, reply='Rerun it.')
-	dm = record.trial('DSS-1234', POSTED, ask=claude(text, []))['dm']
-	assert '> The header text overlaps.\n\n**Suggested reply:**\n> Rerun it.' in dm
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
+	assert '**DTN draft (bug):**\n> The header text overlaps.\n\n' in result['thread']
+	assert '**Draft Reply:**\n> Rerun it.\n\n_Trial' in result['dm']
+	assert 'header text' not in result['dm']
 
 
 def test_empty_fields_are_left_out(sources):
@@ -302,19 +410,20 @@ def test_empty_fields_are_left_out(sources):
 		cause=None,
 		where=None,
 		evidence=[],
-		do_now=None,
+		headline='One question for the analyst',
+		actions={'analyst': [], 'developers': []},
 		reply=None,
 		details={},
 		questions=[QUESTION],
 	)
 	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
 	assert result['problems'] == []
-	dm = result['dm']
-	assert dm.startswith('**DSS-1234 · needs info · low confidence · Gate C · input data')
-	assert f'1. {QUESTION["ask"]} (settles: {QUESTION["settles"]})' in dm
-	for label in ('Cause:', 'Where:', 'Do now', 'Suggested reply'):
-		assert label not in dm
-	assert 'Evidence' not in result['thread'] and 'Details' not in result['thread']
+	dm, thread = result['dm'], result['thread']
+	assert dm.startswith('**DSS-1234 · One question for the analyst · needs info**\n')
+	assert f'**Ann Analyst Todos:**\n1. Answer: {QUESTION["ask"]}\n\n_Trial' in dm
+	assert 'Data Dev Todos' not in dm and 'Reply' not in dm
+	for label in ('Why:', 'Evidence', 'Details', 'DTN'):
+		assert label not in thread
 
 
 def test_the_record_may_come_in_a_code_fence(sources):
@@ -358,7 +467,7 @@ def test_cli_prints_the_dm_and_thread_of_a_trial(sources, monkeypatch, capsys, t
 	monkeypatch.setattr(sys, 'argv', ['dss', 'trial', 'DSS-1234', '--posted', POSTED])
 	cli.main()
 	out, err = capsys.readouterr()
-	assert out.startswith('**DSS-1234 · proved') and '\n--- thread reply ---\n' in out
+	assert out.startswith('**DSS-1234 · Input problem') and '\n--- thread reply ---\n' in out
 	assert 'record check: passed' in err and str(tmp_path / 'trial') in err
 	monkeypatch.setattr(sys, 'argv', ['dss', 'trial', 'DSS 1234'])
 	with pytest.raises(SystemExit) as stopped:

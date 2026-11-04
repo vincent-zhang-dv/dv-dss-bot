@@ -1,12 +1,17 @@
 """DSS triage tools: Jira fields flattened, project files through the index, code at the release."""
 
+import asyncio
 import base64
 import io
 import json
 import ntpath
+import os
+import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import zipfile
@@ -17,8 +22,10 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+from mcp import Client
 
 from dss import cerb, code, jira
+from dss.server import build
 
 
 def test_jira_issue_keeps_only_plain_triage_fields():
@@ -37,6 +44,31 @@ def test_jira_issue_keeps_only_plain_triage_fields():
 			],
 			'customfield_10824': {'value': 'CERB-PE', 'id': '9'},
 			'customfield_13664': 1234.0,
+			'resolution': {'name': 'Done', 'id': '1'},
+			'fixVersions': [
+				{'name': 'CERBERUS v1.1', 'released': False, 'releaseDate': '2026-11-03'},
+				{'name': 'CERBERUS v1.0.4', 'released': True, 'releaseDate': '2026-10-09'},
+				{'name': 'Backlog', 'released': False},
+			],
+			'comment': {
+				'total': 12,
+				'comments': [
+					{
+						'author': {'displayName': f'Dev {number}'},
+						'created': f'2026-10-{number + 10}T11:04:58.443-0700',
+						'body': f'Comment {number}',
+					}
+					for number in range(1, 13)
+				],
+			},
+			'attachment': [
+				{
+					'filename': 'plot.png',
+					'mimeType': 'image/png',
+					'size': 2048,
+					'created': '2026-10-27T15:43:15.061-0700',
+				}
+			],
 		},
 	}
 	found = jira.compact(issue, jira.TICKET_FIELDS)
@@ -45,7 +77,23 @@ def test_jira_issue_keeps_only_plain_triage_fields():
 	assert found['links'] == ['causes DTN-2: Fix it']
 	assert len(found['description']) == jira.DESCRIPTION_CHARS
 	assert found['outcome'] is None
+	assert found['resolution'] == 'Done'
+	assert found['fix_versions'] == [
+		'CERBERUS v1.1 (not released, due 2026-11-03)',
+		'CERBERUS v1.0.4 (released 2026-10-09)',
+		'Backlog (not released)',
+	]
+	assert found['comments'][0] == '(2 older comments left out)'  # the newest 10 are kept
+	assert found['comments'][1] == '2026-10-13 Dev 3: Comment 3'
+	assert found['comments'][-1] == '2026-10-22 Dev 12: Comment 12'
+	assert found['attachments'] == ['plot.png (image/png, 2 KB, 2026-10-27)']
 	assert jira.plain([{'value': 'CERB-WI'}, {'name': 'Done'}, 7]) == ['CERB-WI', 'Done', 7]
+
+
+def test_long_jira_comments_are_cut():
+	issue = {'key': 'DTN-1', 'fields': {'comment': {'comments': [{'body': 'x' * 5000}]}}}
+	(comment,) = jira.compact(issue, jira.TICKET_FIELDS)['comments']
+	assert comment == ' unknown: ' + 'x' * jira.COMMENT_CHARS
 
 
 def test_jira_rejects_a_key_before_connecting():
@@ -85,6 +133,8 @@ def test_jira_asks_only_for_the_triage_fields(jira_site):
 			'key': 'DSS-7',
 			'summary': 'Old plot',
 			'status': None,
+			'resolution': None,
+			'fix_versions': [],
 			'created': '2026-01-02',
 			'toolbox': None,
 			'outcome': None,
@@ -147,10 +197,16 @@ def index(monkeypatch):
 	"""
 	files: dict[str, bytes] = {}
 
-	def get(url_path):
+	def get(url_path, into=None, part=None):
 		if not url_path.startswith('/?'):
-			parts = [urllib.parse.unquote(part) for part in url_path[1:].split('/')]
-			return files['\\'.join(parts)]
+			parts = [urllib.parse.unquote(piece) for piece in url_path[1:].split('/')]
+			data = files['\\'.join(parts)]
+			if part is not None:
+				data = data[part[0] : part[1] + 1]  # an HTTP range: first to last byte
+			if into is None:
+				return data
+			into.write_bytes(data)  # the real one streams it (cerb._stream)
+			return b''
 		hits, folders = [], set()
 		for path, data in files.items():
 			hits.append(
@@ -222,6 +278,43 @@ def test_project_files_are_listed_read_and_copied(index, tmp_path, monkeypatch):
 	copy = cerb.local_copy(PROJECT + r'\DVT1234_client_info.xlsm')
 	assert copy == tmp_path / 'dv_project_index' / 'ACME' / PROJECT.rsplit('\\', 1)[1] / copy.name
 	assert copy.read_bytes() == b'PK\x03\x04\0\0'
+
+
+def test_copies_are_reused_for_a_while_then_deleted(index, tmp_path, monkeypatch):
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	report = PROJECT + r'\Deliverables\report.pdf'
+	index[report] = b'first'
+	copy = cerb.local_copy(report)
+	index[report] = b'second'
+	assert cerb.local_copy(report).read_bytes() == b'first'  # paging: no second download
+	stale = time.time() - cerb.COPY_FRESH_S - 1
+	os.utime(copy, (stale, stale))
+	assert cerb.local_copy(report).read_bytes() == b'second'
+	old = tmp_path / 'dv_project_index' / 'ACME' / 'DVT9_old' / 'Deliverables' / 'old.pdf'
+	old.parent.mkdir(parents=True)
+	old.write_bytes(b'old')
+	ancient = time.time() - cerb.COPY_KEEP_S - 1
+	os.utime(old, (ancient, ancient))
+	cerb.local_copy(report)
+	assert not (tmp_path / 'dv_project_index' / 'ACME' / 'DVT9_old').exists()  # folders too
+	assert copy.exists()
+
+
+def test_big_files_stream_to_disk_up_to_the_limit(tmp_path, monkeypatch):
+	target = tmp_path / 'big.docx'
+	monkeypatch.setattr(cerb, 'CHUNK_BYTES', 4)
+	cerb._stream(io.BytesIO(b'0123456789'), target, limit=10)
+	assert target.read_bytes() == b'0123456789'
+	with pytest.raises(RuntimeError, match=r'over 0 MB, the most this bot copies'):
+		cerb._stream(io.BytesIO(b'0123456789A'), tmp_path / 'bigger.docx', limit=10)
+	assert sorted(path.name for path in tmp_path.iterdir()) == ['big.docx']  # nothing left behind
+	monkeypatch.delenv('DV_PROJECT_INDEX_MAX_MB', raising=False)
+	assert cerb._max_copy_bytes() == 1024 * 2**20
+	monkeypatch.setenv('DV_PROJECT_INDEX_MAX_MB', '2000')
+	assert cerb._max_copy_bytes() == 2000 * 2**20
+	monkeypatch.setenv('DV_PROJECT_INDEX_MAX_MB', '1 GB')
+	with pytest.raises(ValueError, match='must be a number of MB'):
+		cerb._max_copy_bytes()
 
 
 def test_project_tools_read_only_inside_the_share(index):
@@ -497,6 +590,254 @@ def test_workbooks_on_the_share_are_read_through_the_index(
 		cerb.read_sheet(PROJECT + r'\~$DVT1234_client_info.xlsm')
 
 
+PAGES = ['Cover\nACME Well-1', '', 'Eccentricity (in)\n0.0 0.1 0.2 0.2', 'Ovality (%)', 'End']
+
+
+def test_document_pages_are_shown_with_where_to_go_next(monkeypatch):
+	page = cerb.document_page(PAGES, 'page')
+	assert page.startswith('5 pages.\n--- page 1\nCover\nACME Well-1\n--- page 2\n(no text on')
+	assert 'likely an image, which this tool cannot show' in page
+	assert page.endswith('--- page 5\nEnd\nEnd of document.')
+	found = cerb.document_page(PAGES, 'page', contains='ECCENTRICITY')
+	assert found == (
+		'5 pages, 1 from page 1 on contain "ECCENTRICITY".\n'
+		'--- page 3\nEccentricity (in)\n0.0 0.1 0.2 0.2\nEnd of document.'
+	)
+	monkeypatch.setattr(cerb, 'DOC_PAGES', 2)
+	first = cerb.document_page(PAGES, 'page')
+	assert '--- page 2' in first and '--- page 3' not in first
+	assert first.endswith('More from first=3.')
+	assert cerb.document_page(PAGES, 'page', first=4).endswith('--- page 5\nEnd\nEnd of document.')
+	assert cerb.document_page(['a b'], 'part').startswith('1 parts.\n--- part 1\na b')
+
+
+def test_documents_on_the_share_are_read_through_the_index(index, monkeypatch, tmp_path):
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	report = PROJECT + r'\Deliverables\DVT1234 Report.pdf'
+	index[report] = b'%PDF-1.7 made-up'
+	reads = []
+
+	def run_in(app, module, func, **kwargs):
+		reads.append((app, module, func))
+		return {'unit': 'page', 'parts': PAGES}
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	assert cerb.read_document(report, contains='ovality') == (
+		'DVT1234 Report.pdf: 5 pages, 1 from page 1 on contain "ovality".\n'
+		'--- page 4\nOvality (%)\nEnd of document.'
+	)
+	assert reads == [('cerb', 'dss.cerb', 'document')]
+	with pytest.raises(ValueError, match=r'is not a \.pdf or \.docx file'):
+		cerb.read_document(PROJECT + r'\old.doc')
+	with pytest.raises(ValueError, match='the lock file Word keeps'):
+		cerb.read_document(PROJECT + r'\~$Report.docx')
+	with pytest.raises(ValueError, match='outside the project share'):
+		cerb.read_document(r'C:\Users\x\report.pdf')
+
+
+MADE_UP_PNG = b'\x89PNG made-up'
+
+
+def picture(width: int, height: int) -> dict:
+	"""One picture as `cerb.pictures` hands it over from the Cerberus venv."""
+	data = base64.b64encode(MADE_UP_PNG).decode()
+	return {'format': 'png', 'size': [width, height], 'shown': [width, height], 'data': data}
+
+
+@pytest.fixture
+def share_images(index, monkeypatch, tmp_path):
+	"""A plot and a PDF on the faked share; `cerb.pictures` faked: the PDF's page 1 holds only
+	a logo, page 2 eight plots."""
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	plot, report = PROJECT + r'\Deliverables\plot.png', PROJECT + r'\Deliverables\intro.pdf'
+	index[plot] = MADE_UP_PNG
+	index[report] = b'%PDF-1.7 made-up'
+
+	def run_in(app, module, func, **kwargs):
+		assert (module, func) == ('dss.cerb', 'pictures')
+		if not kwargs['path'].endswith('.pdf'):
+			return {'pages': 0, 'found': 1, 'images': [picture(800, 600)]}
+		if kwargs['page'] == 1:
+			return {'pages': 2, 'found': 0, 'images': []}
+		return {'pages': 2, 'found': 8, 'images': [picture(1899, 1078)] * cerb.MAX_PAGE_PICTURES}
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	return plot, report
+
+
+def test_images_and_pdf_pictures_are_shown_to_claude(share_images):
+	plot, report = share_images
+	line, image = cerb.read_image(plot)
+	assert line == 'plot.png (800x600 pixels)'
+	assert image.data == MADE_UP_PNG and image.to_image_content().mime_type == 'image/png'
+	parts = cerb.read_image(report, page=2)
+	assert parts[0].startswith('intro.pdf, page 2 of 2: 8 pictures, the first 6 shown (1899x1078, ')
+	assert len(parts) == 1 + cerb.MAX_PAGE_PICTURES
+	only_logos = (
+		'intro.pdf, page 1 of 2: 0 pictures (only logos or icons, or none); '
+		'cerb_read_document reads its text'
+	)
+	assert cerb.read_image(report, page=1) == [only_logos]
+	with pytest.raises(ValueError, match='give the PDF page'):
+		cerb.read_image(report)
+	with pytest.raises(ValueError, match='is not an image'):
+		cerb.read_image(PROJECT + r'\notes.txt')
+	with pytest.raises(ValueError, match='outside the project share'):
+		cerb.read_image(r'C:\Users\x\plot.png')
+
+
+def test_claude_gets_share_images_as_images(share_images):
+	plot, _ = share_images
+
+	async def call():
+		async with Client(build()) as client:
+			return await client.call_tool('cerb_read_image', {'path': plot})
+
+	result = asyncio.run(call())
+	assert not result.is_error
+	assert [part.type for part in result.content] == ['text', 'image']
+
+
+@pytest.fixture
+def share_db(index, monkeypatch, tmp_path):
+	"""A SQLite file on the faked share, read by the real `cerb.table` in this process."""
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	made = tmp_path / 'made.db'
+	connection = sqlite3.connect(made)
+	connection.execute('CREATE TABLE runs (name TEXT, status TEXT)')
+	connection.executemany('INSERT INTO runs VALUES (?, ?)', [('plots', 'ok'), ('doc', 'failed')])
+	connection.execute('CREATE TABLE "odd ""name""" (x INTEGER)')
+	connection.commit()
+	connection.close()
+	path = PROJECT + r'\cerberus\deliv01\runs.db'
+	index[path] = made.read_bytes()
+
+	def run_in(app, module, func, **kwargs):
+		return getattr(cerb, func)(**kwargs)
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	return path
+
+
+def test_sqlite_tables_are_listed_then_paged(share_db):
+	assert cerb.read_table(share_db) == 'runs.db: 2 tables: "odd "name"" 0 rows; "runs" 2 rows.'
+	assert cerb.read_table(share_db, 'runs') == (
+		'runs.db [runs]: row 1 holds the column names. 3 rows, 2 columns. Rows 1-3 below. '
+		'End of sheet.\n1\tname\tstatus\n2\tplots\tok\n3\tdoc\tfailed'
+	)
+	assert '3\tdoc\tfailed' in cerb.read_table(share_db, 'runs', contains='FAIL')
+	assert cerb.read_table(share_db, 'odd "name"').endswith('End of sheet.\n1\tx')
+	with pytest.raises(ValueError, match=r"no table 'nope'; the tables are: odd \"name\", runs"):
+		cerb.read_table(share_db, 'nope')
+
+
+def test_files_that_are_not_sqlite_say_so(share_db, index):
+	not_sqlite = PROJECT + r'\cerberus\other.db'
+	index[not_sqlite] = b'not a database at all, just text that is long enough' * 4
+	with pytest.raises(ValueError, match=r'other\.db is not a SQLite file: file is not a database'):
+		cerb.read_table(not_sqlite)
+	with pytest.raises(ValueError, match="Windows' cache of picture thumbnails"):
+		cerb.read_table(PROJECT + r'\Images\Thumbs.db')
+
+
+def test_pickles_and_other_files_are_refused():
+	for reader in (cerb.read_table, cerb.read_caliper):
+		with pytest.raises(ValueError, match='loading one runs code stored in it'):
+			reader(PROJECT + r'\cerberus\temp\state.pkl')
+	with pytest.raises(ValueError, match=r'is not a \.parquet or SQLite'):
+		cerb.read_table(PROJECT + r'\notes.csv')
+	with pytest.raises(ValueError, match=r'is not a \.dvcaliper or \.npy caliper file'):
+		cerb.read_caliper(PROJECT + r'\notes.csv')
+
+
+def made_up_caliper(depths: list[float], elements: int = 3) -> bytes:
+	"""A .dvcaliper as Cerberus writes it: (elements, slices) as int64s, then for each slice its
+	depth and its elements (here the depth plus 0.1, 0.2, ...) as float32s."""
+	data = struct.pack('<2q', elements, len(depths))
+	for depth in depths:
+		values = [depth]
+		for element in range(1, elements + 1):
+			values.append(depth + element / 10)
+		data += struct.pack(f'<{elements + 1}f', *values)
+	return data
+
+
+@pytest.fixture
+def share_calipers(index, monkeypatch, tmp_path):
+	"""A wall loss caliper, depths 1000-1099 m, on the faked share, and the same descending."""
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	rising = PROJECT + r'\DVCaliper_Files\Pass1.wall-loss.dvcaliper'
+	falling = PROJECT + r'\DVCaliper_Files\Pass2.wall-loss.dvcaliper'
+	depths = [1000.0 + number for number in range(100)]
+	index[rising] = made_up_caliper(depths)
+	index[falling] = made_up_caliper(depths[::-1])
+	return rising, falling
+
+
+def test_a_caliper_window_is_read_by_ranges_in_either_depth_order(share_calipers):
+	for path in share_calipers:
+		facts, piece, window = cerb.caliper_piece(path, 1010.0, 1012.5)
+		assert facts == {
+			'slices': 100,
+			'elements': 3,
+			'depths': [1000.0, 1099.0],
+			'window_slices': 3,
+		}
+		assert window and piece.name.endswith('_3_' + ntpath.basename(path))
+		elements, slices = struct.unpack('<2q', piece.read_bytes()[:16])
+		rows = struct.unpack(f'<{slices * (elements + 1)}f', piece.read_bytes()[16:])
+		depths = sorted(rows[:: elements + 1])
+		assert (elements, slices, depths) == (3, 3, [1010.0, 1011.0, 1012.0])
+	rising, _ = share_calipers
+	facts, piece, window = cerb.caliper_piece(rising)  # no window: the first slice, for its type
+	assert not window and 'window_slices' not in facts and piece.stat().st_size == 16 + 4 * 4
+	facts, piece, window = cerb.caliper_piece(rising, 2000.0, 2001.0)
+	assert not window and facts['window_slices'] == 0
+
+
+def test_a_too_wide_caliper_window_is_refused(share_calipers, monkeypatch):
+	monkeypatch.setattr(cerb, 'MAX_WINDOW_SLICES', 2)
+	with pytest.raises(ValueError, match=r'1010\.0-1012\.5 m holds 3 slices; ask for at most 2'):
+		cerb.caliper_piece(share_calipers[0], 1010.0, 1012.5)
+
+
+def test_a_caliper_window_comes_as_slices_and_a_picture(share_calipers, monkeypatch):
+	rising, _ = share_calipers
+	monkeypatch.delenv('DSS_CERB_PROD_CODE', raising=False)
+	asked = []
+
+	def run_in(app, module, func, **kwargs):
+		asked.append((func, kwargs['first_path'], kwargs['depth_from'], kwargs['depth_to']))
+		found = {'type': 'CaliperType.WALL_LOSS', 'units': None, 'slices': 1, 'elements': 3}
+		found['depths'] = [1010.0, 1012.0]  # the piece's own: replaced by the whole file's
+		if kwargs['depth_to'] > kwargs['depth_from']:
+			found['window_slices'] = 3
+			found['rows'] = [
+				[1010.0, 1010.1, 1010.2, 1010.3, 0],
+				[1012.0, 0.0, float('nan'), 0.0, 3],
+			]
+			found['image'] = picture(1200, 400)
+		return found
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	(summary,) = cerb.read_caliper(rising)
+	assert summary.startswith(
+		'Pass1.wall-loss.dvcaliper: CaliperType.WALL_LOSS, 100 slices x 3 elements, '
+		'depth 1000.00-1099.00 m (3280.8-3605.6 ft)'
+	)
+	assert summary.endswith(
+		'Give depth_from and depth_to (m) to see the slices and a picture of a window.'
+	)
+	text, image = cerb.read_caliper(rising, 1010.0, 1012.5)
+	assert '3 slices from 1010.0 to 1012.5 m.' in text
+	assert '1010.000 m (3313.65 ft)\t1010\t1010\t1010\t0' in text
+	assert text.endswith('1012.000 m (3320.21 ft)\t0\tnan\t0\t3')
+	assert image.data == MADE_UP_PNG
+	assert asked == [('caliper', '', 0, 0), ('caliper', '', 1010.0, 1012.5)]  # prod copy unset
+	(empty,) = cerb.read_caliper(rising, 2000.0, 2001.0)
+	assert empty.endswith('0 slices from 2000.0 to 2001.0 m.')
+
+
 def git(repo, *args) -> str:
 	command = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', *args]
 	return subprocess.run(command, cwd=repo, check=True, capture_output=True, text=True).stdout
@@ -544,6 +885,19 @@ def test_code_reads_another_commit_when_told_and_says_what_is_missing(released, 
 	(released.parent / 'cerberus-1.0.5-py3-none-any.whl').touch()  # released, not fetched yet
 	with pytest.raises(LookupError, match=r'no "release: v1\.0\.5" commit'):
 		code.read('cerberus/plots.py')
+
+
+def test_a_wheel_with_a_build_number_finds_its_release_commit(released):
+	git(released, 'commit', '-q', '--allow-empty', '-m', 'release: 1.1 (#978)')
+	git(released, 'update-ref', 'refs/remotes/origin/master', 'HEAD')
+	release = git(released, 'rev-parse', '--short', 'HEAD').strip()
+	(released.parent / 'cerberus-1.1.0.68-py3-none-any.whl').touch()  # 1.1, build 68
+	assert code.prod_ref() == release
+	assert code._release_names('1.1.0.68') == ['1.1.0.68', '1.1.0', '1.1']
+	assert code._release_names('1.1.1.70') == ['1.1.1.70', '1.1.1']  # a real patch stays
+	(released.parent / 'cerberus-1.1.1.70-py3-none-any.whl').touch()  # not released in git yet
+	with pytest.raises(LookupError, match=r'no "release: v1\.1\.1\.70" \(or 1\.1\.1\) commit'):
+		code.prod_ref()
 
 
 def test_code_history_search_skips_text_filters_on_binary_files(released):
@@ -688,6 +1042,30 @@ def test_the_bots_clone_is_read_and_fetched_before_each_triage(released, bot_clo
 	(note,) = code.refresh()  # GitHub out of reach: the last fetch still serves
 	assert note.startswith('Cerberus clone not updated, so the newest commits may be missing')
 	assert 'origin/DTN-9-work-new-fix' in code.branches('DTN-9')
+
+
+def test_web_links_name_only_what_the_clone_has(released, bot_clone):
+	fix = git(released, 'rev-parse', 'origin/master').strip()
+	tip = git(released, 'commit-tree', 'origin/master^{tree}', '-p', fix, '-m', 'Fix it').strip()
+	git(released, 'update-ref', 'refs/heads/DTN-9-work-fix', tip)
+	git(released, 'update-ref', 'refs/pull/980/head', tip)  # its PR, as GitHub keeps it
+	git(released, 'branch', 'DTN-8-work-old', fix)  # no PR
+	code.fetch()
+	text = (
+		f'Fix {fix[:9]} is on DTN-9-work-fix and DTN-8-work-old, not origin/master or master. '
+		'Cerberus 1.0.4 lacks it, Cerberus 1.1 is not out, PR #981 waits. 2026110 abc1234def.'
+	)
+	url = code.GITHUB_URL
+	assert code.web_links(text) == {
+		fix[:9]: f'{url}/commit/{fix}',
+		'DTN-9-work-fix': f'{url}/pull/980',
+		'DTN-8-work-old': f'{url}/tree/DTN-8-work-old',
+		'Cerberus 1.0.4': f'{url}/pull/975',  # 'release: v1.0.4 (#975)'
+		'#981': f'{url}/pull/981',
+	}
+	git(bot_clone, 'remote', 'set-url', 'origin', str(released.parent / 'gone'))
+	links = code.web_links('DTN-9-work-fix')  # no pull refs: the branch serves
+	assert links == {'DTN-9-work-fix': f'{url}/tree/DTN-9-work-fix'}
 
 
 def test_a_developer_checkout_is_never_fetched(released, monkeypatch):

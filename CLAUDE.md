@@ -25,8 +25,11 @@ packages to this repo's dependencies.
 - **Keep the runner locked down.** `dss/runner.py` gives Claude no built-in tools, no user
   settings, only `mcp__dss__*` and `dontAsk`. Don't loosen it; `test_claude_is_locked_down` must
   keep passing.
-- **Nothing reaches the channel.** Analyses go to the reviewer's DM only. Changing that is a
-  decision for both owners, not a code change.
+- **Nothing reaches the DSS channel.** Analyses go to #data-dev-support-assist
+  (`DSS_SLACK_POST_CHANNEL`, the developers' channel), never to #data-dev-support, until the
+  owners agree the replies are good enough to post in DSS threads. Test new features and debug in
+  #data-dev-support-assist-test. Changing where analyses go is a decision for both owners, not a
+  code change; the bot refuses #data-dev-support as a destination.
 - **Prompt and tool changes:** `dss/triage.md` drives the behaviour. Test a change with
   `python -m dss triage` on a few real tickets and compare the answers before and after. Each run
   uses the person's Claude login and costs tokens, so ask before running more than a few.

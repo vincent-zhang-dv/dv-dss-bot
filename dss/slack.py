@@ -1,18 +1,18 @@
-"""DSS triage bot in Slack #data-dev-support: each new ticket is analysed for the reviewer.
+"""DSS triage bot in Slack #data-dev-support: each new ticket is analysed for the developers.
 
-When a support-request workflow posts "created DSS-…" in the channel, Claude triages the ticket
-(:mod:`dss.triage`) and the analysis goes to the reviewer's DM only; nothing is posted in the
-channel. The triage starts TRIAGE_DELAY_S after the post, so the thread it reads
-(`slack_thread`) holds the analyst's screenshots. The bot runs on the reviewer's PC under their
-`claude` login (Socket Mode: no public URL). On start it also triages the tickets of the last
-CATCH_UP_S that have no saved answer, because Slack does not resend events missed while the bot
-was down.
+When a support-request workflow posts "created DSS-…" in the channel, Claude triages the ticket as
+a checked record (:func:`dss.record.trial`). The decision is posted to DSS_SLACK_POST_CHANNEL (the
+developers' channel), else to the reviewer's DM (DSS_SLACK_REVIEWER), with the proof in a thread
+under it. Nothing is ever posted in the watched channel. The triage starts TRIAGE_DELAY_S after
+the post, so the thread it reads (`slack_thread`) holds the workflow's screenshot. The bot runs on
+the reviewer's PC under their `claude` login (Socket Mode: no public URL). On start it also
+triages the tickets of the last CATCH_UP_S that have no saved answer, because Slack does not
+resend events missed while the bot was down.
 
-	set DSS_SLACK_BOT_TOKEN=xoxb-...  DSS_SLACK_APP_TOKEN=xapp-...  DSS_SLACK_REVIEWER=U0...
+	set DSS_SLACK_BOT_TOKEN=xoxb-...  DSS_SLACK_APP_TOKEN=xapp-...  DSS_SLACK_POST_CHANNEL=C0...
 	python -m dss slack
 
-Create the Slack app from `slack_manifest.yaml`, as its own app: Slack hands each event to one
-of an app's open connections, so two bots sharing an app would each miss events.
+Slack hands each event to one of an app's open connections, so only one bot may run per app.
 
 Copied from dv-auto-setup-agent `assistant/slack.py` (commit b3f182e), triage part only.
 """
@@ -24,20 +24,23 @@ import threading
 import time
 from datetime import datetime
 
-from dss import runner
+from dss import record
 from dss.store import AnswerStore
-from dss.triage import TIME_FORMAT, explain, triage
+from dss.triage import TIME_FORMAT, explain
 from dss.worker import ROOT
 
 CHANNEL = 'C0793LJ1KDM'  # #data-dev-support
 TICKET = re.compile(r'created (DSS-\d+)')  # what the support-request workflows post
+CREATOR = re.compile(r'<@([A-Z0-9]+)(\|[^>]*)?>\s*created DSS-')  # the analyst who asked
 CATCH_UP_S = 24 * 3600  # on start, triage tickets posted this recently that were missed
-TRIAGE_DELAY_S = 300  # the analyst's screenshots and first replies follow the post within minutes
+# The workflow posts the analyst's screenshot within a second of the ticket; waiting longer would
+# let the developers' own first answers into the thread the triage reads.
+TRIAGE_DELAY_S = 15
 SEEN_S = 600  # an event seen this recently is a redelivery; Slack resends unacknowledged events
-BLOCK_CHARS = 2900  # Slack's section text limit is 3000
-MAX_BLOCKS = 50  # Slack's limit per message
-MAX_SECTIONS = 45  # leaves room for the footer
-ENV = ('DSS_SLACK_BOT_TOKEN', 'DSS_SLACK_APP_TOKEN', 'DSS_SLACK_REVIEWER')
+MARKDOWN_CHARS = 12_000  # Slack's limit for the Markdown block of one message
+ENV = ('DSS_SLACK_BOT_TOKEN', 'DSS_SLACK_APP_TOKEN')
+LABEL = 'Draft by Claude'  # starts the post's footer, before what the triage cost
+MARKDOWN_LINK = re.compile(r'\[([^\]\n]*)\]\([^)\s]*\)')
 
 log = logging.getLogger(__name__)
 
@@ -77,22 +80,25 @@ class Names:
 
 
 class SlackDesk:
-	"""Workflow posts in, analyses to the reviewer. *client* is a slack_sdk WebClient, *ask*
-	is :func:`dss.runner.run_reply` and *sleep* is :func:`time.sleep` (all faked in tests); Bolt
-	wiring is in :func:`build_app`.
+	"""Workflow posts in, analyses to *destination*: a channel or a member's DM, never the watched
+	channel. *client* is a slack_sdk WebClient, *ask* is Claude (None: the record's own, see
+	:func:`dss.record.trial`) and *sleep* is :func:`time.sleep` (all faked in tests); Bolt wiring is
+	in :func:`build_app`.
 	"""
 
 	def __init__(
 		self,
 		client,
-		reviewer: str,
+		destination: str,
 		store: AnswerStore,
 		channel: str = CHANNEL,
-		ask=runner.run_reply,
+		ask=None,
 		sleep=time.sleep,
 	) -> None:
+		if destination in (channel, CHANNEL):
+			raise ValueError('analyses never go to #data-dev-support or the watched channel')
 		self.client = client
-		self.reviewer = reviewer
+		self.destination = destination
 		self.store = store
 		self.channel = channel
 		self.ask = ask
@@ -102,7 +108,8 @@ class SlackDesk:
 		self._lock = threading.Lock()
 
 	def on_message(self, event: dict) -> None:
-		"""A new DSS ticket from a support-request workflow: triage it and DM the reviewer."""
+		"""A new DSS ticket from a support-request workflow: triage it as a checked record and post
+		the decision, with the proof in its thread, to the destination."""
 		ticket = TICKET.search(event.get('text', ''))
 		if not (event.get('bot_id') and ticket and event.get('channel') == self.channel):
 			return
@@ -114,18 +121,32 @@ class SlackDesk:
 			self.sleep(wait)
 		# Cerberus names telemetry logs by local start time; the triage compares against this
 		posted = datetime.fromtimestamp(float(ts)).strftime(TIME_FORMAT)
-		link = self._link(channel, ts)
+		link = self._link(channel, ts)  # the headline's key; Slack shows the DSS post below
+		post = self.names.plain(event['text'])
+		analyst = ''  # the Jira reporter stands in
+		creator = CREATOR.search(event['text'])
+		if creator and self.names.name(creator[1]) != creator[1]:
+			analyst = self.names.name(creator[1])  # a name, not a mention, which would notify them
 		try:
-			answer = triage(key, posted, self.names.plain(event['text']), self.ask, thread_ts=ts)
-		except Exception as error:  # noqa: BLE001 - the reviewer must hear about every failure
-			detail = explain(error)
-			warning = f':warning: Could not triage <{link}|{key}>: {detail}'
-			self._dm(f'Could not triage {key}: {detail}', [_section(warning)])
+			result = record.trial(
+				key,
+				posted,
+				post,
+				self.ask,
+				thread_ts=ts,
+				label=LABEL,
+				ticket_link=link,
+				analyst=analyst,
+			)
+		except Exception as error:  # noqa: BLE001 - the developers must hear about every failure
+			self._post(f':warning: Could not triage [{key}]({link}): {explain(error)}')
 			return
-		self.store.put(channel, ts, {'ticket': key, 'posted': posted, **answer})
-		usage = f'{answer["tokens"]:,} tokens · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
-		footer = f'Draft by Claude, for you only · <{link}|{key}> · {usage}'
-		self._dm(f'Triage of {key}', [*_sections(mrkdwn(answer['text'])), _context(footer)])
+		saved = {'ticket': key, 'posted': posted, 'trial': result['file']}
+		for name in ('problems', 'tokens', 'cost_usd', 'seconds', 'turns'):
+			saved[name] = result[name]
+		self.store.put(channel, ts, saved)
+		decision = self._post(result['dm'])
+		self._post(result['thread'], thread_ts=decision)
 
 	def catch_up(self) -> None:
 		"""Triage tickets posted while the bot was down; Slack does not resend those events.
@@ -159,52 +180,24 @@ class SlackDesk:
 		except Exception:  # noqa: BLE001 - a link is a convenience
 			return f'https://slack.com/archives/{channel}/p{ts.replace(".", "")}'
 
-	def _dm(self, text: str, blocks: list[dict]) -> None:
-		self.client.chat_postMessage(channel=self.reviewer, text=text, blocks=blocks[:MAX_BLOCKS])
+	def _post(self, text: str, thread_ts: str = '') -> str:
+		"""*text* (Markdown) to the destination, in the thread *thread_ts* when given; its ts.
 
-
-def mrkdwn(markdown: str) -> str:
-	"""Claude's Markdown as Slack mrkdwn: bold, headings, links and bullets; code kept."""
-	parts = re.split(r'(```.*?```)', markdown, flags=re.DOTALL)
-	for index in range(0, len(parts), 2):  # the even parts lie outside code fences
-		text = parts[index].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-		text = re.sub(r'\[([^\]]+)\]\((https?://[^)\s]+)\)', r'<\2|\1>', text)
-		text = re.sub(r'\*\*([^*]+)\*\*', r'*\1*', text)
-		text = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
-		parts[index] = re.sub(r'^(\s*)[-*]\s+', r'\1• ', text, flags=re.MULTILINE)
-	return ''.join(parts)
-
-
-def _sections(text: str) -> list[dict]:
-	"""Section blocks of at most BLOCK_CHARS, split at line ends (a code fence may be split)."""
-	chunks: list[str] = []
-	chunk = ''
-	for line in text.splitlines(keepends=True):
-		while len(line) > BLOCK_CHARS:  # a line longer than a block is cut into block-sized pieces
-			chunks.append(chunk)
-			chunks.append(line[:BLOCK_CHARS])
-			chunk = ''
-			line = line[BLOCK_CHARS:]
-		if len(chunk) + len(line) > BLOCK_CHARS:
-			chunks.append(chunk)
-			chunk = ''
-		chunk += line
-	chunks.append(chunk)
-	sections = []
-	for piece in chunks:
-		if piece.strip():
-			sections.append(_section(piece))
-	if not sections:
-		return [_section('(empty answer)')]
-	return sections[:MAX_SECTIONS]
-
-
-def _section(text: str) -> dict:
-	return {'type': 'section', 'text': {'type': 'mrkdwn', 'text': text[:3000]}}
-
-
-def _context(text: str) -> dict:
-	return {'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': text}]}
+		Slack previews the link to the DSS post and no Jira or GitHub link. unfurl_links stays at
+		Slack's default: False hides the DSS post's preview too.
+		"""
+		if self.destination in (self.channel, CHANNEL):  # checked at start too; never post there
+			raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
+		first = MARKDOWN_LINK.sub(r'\1', text.splitlines()[0]).replace('**', '')
+		message = {
+			'channel': self.destination,
+			'text': first[:300],  # for notifications
+			'blocks': [{'type': 'markdown', 'text': text[:MARKDOWN_CHARS]}],
+			'unfurl_media': False,
+		}
+		if thread_ts:
+			message['thread_ts'] = thread_ts
+		return self.client.chat_postMessage(**message)['ts']
 
 
 def watched_channel() -> str:
@@ -212,11 +205,17 @@ def watched_channel() -> str:
 	return os.environ.get('DSS_SLACK_CHANNEL') or CHANNEL
 
 
-def build_app(store: AnswerStore, reviewer: str):
+def destination() -> str:
+	"""Where analyses go: DSS_SLACK_POST_CHANNEL (the developers' channel), else the reviewer's
+	DM (DSS_SLACK_REVIEWER); empty when neither is set."""
+	return os.environ.get('DSS_SLACK_POST_CHANNEL') or os.environ.get('DSS_SLACK_REVIEWER', '')
+
+
+def build_app(store: AnswerStore, to: str):
 	from slack_bolt import App
 
 	app = App(token=os.environ['DSS_SLACK_BOT_TOKEN'])
-	desk = SlackDesk(app.client, reviewer, store, watched_channel())
+	desk = SlackDesk(app.client, to, store, watched_channel())
 	app.event('message')(lambda event: desk.on_message(event))
 	return app, desk
 
@@ -229,13 +228,17 @@ def main() -> None:
 	for name in ENV:
 		if not os.environ.get(name):
 			missing.append(name)
+	if not destination():
+		missing.append('DSS_SLACK_POST_CHANNEL or DSS_SLACK_REVIEWER')
 	if missing:
 		raise SystemExit(
-			f'Set {", ".join(missing)} first: the bot and app tokens of the Slack app made from '
-			'slack_manifest.yaml, and your Slack member id (profile > Copy member ID).'
+			f'Set {", ".join(missing)} first: the bot and app tokens of the Slack app, and where '
+			'analyses go (a channel id, or your member id: profile > Copy member ID).'
 		)
-	log.info('triaging new tickets in %s', watched_channel())
-	app, desk = build_app(AnswerStore(ROOT / 'out' / 'answers'), os.environ['DSS_SLACK_REVIEWER'])
+	if destination() in (watched_channel(), CHANNEL):
+		raise SystemExit('DSS_SLACK_POST_CHANNEL is the watched channel; analyses never go there')
+	log.info('triaging new tickets in %s, analyses to %s', watched_channel(), destination())
+	app, desk = build_app(AnswerStore(ROOT / 'out' / 'answers'), destination())
 	handler = SocketModeHandler(app, os.environ['DSS_SLACK_APP_TOKEN'])
 	handler.connect()
 	# live events are handled while the missed tickets are triaged

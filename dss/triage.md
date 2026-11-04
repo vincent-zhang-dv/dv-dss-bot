@@ -67,9 +67,12 @@ gives a proved answer, and say which step that was.
      input it is computed from (`cerb_client_info` on the project's client info file for casing
      and well inputs; `cerb_read_sheet` for any other sheet of it, and for spreadsheets such as
      the statistics in `Deliverables`). The input that differs for the suspect item is the first
-     lead.
+     lead. Data Cerberus computed is in `.parquet` files (`cerb_read_table`) and calipers
+     (`cerb_read_caliper`, with a depth window around the suspect item).
    - Missing or empty output: compare what the screenshots show with what the analyst expected,
-     then the settings, templates and depth ranges the output depends on.
+     then the settings, templates and depth ranges the output depends on. Read the output
+     itself when it is a PDF or Word file (`cerb_read_document`), and look at its plots and
+     images (`cerb_read_image`).
    - Feature request: step 2's searches cover it; read the matches that look closest.
    - How-to: `confluence_search` and `confluence_page`.
 

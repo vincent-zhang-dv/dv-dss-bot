@@ -1,5 +1,5 @@
 {
-	"schema": "dss-triage/2",
+	"schema": "dss-triage/3",
 	"dss_ticket": {
 		"key": "DSS-1234",
 		"created": "2026-10-22T10:00:00-07:00",
@@ -18,6 +18,7 @@
 		"confidence": "high",
 		"settled_at": "playbook",
 		"playbook": "wrong_numbers",
+		"headline": "Input problem: casing ID differs from the tally",
 		"what": "Defect Summary shows 19.97% wall loss at joint 57; the client expects 21%",
 		"request": {"output": "Defect Summary, joint 57", "expected": "21% wall loss", "asks": "fix"},
 		"prior_art": [
@@ -37,9 +38,12 @@
 		],
 		"not_proved": [],
 		"questions": [],
-		"do_now": {"who": "analyst", "action": "Correct the casing record ID to 4.55 in and rerun"},
+		"actions": {
+			"analyst": ["Set the ID in DVT1234_client_info.xlsm, Casing Record row 3, to 4.55 in and rerun the Defect Summary"],
+			"developers": []
+		},
 		"escalate": null,
-		"reply": "The casing record in the client info has ID 4.5 in, but the casing tally has 4.55 in. Correct the casing record to 4.55 in and rerun the Defect Summary; wall loss at joint 57 then computes to 21.02%.",
+		"reply": "Casing Record row 3 in the client info has ID 4.5 in, but the casing tally has 4.55 in. With 4.55 in, wall loss at joint 57 computes to 21.02%.",
 		"secondary": [],
 		"similar_dss_tickets": ["DSS-1100"],
 		"flags": [],
