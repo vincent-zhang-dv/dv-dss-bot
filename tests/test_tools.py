@@ -540,6 +540,51 @@ def test_workbooks_on_the_share_are_read_through_the_index(
 		cerb.read_sheet(PROJECT + r'\~$DVT1234_client_info.xlsm')
 
 
+PAGES = ['Cover\nACME Well-1', '', 'Eccentricity (in)\n0.0 0.1 0.2 0.2', 'Ovality (%)', 'End']
+
+
+def test_document_pages_are_shown_with_where_to_go_next(monkeypatch):
+	page = cerb.document_page(PAGES, 'page')
+	assert page.startswith('5 pages.\n--- page 1\nCover\nACME Well-1\n--- page 2\n(no text on')
+	assert 'likely an image, which this tool cannot show' in page
+	assert page.endswith('--- page 5\nEnd\nEnd of document.')
+	found = cerb.document_page(PAGES, 'page', contains='ECCENTRICITY')
+	assert found == (
+		'5 pages, 1 from page 1 on contain "ECCENTRICITY".\n'
+		'--- page 3\nEccentricity (in)\n0.0 0.1 0.2 0.2\nEnd of document.'
+	)
+	monkeypatch.setattr(cerb, 'DOC_PAGES', 2)
+	first = cerb.document_page(PAGES, 'page')
+	assert '--- page 2' in first and '--- page 3' not in first
+	assert first.endswith('More from first=3.')
+	assert cerb.document_page(PAGES, 'page', first=4).endswith('--- page 5\nEnd\nEnd of document.')
+	assert cerb.document_page(['a b'], 'part').startswith('1 parts.\n--- part 1\na b')
+
+
+def test_documents_on_the_share_are_read_through_the_index(index, monkeypatch, tmp_path):
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	report = PROJECT + r'\Deliverables\DVT1234 Report.pdf'
+	index[report] = b'%PDF-1.7 made-up'
+	reads = []
+
+	def run_in(app, module, func, **kwargs):
+		reads.append((app, module, func))
+		return {'unit': 'page', 'parts': PAGES}
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	assert cerb.read_document(report, contains='ovality') == (
+		'DVT1234 Report.pdf: 5 pages, 1 from page 1 on contain "ovality".\n'
+		'--- page 4\nOvality (%)\nEnd of document.'
+	)
+	assert reads == [('cerb', 'dss.cerb', 'document')]
+	with pytest.raises(ValueError, match=r'is not a \.pdf or \.docx file'):
+		cerb.read_document(PROJECT + r'\old.doc')
+	with pytest.raises(ValueError, match='the lock file Word keeps'):
+		cerb.read_document(PROJECT + r'\~$Report.docx')
+	with pytest.raises(ValueError, match='outside the project share'):
+		cerb.read_document(r'C:\Users\x\report.pdf')
+
+
 def git(repo, *args) -> str:
 	command = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', *args]
 	return subprocess.run(command, cwd=repo, check=True, capture_output=True, text=True).stdout

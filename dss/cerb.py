@@ -44,6 +44,10 @@ SHEET_ROWS = 100  # rows per page of a sheet
 SHEET_CHARS = 30_000  # per page too: a statistics row runs to about 400 characters
 CELL_CHARS = 200
 TOP_ROWS = 3  # shown before a later page or the rows a filter found, for the column names
+DOCUMENTS = ('.pdf', '.docx')  # what pypdf and python-docx open; not the old binary .doc
+DOC_PAGES = 20  # pages per answer
+DOC_CHARS = 30_000  # per answer too
+WORD_PART_CHARS = 3000  # a Word file has no pages, so its text is cut into parts about this long
 WHEEL = re.compile(r'cerberus-(\d+(?:\.\d+)+)-py3-none-any\.whl')
 # <login>_telemetry_<local start time>_<pid>.log, see cerberus/modules/telemetry/config.py
 TELEMETRY_LOG = re.compile(r'(.+)_telemetry_(\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d)_\d+\.log')
@@ -66,6 +70,40 @@ def client_info(path: str) -> dict:
 		found['strings'] = strings.to_dict('records')
 		found['joints'] = record.to_dict('records')
 	return found
+
+
+def document(path: str) -> dict:
+	"""The text of the PDF or Word file at *path*: one entry per PDF page, or per part of about
+	WORD_PART_CHARS of a Word file (paragraphs and table rows in order).
+
+	Runs in the Cerberus venv (pypdf, python-docx), through `cerb_read_document`.
+	"""
+	if path.lower().endswith('.pdf'):
+		from pypdf import PdfReader
+
+		pages = []
+		for page in PdfReader(path).pages:
+			pages.append(page.extract_text() or '')
+		return {'unit': 'page', 'parts': pages}
+	from docx import Document
+	from docx.table import Table
+
+	lines = []
+	for block in Document(path).iter_inner_content():
+		if isinstance(block, Table):
+			for row in block.rows:
+				cells = []
+				for cell in row.cells:
+					cells.append(cell.text.strip())
+				lines.append(' | '.join(cells))
+		elif block.text.strip():
+			lines.append(block.text)
+	parts = ['']
+	for line in lines:
+		if parts[-1] and len(parts[-1]) + len(line) > WORD_PART_CHARS:
+			parts.append('')
+		parts[-1] += line + '\n'
+	return {'unit': 'part', 'parts': parts}
 
 
 def cerberus_found() -> dict:
@@ -246,6 +284,55 @@ def read_sheet(path: str, sheet: str = '', first_row: int = 1, contains: str = '
 		return f'{name}: {len(sheets)} sheets: {"; ".join(parts)}.'
 	cells = run_in('cerb', __name__, 'workbook', path=local, sheet=sheet)['cells']
 	return f'{name} [{sheet}]: {sheet_page(cells, first_row, contains)}'
+
+
+def read_document(path: str, first: int = 1, contains: str = '') -> str:
+	"""Pages of a PDF, or parts of a Word file, on the share, from page *first* on.
+
+	The file is copied through the index and read in the Cerberus venv (:func:`document`). See
+	:func:`document_page` for what an answer holds.
+	"""
+	if not path.lower().endswith(DOCUMENTS):
+		raise ValueError(f'{path} is not a .pdf or .docx file')
+	if ntpath.basename(path).startswith('~$'):
+		raise ValueError(
+			f'{path} is the lock file Word keeps while the file is open; read the file'
+		)
+	found = run_in('cerb', __name__, 'document', path=str(local_copy(path)))
+	return (
+		f'{ntpath.basename(path)}: {document_page(found["parts"], found["unit"], first, contains)}'
+	)
+
+
+def document_page(parts: list[str], unit: str, first: int = 1, contains: str = '') -> str:
+	"""A line saying what the answer holds, then each page (or part) from *first* on, up to
+	DOC_PAGES and DOC_CHARS, under a `--- page n` line. With *contains*, only pages holding that
+	text (any case) count. A page with no text is said to be one, likely an image."""
+	numbers = []
+	for number in range(max(first, 1), len(parts) + 1):
+		if not contains or contains.lower() in parts[number - 1].lower():
+			numbers.append(number)
+	shown, size = [], 0
+	for number in numbers:
+		text = parts[number - 1].strip()
+		if shown and (len(shown) >= DOC_PAGES or size + len(text) > DOC_CHARS):
+			break
+		shown.append(number)
+		size += len(text)
+	head = f'{len(parts)} {unit}s'
+	if contains:
+		head += f', {len(numbers)} from {unit} {max(first, 1)} on contain "{contains}"'
+	lines = [head + '.']
+	for number in shown:
+		text = parts[number - 1].strip()
+		if not text:
+			text = f'(no text on this {unit}: likely an image, which this tool cannot show)'
+		lines.append(f'--- {unit} {number}\n{text[:DOC_CHARS]}')
+	if len(shown) < len(numbers):
+		lines.append(f'More from first={numbers[len(shown)]}.')
+	else:
+		lines.append('End of document.')
+	return '\n'.join(lines)
 
 
 def sheet_page(cells: list[list], first_row: int = 1, contains: str = '') -> str:
@@ -501,6 +588,14 @@ def register(server) -> None:
 		sheet's top 3 rows first for the column names, and where the next page starts.
 		*contains* keeps only the rows with a cell containing that text."""
 		return read_sheet(path, sheet, first_row, contains)
+
+	@server.tool()
+	def cerb_read_document(path: str, first: int = 1, contains: str = '') -> str:
+		"""The text of a .pdf or .docx on the project share, such as a deliverable report or the
+		2D log intro pages: up to 20 pages from page *first* (a Word file comes in parts of about
+		3,000 characters), and where the next answer starts. *contains* keeps only the pages
+		with that text. Pages that are only an image show no text."""
+		return read_document(path, first, contains)
 
 	@server.tool()
 	def cerb_last_session(project: str, user: str, before: str = '') -> dict:

@@ -82,6 +82,7 @@ def test_server_serves_the_triage_tools():
 		'cerb_list',
 		'cerb_read_text',
 		'cerb_read_sheet',
+		'cerb_read_document',
 		'cerb_last_session',
 		'cerb_prod_version',
 		'code_grep',

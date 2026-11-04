@@ -69,7 +69,8 @@ gives a proved answer, and say which step that was.
      the statistics in `Deliverables`). The input that differs for the suspect item is the first
      lead.
    - Missing or empty output: compare what the screenshots show with what the analyst expected,
-     then the settings, templates and depth ranges the output depends on.
+     then the settings, templates and depth ranges the output depends on. Read the output
+     itself when it is a PDF or Word file (`cerb_read_document`).
    - Feature request: step 2's searches cover it; read the matches that look closest.
    - How-to: `confluence_search` and `confluence_page`.
 
