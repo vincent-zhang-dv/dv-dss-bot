@@ -1,5 +1,232 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-04: trial on DSS-1243 and a demo of visible investigations (Vincent, with Claude)
+- **Checked:**
+  - A trial on DSS-1243 (two "0.2 in" labels on the eccentricity scale), from the post only. It
+    took 68 s and $0.38, passed the record check, and answered likely, medium. It found the
+    cause in `techlog/intro_pages.py` (`MaxNLocator(nbins=7)` plus `'%.1f'`), the duplicate
+    DSS-1232 and the unreleased fix DTN-3726 (`2ea08f0ea`). It asked for a screenshot that was
+    already in the thread.
+  - The session proved the rest:
+    - Cerberus's matplotlib 3.10.8 (prod's pin) reproduces the screenshot's labels on a 0 to
+      0.5 in axis: ticks 0.08 apart, with 0.16 and 0.24 both printing 0.2.
+    - The fix gives distinct labels.
+    - DTN-3726 is Done, with fix version CERBERUS v1.1 (not released).
+    - The UAT build `e7d6f928c` (1.0.4+uat20261031) lacks the fix.
+  - The session read the developer's replies by mistake before checking: a `slack_read_thread`
+    call with `limit` returns the newest replies, not the first ones.
+- **Done:**
+  - A demo page for making investigations visible: steps, evidence-graded confidence, hypothesis
+    curves, mistakes and a reviewer's "Flag a mistake" button. It is a private artifact, built
+    from one JSON block.
+  - The page proposes four changes:
+    - `hypotheses` and `steps` fields in the record;
+    - code-set score bands checked against the trace;
+    - `python -m dss report`;
+    - an outcome and corrections log.
+- **Done (later the same day), at Vincent's request: past issues first.**
+  - `triage.md` now runs every ticket as:
+    1. state the request;
+    2. search past DSS and DTN tickets, git history and branches, and Confluence;
+    3. check whether a past fix applies, including whether it is in the analyst's build;
+    4. only then the gates and playbooks.
+  - Stopping rule: "likely" only when no tool can read the last link. The "one `jira_search`"
+    rule is now up to three.
+  - New git-read tools in `dss/code.py`:
+    - `code_log` (recent commits on a path);
+    - `code_branches` (remote branch names);
+    - `code_contains` (does prod, a release, a UAT build or a remote branch include a commit or
+      branch).
+  - Record `dss-triage/2`:
+    - required `request` and `prior_art`;
+    - `settled_at` gains `prior_art`, which needs an item that applies, and `record` is renamed
+      `request`.
+  - Enforcement:
+    - every trial now keeps its trace;
+    - the record check refuses a run that read code or project files before a `jira_search`
+      and a git history search (except `not_cerberus`).
+  - The DM shows the request; the thread lists past issues.
+- **Checked:**
+  - Tests: 156 pass. Ruff is clean on the changed files apart from the old SIM108 in
+    `code.py`'s `grep`, left as a block.
+  - Live `code_contains` and `code_branches` against the real checkout.
+  - Re-ran DSS-1243, DSS-1240 and DSS-1235 from the post only ($1.57 in total). All three passed
+    the check and settled at past issues.
+    - DSS-1243: reached DTN-3726 at call 3 (was 11). It checked the UAT build and offered the
+      rerun with the fix, but went to low confidence because the plot was unseen.
+    - DSS-1235: found Annika's `DSS-1210-work-annika-raid-headers`, which the old run missed. It
+      cost $0.90 (was $0.39): 4 of its calls failed on branch names, so `code_contains` now takes
+      branch names.
+    - DSS-1240: proved, but DTN-3741 was created after the old run, so it is not a fair
+      comparison.
+  - Comparison page: a private artifact, built from the traces by a scratch script.
+- **Not done:**
+  - Nothing committed.
+  - The production bot's Markdown answer follows the new order only through the prompt; nothing
+    checks it there.
+  - Cherry-picked fixes are invisible to `code_contains`.
+  - No tool for open PR titles (needs a GitHub token; both owners).
+  - Annika to review the new order and the `dss-triage/2` schema. The DSS Triage Flow page
+    still describes `dss-triage/1`.
+
+### 2026-11-03: trial on DSS-1240 (Vincent, with Claude)
+- **Checked:**
+  - A trial on DSS-1240 (the reference perforation plots combine all calibrations), from the
+    post only: this PC has no bot token, so `--thread` couldn't be used. It took 103 s and
+    $0.68 and failed the record check: `escalate.kind` came as `draft`.
+    - Its reading went further than earlier trials. It used `cerb_read_sheet` on Stage Designs
+      and the baseline calculation, and read the plot's SVG as text.
+    - It called the ticket a likely feature request (one figure for all stages). It asked whether
+      the spec lines sit at different heights, which it couldn't see.
+  - Against the screenshots and the project's files, read by the session:
+    - Both delivered reference plots have one spec, median and ±1 SD line across all 84
+      reference perforations: each SVG LineCollection holds one segment spanning the axis. The
+      spec line is 0.42 in for all three charges (0.38, 0.40 and 0.42 in).
+    - Since DTN-3214 (b7970ca41, in release 0.14.1) the plot groups its lines by `stage`.
+      Before that it grouped them by charge type (395cd1003).
+    - Cerberus's `stage` is Perf Info's `dvStage`, which is 69 for all reference perforations,
+      while their client stages are 69, 70 and 71. Cerberus's saved calibration table has
+      stage 69 for all 84, so the plot draws one group. The document's "one stage" comes from
+      the same column.
+  - `cerb_read_sheet` now refuses an Excel lock file (`~$…`) with a readable message, with a
+    test. `uv run pytest` (143 passed).
+  - A trial on DSS-1241 (two tiny defects reported as one large one), from the post only: 74 s,
+    $0.53, record check passed, "needs info, low confidence".
+    - It found the interaction rule (3 × 0.304 in nominal wall) and the 12.5 % threshold, and
+      named the 0°/360° seam handling as a possible bug.
+    - Without the thread it asked the analyst for the depth and the two defects' positions,
+      which the screenshots show, and it guessed the wrong defect row.
+    - The session found the row in the delivered Defect Summary: 3.48 in long and 13.32 in wide
+      at 100 % wall loss. On that joint's 4.892 in ID, 13.32 in is 312° of the circumference.
+      Whether a band of shallow wall loss joins the two patches or the seam handling measures
+      the long way round was not settled.
+- **Not done:**
+  - Whether the plot should group by stage and charge type, or the project's `dvStage` should
+    differ, is for the Cerberus owners.
+  - The trial prompt's `escalate` wording (`kind` plus `draft`) was misread again, after
+    DSS-1234's shape errors.
+
+### 2026-11-02: the triage reads the DSS ticket's Slack thread and screenshots (Vincent, with Claude)
+- **Why:** the DSS-1236 and DSS-1239 trials were wrong or noisy because Claude saw only the
+  workflow's post. Both threads already held the deciding screenshots when the trials ran, and
+  the DSS-1236 trial asked the analyst for exactly those. Vincent's priority: a proved answer
+  first; spending many tokens on a complicated ticket is fine, waste is not.
+- **Changed:**
+  - New read-only tool `slack_thread(ts)` (`dss/thread.py`). It returns the post and every reply,
+    oldest first, with each screenshot as an image and each text file as text; other files are
+    named.
+    - It reads only threads of a workflow's "created DSS-…" post in the watched channel, with GET
+      requests: `conversations.replies`, `users.info`, and the files.
+    - The bot token is sent only to `https://files.slack.com`, and redirects are refused. A file
+      that can't be read is named with the reason; the rest of the thread still comes back.
+    - Limits: 200 messages, 20 images, 20 MB per file, 20,000 characters per text file.
+  - The bot waits until 5 minutes after the post before it triages (`TRIAGE_DELAY_S`). It passes
+    the post's ts, and the prompt tells Claude to call `slack_thread` first.
+  - `triage` and `trial` take `--thread <permalink or ts>`. `--posted` then defaults to the post's
+    time, and replies more than 5 minutes after the post are left out (`DSS_THREAD_UNTIL`), so a
+    trial of an older ticket stays blind to the developers' answers. Trial files save
+    `thread_ts`.
+  - `triage.md`:
+    - Puts a proved answer before saving calls.
+    - Reads every screenshot and quotes it.
+    - Starts a crash from the traceback's deepest Cerberus frame, then the input it reads.
+    - Never asks the analyst for what the thread already has.
+    - Keeps confidence low when Claude could not see the symptom itself.
+    - Drops "Read little" and "You cannot open screenshots".
+  - `triage_record.md`: `slack_thread` is an evidence ref.
+  - `slack_manifest.yaml`: the `files:read` scope.
+  - `SlackDesk`'s name lookup moved to `slack.Names`, shared with the tool. `slack._channel` is
+    now `slack.watched_channel`.
+  - New read-only tool `cerb_read_sheet(path, sheet, first_row, contains)` (`dss/cerb.py`) for
+    any `.xlsx` or `.xlsm` on the share. The project index already fetched these files;
+    `cerb_read_text` refused them as binary.
+    - It copies the workbook through the index (`local_copy`, share paths only) and reads it with
+      openpyxl in the Cerberus venv (`cerb.workbook`). Nothing is added to this repo.
+    - Without a sheet it lists the sheets and their sizes. With one it returns up to 100 rows or
+      30,000 characters, by Excel's row numbers, cells tab-separated, formulas as last saved, and
+      where the next page starts.
+    - `contains` keeps only the rows with a cell holding that text. A filtered or later page also
+      shows the top 3 rows, for the column names.
+    - The old binary `.xls` is refused.
+  - `triage.md` names `cerb_read_sheet` in the crash and wrong-numbers playbooks.
+- **Checked:**
+  - `uv run pytest` (143 passed). Ruff check and format pass on the changed files, apart from one
+    older SIM108 in `cerb.py` (`cerb_client_info`'s if/else, kept as a block on purpose). Ruff
+    also flags `code.py`, `eval.py` and `test_eval.py`'s formatting, which this session didn't
+    touch.
+  - One live Haiku run (outside the `dss` server, $0.07) with the runner's locked-down flags and a
+    made-up 6.4 MB PNG returned by an MCP tool. The image reached Claude and its text was copied
+    exactly, at about 2.8k tokens, so screenshots need no resizing here.
+  - `cerb.read_sheet` live on DSS-1239's project (code only, no Claude run):
+    - It listed the Perforation Statistics workbook's 4 sheets in 1.1 s, then returned pages of
+      the 1,451-row sheet in about 0.6 s each.
+    - `contains="7x4"` returned the design's 28 perforation rows, the count found by hand on
+      2026-11-02.
+    - It listed the client info's 20 sheets.
+- **Not done:**
+  - `slack_thread` has not run against real Slack. This PC has no bot token, and the production
+    app lacks `files:read` until the scope is added and the app reinstalled.
+  - No live triage with the new prompt yet. Next: re-run DSS-1235, 1236 and 1239 with `--thread`
+    and compare with the known answers (about $0.50 each).
+  - Annika to agree to the 5-minute delay and the new scope.
+  - No Claude run has used `cerb_read_sheet` yet; the DSS-1239 re-run will show whether it
+    finds the design with no measured perforations.
+
+### 2026-11-02: trial on DSS-1239 (Vincent, with Claude)
+- **Checked:**
+  - A blind trial on DSS-1239, where making the PE analysis document fails. It took 51 s and
+    $0.25, passed the record check as "needs info, low confidence", and was sent to Vincent's
+    DM.
+  - Against the screenshot in the DSS ticket's thread, which the session read and the run can't:
+    - The traceback is `ValueError: arange: cannot compute length` in the completions histogram
+      (`histogram_plots.py` `base_histogram`) for one stage design.
+    - That design's only stage has no measured perforations (all plugged, debris or no data),
+      so the bin range is NaN. Calling `base_histogram` on the project's exported statistics
+      reproduced the error for that design; designs with even one volume pass.
+    - Prod, master and `develop-v1.1-release` have no guard for this.
+    - The run asked the analyst for the error text the screenshot already shows, and followed
+      the analyst's guess about a failed plug.
+  - The low status was right. The gap is the screenshot again: all three trials since DSS-1235
+    needed it.
+  - The same screenshot shows Cerberus's telemetry sink failing on flush
+    (`OSError: [Errno 22]`), which may be why the run found no telemetry for the failed
+    session; not checked.
+- **Not done:** DSS-1237 and DSS-1238 got no trial (Vincent picked the newest). Reading the
+  workflow's screenshot is still open (see 2026-10-31).
+
+### 2026-10-31: first trial on a new DSS ticket (Vincent, with Claude)
+- **Changed:** the trial DM leaves a blank line after the escalation draft, so Slack no longer
+  pulls "Suggested reply" into the quote (`record._decision`, with a test).
+- **Checked:**
+  - A blind trial on DSS-1235 (an overlapping RAID 2D Log header), 15 minutes after it was
+    posted, from the workflow post only. The record check passed in 62 s for $0.39. The result
+    was sent to Vincent's DM, with the proof in the thread.
+  - Against the data developers' answer in Slack (a known header font problem, fixed on
+    Arsenii's and Annika's branches, not released):
+    - It found the cause, Arsenii's fix (d99479197, only on `DTN3703-work-ars-killer-2dlog`),
+      that prod 1.0.4 lacks it, and the earlier DSS-1210.
+    - It missed Annika's fix (1552cf587, only on `DSS-1210-work-annika-raid-headers`). That
+      commit changes only label alignment, so the `code_log_s` text searches can't find it,
+      and no tool lists branches by name.
+    - Its workaround (wider tracks in the RADX layout) was not checked. A data developer said
+      the font size is not a setting.
+    - Neither fix is on `develop-v1.1-release`.
+  - A blind trial on DSS-1236 (a Techlog 2D log missing the white line between joints), 61 s
+    and $0.49, was wrong. It said "likely, medium confidence: casing sections, mark casingSplit".
+    A data developer called it a bug. The screenshots, which the run can't see, show the line
+    missing at a collar in the column beside the depth numbers, between two joints with defects.
+    The run had flagged the white line as not proved, yet still rated its answer likely and
+    gave the analyst an action.
+  - `uv run pytest` (122 passed); ruff check and format pass on the changed files.
+- **Not done:**
+  - The run can't see the workflow's screenshot, the key evidence in both trials. Passing it to
+    Claude needs the Slack app to read files; for the owners to decide.
+  - A prompt rule that an unconfirmed symptom caps the status below "likely", to test on a
+    few tickets first.
+  - A read-only tool that lists remote branches whose names mention a DSS or DTN key would
+    have found Annika's fix; for the owners to decide.
+  - `known_causes.json` has no entry for this header problem.
+
 ### 2026-10-30: trial mode for the triage record (Vincent, with Claude)
 - **Changed:** `python -m dss trial <key>` runs the triage record design by hand; the bot is
   unchanged. It takes the same arguments as `triage`. It runs the same locked-down Claude with
@@ -28,8 +255,9 @@
     - Two rendering faults in Slack Markdown (eaten backslashes, `__init__` as bold) and a footer
       joined to the quoted reply were fixed afterwards. The thread reply went out fixed; the DM
       had already gone out.
+  - Merged as PR #7, which included #6. On `main` after the merge: 121 tests pass, and code read
+    DSS-1233's `dss_ticket` facts from every source with no failure notes (no Claude run).
 - **Not done:**
-  - Merging PR #6 and this branch (left to Vincent).
   - The bot posting the trial itself: this PC has no Slack bot tokens, so the session delivers
     the DM.
   - A repeat between Claude's `flags` and code's notes when both say the same thing.

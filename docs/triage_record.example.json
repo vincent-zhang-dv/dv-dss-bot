@@ -1,5 +1,5 @@
 {
-	"schema": "dss-triage/1",
+	"schema": "dss-triage/2",
 	"dss_ticket": {
 		"key": "DSS-1234",
 		"created": "2026-10-22T10:00:00-07:00",
@@ -19,6 +19,16 @@
 		"settled_at": "playbook",
 		"playbook": "wrong_numbers",
 		"what": "Defect Summary shows 19.97% wall loss at joint 57; the client expects 21%",
+		"request": {"output": "Defect Summary, joint 57", "expected": "21% wall loss", "asks": "fix"},
+		"prior_art": [
+			{
+				"ref": "DSS-1100",
+				"what": "Wall loss was off because the casing record ID differed from the tally",
+				"state": "explained",
+				"applies": "partly",
+				"why": "Same known cause, but each well's casing record has to be checked on its own"
+			}
+		],
 		"cause": "The casing record has ID 4.5 in while the tally has 4.55 in, so nominal thickness is 0.500 in and wall loss computes to 19.97%",
 		"where": {"kind": "data_file", "path": "DVT1234_client_info.xlsm", "detail": "Casing Record row 3"},
 		"evidence": [

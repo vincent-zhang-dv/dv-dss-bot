@@ -48,6 +48,20 @@ def test_status_sets_what_is_required(section, field, value):
 	assert errors(with_value(section, field, value))
 
 
+@pytest.mark.parametrize('field', ['request', 'prior_art'])
+def test_the_request_and_past_issues_are_required(field):
+	record = copy.deepcopy(EXAMPLE)
+	del record['triage'][field]
+	assert errors(record)
+
+
+def test_settling_on_a_past_issue_needs_one_that_applies():
+	record = with_value('triage', 'settled_at', 'prior_art')
+	assert errors(record)  # the example's only past issue applies partly
+	record['triage']['prior_art'][0]['applies'] = 'yes'
+	assert errors(record) == []
+
+
 def test_needs_info_with_a_question_needs_no_cause():
 	record = copy.deepcopy(EXAMPLE)
 	record['triage'].update(
@@ -76,6 +90,8 @@ def test_needs_info_with_a_question_needs_no_cause():
 		('class', 'dtn_tickets', ['DSS-1100']),
 		('triage', 'similar_dss_tickets', ['DTN-3000']),
 		('triage', 'escalate', {'kind': 'bug'}),  # neither a DTN ticket nor a draft
+		('triage', 'request', {'output': None, 'expected': None, 'asks': 'help'}),
+		('triage', 'settled_at', 'record'),  # step 1 is the request since dss-triage/2
 	],
 )
 def test_values_outside_the_lists_are_refused(section, field, value):

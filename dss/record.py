@@ -1,9 +1,10 @@
-"""Trial mode: one triage as a checked record (`dss-triage/1`) instead of free Markdown.
+"""Trial mode: one triage as a checked record (`dss-triage/2`) instead of free Markdown.
 
 Code reads the `dss_ticket` block before Claude starts. Claude follows the same steps and rules as
 the bot (`triage.md`) but answers with the `triage` and `class` blocks (`triage_record.md`). Code
-then checks the record against `docs/triage_record.schema.json` and renders the reviewer's DM (the
-decision) and its thread reply (the proof). The design is on the DSS Triage Flow page.
+then checks the record against `docs/triage_record.schema.json`, checks in the run's trace that
+past issues were searched before the investigation, and renders the reviewer's DM (the decision)
+and its thread reply (the proof). The design is on the DSS Triage Flow page.
 
 The Slack bot does not use this yet. `python -m dss trial <key>` runs one by hand and saves it in
 TRIAL_DIR, away from the bot's saved answers.
@@ -22,7 +23,7 @@ import jsonschema  # type: ignore[import-untyped]
 from dss import cerb, jira, runner, triage
 from dss.worker import ROOT
 
-SCHEMA_ID = 'dss-triage/1'
+SCHEMA_ID = 'dss-triage/2'
 SCHEMA_FILE = ROOT / 'docs' / 'triage_record.schema.json'
 KNOWN_CAUSES_FILE = ROOT / 'docs' / 'known_causes.json'
 ANSWER_FILE = Path(__file__).with_name('triage_record.md')  # replaces triage.md's answer section
@@ -34,14 +35,18 @@ WORKFLOWS = {'PE', 'WI', 'CI', 'FF'}
 PROMPT = """New ticket {key}, posted {posted} (local time).
 
 The DSS ticket record, read by code before you started:
-{ticket}{notes}{post}"""
+{ticket}{notes}{thread}{post}"""
 WORDS = {
 	'not_cerberus': 'not Cerberus',
+	'prior_art': 'past issues',
 	'gate_a': 'Gate A',
 	'gate_b': 'Gate B',
 	'gate_c': 'Gate C',
 	'it': 'IT',
 }
+HISTORY_TOOLS = {'code_log_s', 'code_log', 'code_branches'}  # triage.md step 2's git searches
+# Reading code or project files is investigation (steps 4 to 7); past issues are searched before
+INVESTIGATION_TOOLS = {'code_read', 'cerb_read_text', 'cerb_read_sheet', 'cerb_client_info'}
 CODE_SPAN = re.compile(r'(`[^`\n]*`)')
 MARKDOWN_MARK = re.compile(r'([\\*_~<>\[\]])')  # shown as typed once escaped: \cerberus, __init__
 MAX_PROBLEMS = 10  # schema problems listed in the DM
@@ -49,10 +54,10 @@ PROBLEM_CHARS = 300
 RAW_CHARS = 3000  # of a refused answer, in the thread
 
 
-def trial(key: str, posted: str, post: str = '', ask=None) -> dict:
+def trial(key: str, posted: str, post: str = '', ask=None, thread_ts: str = '') -> dict:
 	"""One trial triage of *key*, checked, rendered and saved in TRIAL_DIR.
 
-	*posted* and *post* are as for :func:`dss.triage.triage`. *ask* defaults to
+	*posted*, *post* and *thread_ts* are as for :func:`dss.triage.triage`. *ask* defaults to
 	:func:`dss.runner.run_reply` with the record system prompt (faked in tests). Returns what was
 	saved: `ticket`, `notes` (what code could not read), `record` (None when the answer had no
 	JSON), `problems` (empty when the record passed the check), `dm` and `thread` (Markdown),
@@ -63,8 +68,12 @@ def trial(key: str, posted: str, post: str = '', ask=None) -> dict:
 	if ask is None:
 		ask = functools.partial(runner.run_reply, system=system_prompt())
 	ticket, notes = build_ticket(key, posted)
-	answer = triage.run(key, posted, prompt(key, posted, ticket, notes, post), ask)
+	asked = prompt(key, posted, ticket, notes, post, thread_ts)
+	trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
+	answer = triage.run(key, posted, asked, ask, trace=trace)
 	record, problems = assemble(ticket, answer['text'])
+	if record is not None:
+		problems += order_problems(record, traced_tools(trace))
 	if record is None or problems:
 		dm, thread = render_refused(key, problems, answer['text'])
 	else:
@@ -78,6 +87,7 @@ def trial(key: str, posted: str, post: str = '', ask=None) -> dict:
 		'key': key,
 		'posted': posted,
 		'post': post,
+		'thread_ts': thread_ts,
 		'ticket': ticket,
 		'notes': notes,
 		'record': record,
@@ -85,6 +95,7 @@ def trial(key: str, posted: str, post: str = '', ask=None) -> dict:
 		'dm': dm,
 		'thread': thread,
 		**answer,
+		'trace': str(trace),
 		'file': str(path),
 	}
 	path.write_text(json.dumps(result, indent=1), encoding='utf-8')
@@ -174,8 +185,11 @@ def workflow(project: str) -> str:
 	return 'unknown'
 
 
-def prompt(key: str, posted: str, ticket: dict, notes: list[str], post: str = '') -> str:
-	"""The trial's prompt: the bot's ticket and time, the `dss_ticket` block, and the post."""
+def prompt(
+	key: str, posted: str, ticket: dict, notes: list[str], post: str = '', thread_ts: str = ''
+) -> str:
+	"""The trial's prompt: the bot's ticket and time, the `dss_ticket` block, the Slack thread
+	and the post."""
 	noted = ''
 	if notes:
 		noted = '\n\nCode could not read:\n- ' + '\n- '.join(notes)
@@ -184,6 +198,7 @@ def prompt(key: str, posted: str, ticket: dict, notes: list[str], post: str = ''
 		posted=posted,
 		ticket=json.dumps(ticket, indent=1),
 		notes=noted,
+		thread=triage.slack_thread(thread_ts),
 		post=triage.workflow_post(post),
 	)
 
@@ -229,6 +244,40 @@ def check(record: dict) -> list[str]:
 	return problems
 
 
+def traced_tools(trace: Path) -> list[str]:
+	"""The tools a run called, in order, from its *trace*; none when it called none."""
+	if not trace.exists():
+		return []
+	tools = []
+	for line in trace.read_text(encoding='utf-8').splitlines():
+		if line.strip():
+			tools.append(json.loads(line)['tool'])
+	return tools
+
+
+def order_problems(record: dict, tools: list[str]) -> list[str]:
+	"""Where the run's *tools* break triage.md's order: past DSS and DTN tickets (`jira_search`)
+	and git history are searched before the investigation reads code or project files. A ticket
+	that is not a Cerberus issue needs no git search."""
+	before = []
+	for tool in tools:
+		if tool in INVESTIGATION_TOOLS:
+			break
+		before.append(tool)
+	problems = []
+	if 'jira_search' not in before:
+		problems.append(
+			'trace: no jira_search for past DSS and DTN tickets before the investigation'
+		)
+	cerberus_issue = record.get('triage', {}).get('status') != 'not_cerberus'
+	if cerberus_issue and not HISTORY_TOOLS & set(before):
+		problems.append(
+			'trace: no git history search (code_log_s, code_log or code_branches) before the '
+			'investigation'
+		)
+	return problems
+
+
 def render(record: dict, notes: list[str]) -> tuple[str, str]:
 	"""The DM (the decision) and its thread reply (the proof) of a checked *record*, in Markdown.
 
@@ -260,6 +309,7 @@ def _decision(record: dict) -> str:
 	if ticket.get('toolbox'):
 		head.append(ticket['toolbox'])
 	lines = [f'**{" · ".join(head)}**', f'**Reported:** {_text(answer["what"])}']
+	lines.append(f'**Request:** {_request(answer["request"])}')
 	if answer.get('cause'):
 		lines.append(f'**Cause:** {_text(answer["cause"])}')
 	if answer.get('where'):
@@ -279,7 +329,8 @@ def _decision(record: dict) -> str:
 		if escalate.get('dtn_ticket'):
 			lines.append(f'**Escalate ({kind}):** {escalate["dtn_ticket"]}')
 		if escalate.get('draft'):
-			lines.append(f'**Escalate ({kind}), draft to send:**\n{_quote(escalate["draft"])}')
+			# the blank line ends the quote; Markdown would run the next line into it
+			lines.append(f'**Escalate ({kind}), draft to send:**\n{_quote(escalate["draft"])}\n')
 	if answer.get('reply'):
 		lines.append(f'**Suggested reply:**\n{_quote(answer["reply"])}')
 	return '\n'.join(lines)
@@ -288,6 +339,15 @@ def _decision(record: dict) -> str:
 def _proof(record: dict, notes: list[str]) -> str:
 	ticket, answer, planning = record['dss_ticket'], record['triage'], record['class']
 	lines = []
+	past = answer['prior_art']
+	if past:
+		lines.append('**Past issues**')
+		for number, item in enumerate(past, 1):
+			state = f'{_words(item["state"])}, applies: {item["applies"]}'
+			what = f'{_text(item["what"])} {_text(item["why"])}'
+			lines.append(f'{number}. {_text(item["ref"])} ({state}): {what}')
+	else:
+		lines.append('**Past issues:** none found')
 	evidence = answer.get('evidence') or []
 	if evidence:
 		lines.append('**Evidence**')
@@ -367,6 +427,16 @@ def _facts(ticket: dict) -> str:
 		parts.append(f'prod {ticket["prod_version"]}')
 	if ticket.get('last_error'):
 		parts.append(f'last failed run: {_text(ticket["last_error"])}')
+	return ' · '.join(parts)
+
+
+def _request(request: dict) -> str:
+	"""The analyst's request in one line: what they ask for, where, and what they expected."""
+	parts = [_words(request['asks'])]
+	if request.get('output'):
+		parts.append(f'in {_text(request["output"])}')
+	if request.get('expected'):
+		parts.append(f'expected {_text(request["expected"])}')
 	return ' · '.join(parts)
 
 

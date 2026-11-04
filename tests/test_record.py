@@ -22,6 +22,7 @@ ISSUE = {
 }
 POSTED = '2026-10-22_10-00-05'
 QUESTION = {'ask': 'Which DVCalipers did the RAID run use?', 'settles': 'whether they match'}
+IN_ORDER = ('jira_get_issue', 'jira_search', 'code_log_s', 'code_read', 'cerb_client_info')
 
 
 def answer_text(**changes) -> str:
@@ -29,11 +30,20 @@ def answer_text(**changes) -> str:
 	return json.dumps({'triage': {**EXAMPLE['triage'], **changes}, 'class': EXAMPLE['class']})
 
 
-def claude(text: str, prompts: list):
-	"""A fake Claude that answers *text* and keeps the prompts it gets in *prompts*."""
+def write_trace(trace, tools) -> None:
+	"""The trace a run that called *tools* in order leaves, as the `dss` server writes it."""
+	if trace is not None:
+		lines = [json.dumps({'tool': tool, 'arguments': {}, 'seconds': 0.1}) for tool in tools]
+		trace.write_text(''.join(line + '\n' for line in lines), encoding='utf-8')
+
+
+def claude(text: str, prompts: list, tools=IN_ORDER):
+	"""A fake Claude that calls *tools*, answers *text* and keeps the prompts it gets in
+	*prompts*."""
 
 	def ask(prompt, trace=None):
 		prompts.append(prompt)
+		write_trace(trace, tools)
 		return {'result': text, 'total_cost_usd': 0.3, 'usage': {'input_tokens': 5000}}
 
 	return ask
@@ -186,18 +196,51 @@ def test_the_trial_runs_the_same_locked_down_claude(sources, monkeypatch):
 def test_a_trial_checks_and_saves_the_record(sources, tmp_path):
 	prompts: list = []
 	post = 'created DSS-1234 · ACME · DVT1234'
-	result = record.trial('DSS-1234', POSTED, post, ask=claude(answer_text(), prompts))
+	ask = claude(answer_text(), prompts)
+	result = record.trial('DSS-1234', POSTED, post, ask=ask, thread_ts='1792523850.5')
 	assert result['problems'] == []
 	assert result['record']['dss_ticket'] == result['ticket']
 	assert result['record']['triage'] == EXAMPLE['triage']
 	assert result['record']['class'] == EXAMPLE['class']
+	assert result['thread_ts'] == '1792523850.5'
 	(prompt,) = prompts
 	assert prompt.startswith(f'New ticket DSS-1234, posted {POSTED} (local time).')
 	assert json.dumps(result['ticket'], indent=1) in prompt
+	assert '`slack_thread("1792523850.5")`' in prompt
 	assert prompt.endswith('workflow posted:\n' + post)
 	saved = Path(result['file'])
 	assert saved.parent == tmp_path / 'trial'  # never the bot's out/answers
 	assert json.loads(saved.read_text(encoding='utf-8')) == result
+	assert Path(result['trace']).parent == tmp_path / 'trace'  # a trial always keeps its trace
+
+
+@pytest.mark.parametrize(
+	('tools', 'status', 'problems'),
+	[
+		(IN_ORDER, 'proved', []),
+		(
+			('jira_get_issue', 'code_read', 'jira_search', 'code_log_s'),
+			'proved',
+			['jira_search', 'git history'],  # both came after the investigation started
+		),
+		(('jira_search', 'code_grep', 'cerb_read_sheet', 'code_log'), 'proved', ['git history']),
+		(('jira_search', 'code_branches', 'cerb_read_text'), 'proved', []),
+		(('jira_get_issue', 'jira_search'), 'not_cerberus', []),  # no git search needed
+		((), 'proved', ['jira_search', 'git history']),  # no tool calls at all
+	],
+)
+def test_past_issues_are_searched_before_the_investigation(tools, status, problems):
+	found = record.order_problems({'triage': {'status': status}}, list(tools))
+	assert len(found) == len(problems)
+	for problem, word in zip(found, problems, strict=True):
+		assert problem.startswith('trace: ') and word in problem
+
+
+def test_a_trial_that_skips_past_issues_fails_the_check(sources):
+	text = answer_text()
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, [], tools=('code_read',)))
+	assert any('no jira_search' in problem for problem in result['problems'])
+	assert result['dm'].startswith('**DSS-1234 · the trial answer failed the record check**')
 
 
 def test_the_dm_decides_and_the_thread_proves_without_repeats(sources):
@@ -211,7 +254,9 @@ def test_the_dm_decides_and_the_thread_proves_without_repeats(sources):
 	for item in answer['evidence']:
 		assert thread.count(item['fact']) == 1 and item['fact'] not in dm
 	assert '**Where:** data file `DVT1234_client_info.xlsm`, Casing Record row 3' in dm
+	assert '**Request:** fix · in Defect Summary, joint 57 · expected 21% wall loss' in dm
 	assert f'> {answer["reply"]}' in dm
+	assert thread.startswith('**Past issues**\n1. DSS-1100 (explained, applies: partly): Wall')
 	assert '- reported: 19.97% (Defect Summary, joint 57)' in thread
 	assert '- first difference: casing ID' in thread
 	assert '**Labels to set:** Outcome User Error' in thread  # the Toolbox Name is already set
@@ -229,6 +274,13 @@ def test_claude_text_shows_as_written(sources):
 	assert r'\<project\>\\cerberus\\\<scene\>\\x.pdf' in dm  # Markdown would eat \< and <...>
 	assert r'so \_\_init\_\_ fails at `a.py:9`' in dm  # code spans stay as they are
 	assert '> Rerun it.\n> Thanks\n\n_Trial' in dm  # the footer is not part of the quoted reply
+
+
+def test_reply_is_not_part_of_the_escalation_draft(sources):
+	escalate = {'kind': 'bug', 'draft': 'The header text overlaps.'}
+	text = answer_text(escalate=escalate, reply='Rerun it.')
+	dm = record.trial('DSS-1234', POSTED, ask=claude(text, []))['dm']
+	assert '> The header text overlaps.\n\n**Suggested reply:**\n> Rerun it.' in dm
 
 
 def test_empty_fields_are_left_out(sources):
@@ -288,6 +340,7 @@ def test_a_trial_needs_an_issue_key(sources):
 def test_cli_prints_the_dm_and_thread_of_a_trial(sources, monkeypatch, capsys, tmp_path):
 	def run_reply(prompt, trace=None, system=''):
 		assert 'Answer with one JSON object' in system
+		write_trace(trace, IN_ORDER)
 		return {'result': answer_text(), 'total_cost_usd': 0.3, 'usage': {'input_tokens': 5000}}
 
 	monkeypatch.setattr(cli, 'load_env', lambda: None)

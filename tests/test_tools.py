@@ -9,8 +9,10 @@ import sys
 import tempfile
 import urllib.error
 import urllib.parse
+from datetime import datetime, timedelta
 from email.message import Message
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -294,7 +296,7 @@ class FakeFrame:
 class FakeClientInfo:
 	"""Cerberus's DHClientInfo, faked: *sheets* are the sheets the client info file has."""
 
-	sheets: dict = {'casing_record': {}}
+	sheets: ClassVar[dict] = {'casing_record': {}}
 
 	def __init__(self, ci_path):
 		self.ci_path = ci_path
@@ -328,9 +330,174 @@ def test_client_info_reads_the_casing_record_when_the_file_has_one(monkeypatch):
 	assert set(cerb.client_info('DVT1234_client_info.xlsm')) == {'version', 'wellinfo'}
 
 
-def git(repo, *args):
+class FakeWorksheet:
+	def __init__(self, title, rows):
+		self.title, self.rows, self.reset = title, rows, False
+
+	def reset_dimensions(self):
+		self.reset = True
+
+	def iter_rows(self, min_row, values_only):
+		assert min_row == 1 and values_only
+		return iter(self.rows)
+
+
+class FakeWorkbook:
+	"""openpyxl's read-only workbook, faked: its worksheets, and whether it was closed."""
+
+	def __init__(self, worksheets):
+		self.worksheets, self.closed = worksheets, False
+
+	def __getitem__(self, name):
+		for worksheet in self.worksheets:
+			if worksheet.title == name:
+				return worksheet
+		raise KeyError(name)
+
+	def close(self):
+		self.closed = True
+
+
+STATS = [  # a made-up statistics sheet as openpyxl yields it: row 1 first, gaps padded
+	('Stage', 'Design', 'Perforation', 'Volume (bbl)', None),
+	(1, '7x4', '1.1.1', None),
+	(1, '7x4', None, 0),
+	(),
+	(2, '6x3', '2.1.1', 12.5),
+	(2, '6X3', '2.1.2', 3.0),
+	(datetime(2026, 10, 8), 'note\twith a tab\nand a line break', 'x' * 300),
+	(None, None),
+]
+
+
+@pytest.fixture
+def openpyxl(monkeypatch):
+	"""openpyxl in the Cerberus venv, faked; `cerb.run_in` calls the function in this process."""
+	books = []
+
+	def load_workbook(path, read_only, data_only):
+		assert read_only and data_only  # fast, and formulas as Excel saved them
+		books.append(FakeWorkbook([FakeWorksheet('Well Info', [('Well', 'Test 1')]), stats]))
+		return books[-1]
+
+	stats = FakeWorksheet('Perforation Statistics', STATS)
+	monkeypatch.setitem(sys.modules, 'openpyxl', SimpleNamespace(load_workbook=load_workbook))
+
+	def run_in(app, module, func, **kwargs):
+		assert (app, module) == ('cerb', 'dss.cerb')
+		return json.loads(json.dumps(getattr(cerb, func)(**kwargs)))  # as the venv sends it
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	return books
+
+
+def test_workbook_rows_keep_excel_numbers(openpyxl):
+	assert cerb.workbook('stats.xlsx') == {
+		'sheets': [
+			{'name': 'Well Info', 'rows': 1, 'columns': 2},
+			{'name': 'Perforation Statistics', 'rows': 7, 'columns': 4},
+		]
+	}
+	cells = cerb.workbook('stats.xlsx', 'Perforation Statistics')['cells']
+	assert cells[0] == ['Stage', 'Design', 'Perforation', 'Volume (bbl)']  # trailing empty cut
+	assert cells[3] == [] and len(cells) == 7  # an empty row keeps its place; trailing ones go
+	assert cells[6][0] == '2026-10-08T00:00:00'
+	assert all(book.closed for book in openpyxl)
+	assert openpyxl[-1]['Perforation Statistics'].reset  # a stale size record can't cut rows
+	with pytest.raises(ValueError, match="no sheet 'Stats'; the sheets are: Well Info, Perfor"):
+		cerb.workbook('stats.xlsx', 'Stats')
+
+
+def stats_cells(rows: int = 7) -> list[list]:
+	"""STATS as :func:`cerb.workbook` sends it, cut to its first *rows* rows."""
+	return cerb._sheet_rows(FakeWorksheet('Perforation Statistics', STATS))[:rows]
+
+
+def numbers(page: list[str]) -> list[str]:
+	"""The row numbers of a page's rows, after its summary line."""
+	found = []
+	for line in page[1:]:
+		found.append(line.split('\t', 1)[0])
+	return found
+
+
+def test_a_sheet_page_shows_rows_by_their_excel_numbers():
+	page = cerb.sheet_page(stats_cells()).splitlines()
+	assert page[0] == '7 rows, 4 columns. Rows 1-7 below. End of sheet.'
+	assert page[1] == '1\tStage\tDesign\tPerforation\tVolume (bbl)'
+	assert page[2] == '2\t1\t7x4\t1.1.1'
+	assert page[3] == '3\t1\t7x4\t\t0'  # an empty cell keeps its column
+	assert page[4] == '4' and page[6] == '6\t2\t6X3\t2.1.2\t3'  # a whole float loses its .0
+	date, note, long_text = page[7].split('\t')[1:]
+	assert date == '2026-10-08T00:00:00' and note == 'note with a tab and a line break'
+	assert long_text == 'x' * cerb.CELL_CHARS + '…'
+
+
+def test_a_sheet_filter_keeps_matching_rows_and_the_column_names():
+	cells = stats_cells(6)
+	page = cerb.sheet_page(cells, contains='6x3').splitlines()
+	assert page[0] == (
+		'6 rows, 4 columns. 2 rows from row 1 on contain "6x3"; 2 below, '
+		"with the sheet's top rows for the column names. End of sheet."
+	)
+	assert numbers(page) == ['1', '2', '3', '5', '6']
+	page = cerb.sheet_page(cells, contains='7x4').splitlines()
+	assert numbers(page) == ['1', '2', '3']  # matches among the top rows show once
+	assert '2 rows from row 1 on contain "7x4"' in page[0]
+
+
+def test_long_sheets_come_in_pages(monkeypatch):
+	cells = stats_cells(6)
+	monkeypatch.setattr(cerb, 'SHEET_ROWS', 2)
+	page = cerb.sheet_page(cells).splitlines()
+	assert page[0] == '6 rows, 4 columns. Rows 1-2 below. More from first_row=3.'
+	assert numbers(page) == ['1', '2']
+	page = cerb.sheet_page(cells, first_row=3).splitlines()
+	assert page[0].endswith(
+		"Rows 3-4 below, with the sheet's top rows for the column names. More from first_row=5."
+	)
+	assert numbers(page) == ['1', '2', '3', '4']
+	filtered = cerb.sheet_page(cells, contains='x', first_row=2).splitlines()[0]
+	assert '4 rows from row 2 on contain "x"; 2 below' in filtered
+	assert filtered.endswith('More from first_row=5.')
+	monkeypatch.setattr(cerb, 'SHEET_CHARS', 5)  # a row longer than a page still shows
+	assert cerb.sheet_page(cells).splitlines()[0].endswith('Rows 1-1 below. More from first_row=2.')
+	assert (
+		cerb.sheet_page(cells, first_row=50)
+		.splitlines()[0]
+		.startswith('6 rows, 4 columns. No rows from row 50 on')
+	)
+
+
+def test_workbooks_on_the_share_are_read_through_the_index(
+	index, openpyxl, mcp_call, tmp_path, monkeypatch
+):
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	stats = PROJECT + r'\Deliverables\DVT1234 Perforation Statistics.xlsx'
+	index[stats] = b'PK\x03\x04 made-up workbook'
+	assert cerb.read_sheet(stats) == (
+		'DVT1234 Perforation Statistics.xlsx: 2 sheets: "Well Info" 1 rows x 2 columns; '
+		'"Perforation Statistics" 7 rows x 4 columns.'
+	)
+	page = cerb.read_sheet(stats, 'Perforation Statistics', contains='7X4')
+	assert page.startswith('DVT1234 Perforation Statistics.xlsx [Perforation Statistics]: 7 rows')
+	failed, text = mcp_call(
+		'cerb_read_sheet', {'path': stats, 'sheet': 'Perforation Statistics', 'first_row': 5}
+	)
+	assert not failed and '\n5\t2\t6x3\t2.1.1\t12.5\n' in text
+	for path in (PROJECT + r'\notes.csv', PROJECT + r'\old.xls'):
+		with pytest.raises(ValueError, match=r'is not an \.xlsx or \.xlsm workbook'):
+			cerb.read_sheet(path)
+	with pytest.raises(ValueError, match='outside the project share'):
+		cerb.read_sheet(r'C:\Users\x\stats.xlsx')
+	index[PROJECT + r'\~$DVT1234_client_info.xlsm'] = b'not a zip'
+	with pytest.raises(ValueError, match='the lock file Excel keeps'):
+		cerb.read_sheet(PROJECT + r'\~$DVT1234_client_info.xlsm')
+
+
+def git(repo, *args) -> str:
 	command = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', *args]
-	subprocess.run(command, cwd=repo, check=True, capture_output=True)
+	return subprocess.run(command, cwd=repo, check=True, capture_output=True, text=True).stdout
 
 
 @pytest.fixture
@@ -373,7 +540,7 @@ def test_code_reads_another_commit_when_told_and_says_what_is_missing(released, 
 		code.read('cerberus/missing.py')
 	monkeypatch.delenv('DV_CERB_REF')
 	(released.parent / 'cerberus-1.0.5-py3-none-any.whl').touch()  # released, not fetched yet
-	with pytest.raises(LookupError, match='no "release: v1.0.5" commit'):
+	with pytest.raises(LookupError, match=r'no "release: v1\.0\.5" commit'):
 		code.read('cerberus/plots.py')
 
 
@@ -394,6 +561,54 @@ def test_code_history_search_skips_text_filters_on_binary_files(released):
 	assert plain.returncode != 0  # the filter breaks a search that uses it
 	found = code.log_s('round(2)', all_branches=True)
 	assert 'Add plots' in found and 'Add the report template' not in found
+
+
+def test_history_tools_find_a_fix_and_whether_a_build_has_it(released, mcp_call):
+	fix = git(released, 'rev-parse', '--short', 'origin/master').strip()
+	release = git(released, 'rev-parse', '--short', 'origin/master~1').strip()
+	git(released, 'update-ref', 'refs/remotes/origin/DTN-1234-work-stop-rounding', fix)
+	# the analyst's build: the release plus a version commit on a local branch only
+	uat = git(
+		released,
+		'commit-tree',
+		f'{release}^{{tree}}',
+		'-p',
+		release,
+		'-m',
+		'Set version 1.0.4+uat1',
+	).strip()
+	git(released, 'update-ref', 'refs/heads/uat', uat)
+
+	released_log = code.log('cerberus')
+	assert 'Add plots' in released_log and 'Stop rounding' not in released_log
+	assert 'Stop rounding' in code.log('cerberus/plots.py', all_branches=True)
+	later = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
+	assert 'nothing found' in code.log('cerberus', since=later, all_branches=True)
+	with pytest.raises(ValueError, match='not a date'):
+		code.log('cerberus', since='last week')
+
+	branches = code.branches('dtn-1234')
+	assert 'origin/DTN-1234-work-stop-rounding' in branches and 'Stop rounding' in branches
+	assert 'nothing found' in code.branches('DTN-9999')
+
+	assert 'does not include' in code.contains(fix, '1.0.4')
+	assert 'does not include' in code.contains(fix, 'prod')
+	answer = code.contains(release, '1.0.4+uat1')
+	assert 'includes' in answer and 'release: v1.0.4' in answer
+	assert code.contains(fix, '1.0.4+uat1').startswith(f'Cerberus 1.0.4+uat1 ({uat[:7]} ')
+	# branch names work on both sides: is the fix branch in a release, is a commit on a branch
+	assert 'does not include' in code.contains('origin/DTN-1234-work-stop-rounding', '1.0.4')
+	assert 'includes' in code.contains(release, 'DTN-1234-work-stop-rounding')
+	with pytest.raises(ValueError, match='not a commit hash or a remote branch'):
+		code.contains('--all', '1.0.4')
+	with pytest.raises(ValueError, match='not a commit hash or a remote branch'):
+		code.contains('origin/no-such-branch', '1.0.4')
+	with pytest.raises(ValueError, match='not a Cerberus version'):
+		code.contains(fix, '1.0.4 --all')
+	with pytest.raises(LookupError, match='no commit names the build'):
+		code.contains(fix, '1.0.4+uat2')
+	failed, text = mcp_call('code_contains', {'commit': fix, 'version': 'prod'})
+	assert not failed and 'does not include' in text
 
 
 def test_long_code_answers_are_cut_with_a_hint(monkeypatch):
