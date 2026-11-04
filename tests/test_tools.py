@@ -6,6 +6,8 @@ import io
 import json
 import ntpath
 import os
+import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -195,10 +197,12 @@ def index(monkeypatch):
 	"""
 	files: dict[str, bytes] = {}
 
-	def get(url_path, into=None):
+	def get(url_path, into=None, part=None):
 		if not url_path.startswith('/?'):
-			parts = [urllib.parse.unquote(part) for part in url_path[1:].split('/')]
+			parts = [urllib.parse.unquote(piece) for piece in url_path[1:].split('/')]
 			data = files['\\'.join(parts)]
+			if part is not None:
+				data = data[part[0] : part[1] + 1]  # an HTTP range: first to last byte
 			if into is None:
 				return data
 			into.write_bytes(data)  # the real one streams it (cerb._stream)
@@ -692,6 +696,146 @@ def test_claude_gets_share_images_as_images(share_images):
 	result = asyncio.run(call())
 	assert not result.is_error
 	assert [part.type for part in result.content] == ['text', 'image']
+
+
+@pytest.fixture
+def share_db(index, monkeypatch, tmp_path):
+	"""A SQLite file on the faked share, read by the real `cerb.table` in this process."""
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	made = tmp_path / 'made.db'
+	connection = sqlite3.connect(made)
+	connection.execute('CREATE TABLE runs (name TEXT, status TEXT)')
+	connection.executemany('INSERT INTO runs VALUES (?, ?)', [('plots', 'ok'), ('doc', 'failed')])
+	connection.execute('CREATE TABLE "odd ""name""" (x INTEGER)')
+	connection.commit()
+	connection.close()
+	path = PROJECT + r'\cerberus\deliv01\runs.db'
+	index[path] = made.read_bytes()
+
+	def run_in(app, module, func, **kwargs):
+		return getattr(cerb, func)(**kwargs)
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	return path
+
+
+def test_sqlite_tables_are_listed_then_paged(share_db):
+	assert cerb.read_table(share_db) == 'runs.db: 2 tables: "odd "name"" 0 rows; "runs" 2 rows.'
+	assert cerb.read_table(share_db, 'runs') == (
+		'runs.db [runs]: row 1 holds the column names. 3 rows, 2 columns. Rows 1-3 below. '
+		'End of sheet.\n1\tname\tstatus\n2\tplots\tok\n3\tdoc\tfailed'
+	)
+	assert '3\tdoc\tfailed' in cerb.read_table(share_db, 'runs', contains='FAIL')
+	assert cerb.read_table(share_db, 'odd "name"').endswith('End of sheet.\n1\tx')
+	with pytest.raises(ValueError, match=r"no table 'nope'; the tables are: odd \"name\", runs"):
+		cerb.read_table(share_db, 'nope')
+
+
+def test_files_that_are_not_sqlite_say_so(share_db, index):
+	not_sqlite = PROJECT + r'\cerberus\other.db'
+	index[not_sqlite] = b'not a database at all, just text that is long enough' * 4
+	with pytest.raises(ValueError, match=r'other\.db is not a SQLite file: file is not a database'):
+		cerb.read_table(not_sqlite)
+	with pytest.raises(ValueError, match="Windows' cache of picture thumbnails"):
+		cerb.read_table(PROJECT + r'\Images\Thumbs.db')
+
+
+def test_pickles_and_other_files_are_refused():
+	for reader in (cerb.read_table, cerb.read_caliper):
+		with pytest.raises(ValueError, match='loading one runs code stored in it'):
+			reader(PROJECT + r'\cerberus\temp\state.pkl')
+	with pytest.raises(ValueError, match=r'is not a \.parquet or SQLite'):
+		cerb.read_table(PROJECT + r'\notes.csv')
+	with pytest.raises(ValueError, match=r'is not a \.dvcaliper or \.npy caliper file'):
+		cerb.read_caliper(PROJECT + r'\notes.csv')
+
+
+def made_up_caliper(depths: list[float], elements: int = 3) -> bytes:
+	"""A .dvcaliper as Cerberus writes it: (elements, slices) as int64s, then for each slice its
+	depth and its elements (here the depth plus 0.1, 0.2, ...) as float32s."""
+	data = struct.pack('<2q', elements, len(depths))
+	for depth in depths:
+		values = [depth]
+		for element in range(1, elements + 1):
+			values.append(depth + element / 10)
+		data += struct.pack(f'<{elements + 1}f', *values)
+	return data
+
+
+@pytest.fixture
+def share_calipers(index, monkeypatch, tmp_path):
+	"""A wall loss caliper, depths 1000-1099 m, on the faked share, and the same descending."""
+	monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+	rising = PROJECT + r'\DVCaliper_Files\Pass1.wall-loss.dvcaliper'
+	falling = PROJECT + r'\DVCaliper_Files\Pass2.wall-loss.dvcaliper'
+	depths = [1000.0 + number for number in range(100)]
+	index[rising] = made_up_caliper(depths)
+	index[falling] = made_up_caliper(depths[::-1])
+	return rising, falling
+
+
+def test_a_caliper_window_is_read_by_ranges_in_either_depth_order(share_calipers):
+	for path in share_calipers:
+		facts, piece, window = cerb.caliper_piece(path, 1010.0, 1012.5)
+		assert facts == {
+			'slices': 100,
+			'elements': 3,
+			'depths': [1000.0, 1099.0],
+			'window_slices': 3,
+		}
+		assert window and piece.name.endswith('_3_' + ntpath.basename(path))
+		elements, slices = struct.unpack('<2q', piece.read_bytes()[:16])
+		rows = struct.unpack(f'<{slices * (elements + 1)}f', piece.read_bytes()[16:])
+		depths = sorted(rows[:: elements + 1])
+		assert (elements, slices, depths) == (3, 3, [1010.0, 1011.0, 1012.0])
+	rising, _ = share_calipers
+	facts, piece, window = cerb.caliper_piece(rising)  # no window: the first slice, for its type
+	assert not window and 'window_slices' not in facts and piece.stat().st_size == 16 + 4 * 4
+	facts, piece, window = cerb.caliper_piece(rising, 2000.0, 2001.0)
+	assert not window and facts['window_slices'] == 0
+
+
+def test_a_too_wide_caliper_window_is_refused(share_calipers, monkeypatch):
+	monkeypatch.setattr(cerb, 'MAX_WINDOW_SLICES', 2)
+	with pytest.raises(ValueError, match=r'1010\.0-1012\.5 m holds 3 slices; ask for at most 2'):
+		cerb.caliper_piece(share_calipers[0], 1010.0, 1012.5)
+
+
+def test_a_caliper_window_comes_as_slices_and_a_picture(share_calipers, monkeypatch):
+	rising, _ = share_calipers
+	monkeypatch.delenv('DSS_CERB_PROD_CODE', raising=False)
+	asked = []
+
+	def run_in(app, module, func, **kwargs):
+		asked.append((func, kwargs['first_path'], kwargs['depth_from'], kwargs['depth_to']))
+		found = {'type': 'CaliperType.WALL_LOSS', 'units': None, 'slices': 1, 'elements': 3}
+		found['depths'] = [1010.0, 1012.0]  # the piece's own: replaced by the whole file's
+		if kwargs['depth_to'] > kwargs['depth_from']:
+			found['window_slices'] = 3
+			found['rows'] = [
+				[1010.0, 1010.1, 1010.2, 1010.3, 0],
+				[1012.0, 0.0, float('nan'), 0.0, 3],
+			]
+			found['image'] = picture(1200, 400)
+		return found
+
+	monkeypatch.setattr(cerb, 'run_in', run_in)
+	(summary,) = cerb.read_caliper(rising)
+	assert summary.startswith(
+		'Pass1.wall-loss.dvcaliper: CaliperType.WALL_LOSS, 100 slices x 3 elements, '
+		'depth 1000.00-1099.00 m (3280.8-3605.6 ft)'
+	)
+	assert summary.endswith(
+		'Give depth_from and depth_to (m) to see the slices and a picture of a window.'
+	)
+	text, image = cerb.read_caliper(rising, 1010.0, 1012.5)
+	assert '3 slices from 1010.0 to 1012.5 m.' in text
+	assert '1010.000 m (3313.65 ft)\t1010\t1010\t1010\t0' in text
+	assert text.endswith('1012.000 m (3320.21 ft)\t0\tnan\t0\t3')
+	assert image.data == MADE_UP_PNG
+	assert asked == [('caliper', '', 0, 0), ('caliper', '', 1010.0, 1012.5)]  # prod copy unset
+	(empty,) = cerb.read_caliper(rising, 2000.0, 2001.0)
+	assert empty.endswith('0 slices from 2000.0 to 2001.0 m.')
 
 
 def git(repo, *args) -> str:
