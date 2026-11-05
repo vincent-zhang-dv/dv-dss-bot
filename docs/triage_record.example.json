@@ -11,6 +11,7 @@
 		"cerberus_version": "1.0.3",
 		"prod_version": "1.0.4",
 		"last_error": null,
+		"terminal_log": {"found": false, "why": "Cerberus 1.0.3 writes no terminal log; Cerberus 1.1 and later do"},
 		"inputs": {"client_info": true, "bookmarks": true, "dvcalipers": true}
 	},
 	"triage": {

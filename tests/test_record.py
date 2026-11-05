@@ -23,6 +23,7 @@ ISSUE = {
 POSTED = '2026-10-22_10-00-05'
 QUESTION = {'ask': 'Which DVCalipers did the RAID run use?', 'settles': 'whether they match'}
 IN_ORDER = ('jira_get_issue', 'jira_search', 'code_log_s', 'code_read', 'cerb_client_info')
+NO_TERMINAL_LOG = {'found': False, 'why': 'Cerberus 1.0.3 writes no terminal log; 1.1 and later do'}
 
 
 def answer_text(**changes) -> str:
@@ -65,7 +66,8 @@ def sources(monkeypatch):
 	def last_session(project, user, before=''):
 		calls.append(('telemetry', project, user, before))
 		failed = {'name': 'casing_tally', 'status': 'error', 'result_detail': 'KeyError: ID'}
-		return {'found': True, 'cerb': '1.0.3', 'failed_runs': [failed], 'last_config': ''}
+		session = {'found': True, 'cerb': '1.0.3', 'failed_runs': [failed], 'last_config': ''}
+		return {**session, 'terminal_log': NO_TERMINAL_LOG}
 
 	monkeypatch.setattr(jira, 'get_issue', get_issue)
 	monkeypatch.setattr(cerb, 'find_project', find_project)
@@ -90,10 +92,34 @@ def test_code_reads_the_dss_ticket_before_claude_starts(sources):
 		'cerberus_version': '1.0.3',
 		'prod_version': '1.0.4',
 		'last_error': 'casing_tally: KeyError: ID',
+		'terminal_log': NO_TERMINAL_LOG,
 	}
-	assert notes == []
+	assert notes == []  # no terminal log is expected before Cerberus 1.1
 	assert ('jira', 'DSS-1234', True) in sources  # with the created time
 	assert ('telemetry', PROJECT, 'Ann Analyst', POSTED) in sources  # the session before the post
+
+
+def test_a_1_1_sessions_terminal_log_goes_to_claude_and_a_missing_one_is_noted(
+	sources, monkeypatch
+):
+	log = {
+		'found': True,
+		'path': PROJECT + r'\cerberus\terminal_log\AnalystAnn_terminal_log_x.log',
+		'errors': ['line 17: ERROR cat_view:run_analysis_on_click:2538 - CATCALL run failed'],
+		'warnings': [],
+	}
+	session = {'found': True, 'cerb': '1.1.0.68', 'failed_runs': [], 'last_config': ''}
+	monkeypatch.setattr(cerb, 'last_session', lambda *args: {**session, 'terminal_log': log})
+	ticket, notes = record.build_ticket('DSS-1234', POSTED)
+	assert ticket['terminal_log'] == log and notes == []
+	assert 'line 17: ERROR cat_view:run_analysis_on_click:2538' in record.prompt(
+		'DSS-1234', POSTED, ticket, notes
+	)
+	full = {'schema': record.SCHEMA_ID, 'dss_ticket': ticket, **json.loads(answer_text())}
+	assert record.check(full) == []
+	missing = {'found': False, 'why': 'terminal log not read: no such file in the project index'}
+	monkeypatch.setattr(cerb, 'last_session', lambda *args: {**session, 'terminal_log': missing})
+	assert record.build_ticket('DSS-1234', POSTED)[1] == [missing['why']]
 
 
 def test_a_source_that_fails_is_noted_not_fatal(sources, monkeypatch):

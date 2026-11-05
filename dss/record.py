@@ -167,6 +167,7 @@ def build_ticket(key: str, posted: str) -> tuple[dict, list[str]]:
 		'cerberus_version': None,
 		'prod_version': None,
 		'last_error': None,
+		'terminal_log': None,
 	}
 	try:
 		issue = jira.get_issue(key, RECORD_FIELDS)
@@ -630,8 +631,9 @@ def _project(dvt: int, project_path, notes: list[str]) -> str | None:
 
 
 def _last_session(ticket: dict, posted: str, notes: list[str]) -> None:
-	"""The reporter's Cerberus version and last failed run, from their last session before
-	*posted*, into *ticket*."""
+	"""The reporter's Cerberus version, last failed run and terminal log, from their last session
+	before *posted*, into *ticket*. A missing terminal log is noted only where Cerberus writes
+	one (1.1 and later)."""
 	if ticket['reporter'] == 'unknown':
 		return
 	try:
@@ -646,6 +648,10 @@ def _last_session(ticket: dict, posted: str, notes: list[str]) -> None:
 	if session['failed_runs']:
 		run = session['failed_runs'][-1]
 		ticket['last_error'] = f'{run["name"]}: {run["result_detail"] or run["status"]}'
+	log = session['terminal_log']
+	ticket['terminal_log'] = log
+	if not log['found'] and cerb.writes_terminal_log(session['cerb']):
+		notes.append(log['why'])
 
 
 @functools.cache

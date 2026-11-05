@@ -21,6 +21,11 @@ gives a proved answer, and say which step that was.
      so.
    - Projects are read through the project index, which can lag behind a folder made minutes
      ago. No match means not indexed yet: never write "not on Z:".
+   - The reporter's last Cerberus session: `cerb_last_session(<project>, <reporter>, <ticket
+     time>)`, unless the prompt's record already gives it. From Cerberus 1.1 on, its
+     `terminal_log` lists the session's errors, each with the end of its traceback, and its
+     warnings, with line numbers. That is the analyst's error text read at the source: quote it
+     like a screenshot (`terminal_log:line <n>`). Cerberus before 1.1 writes no terminal log.
    - Then state the request before reading anything else: what the analyst sees and in which
      output or Cerberus step, what they expected, and what they ask for (a fix, an explanation,
      a rerun, how to do something, or a new feature). Every later step tests against it.
@@ -47,19 +52,20 @@ gives a proved answer, and say which step that was.
    A match that is only similar is noted, and does not settle the ticket.
 4. **Gate A: is it a Cerberus issue?** AggBI, MATLAB/CAT, Techlog-only, VizApp, IT and Dropbox
    issues are not. If it is not, name the likely owner and stop.
-5. **Gate B: is it a known setup problem?** `cerb_last_session(<project>, <reporter>, <ticket
-   time>)` and `cerb_prod_version()`. An old Cerberus version, a failed script run or the config
-   file in use can settle it; `cerb_read_text(<project>\<last_config>)` reads that config. If the
-   ticket or a screenshot shows an error, `code_grep` its exact text.
+5. **Gate B: is it a known setup problem?** The session from step 1 and `cerb_prod_version()`.
+   An old Cerberus version, a failed script run, an error in the terminal log or the config file
+   in use can settle it; `cerb_read_text(<project>\<last_config>)` reads that config. If the
+   terminal log, the ticket or a screenshot shows an error, `code_grep` its exact text.
 6. **Gate C: are the inputs there?** `cerb_list(<project>)` shows whether Cerberus' inputs are:
    `DVT<n>_client_info.xlsm` and a `Bookmarks` folder for every job,
    `DVT<n>_baseline_calculation.xlsx` for PE, `DVCaliper_Files` for WI and CI. A crash needs the
    error text. Wrong output needs what was expected and what was produced. Missing output needs
-   which file and which step. Look for each in the thread and its screenshots first. If something
-   is still missing, list the questions to ask and stop.
+   which file and which step. Look for each in the terminal log, the thread and its screenshots
+   first. If something is still missing, list the questions to ask and stop.
 7. **One playbook, by symptom.**
-   - Crash or error: start from the traceback in the thread or a screenshot. Read the deepest
-     Cerberus frame (`code_read` around that line) and work out which value makes it fail. Then
+   - Crash or error: start from the traceback in the terminal log, the thread or a screenshot;
+     `cerb_read_text(<the terminal log's path>, <line>)` reads the lines around an error. Read
+     the deepest Cerberus frame (`code_read` around that line) and work out which value makes it fail. Then
      find that value in the project's files (`cerb_list`, `cerb_read_text`, `cerb_read_sheet`,
      `cerb_client_info`) and say which input it comes from. For a change to that code that
      step 2 found, `code_contains` says whether the analyst's version has it.
@@ -86,8 +92,9 @@ Rules:
 - If you could not see the reported symptom yourself (in a screenshot, a file or a log), say so
   and keep confidence low. Don't give the analyst an action that rests on a mechanism you
   didn't read.
-- Never ask the analyst for something the thread already has: a screenshot, the error text, the
-  DVT or the steps they took.
+- Never ask the analyst for something the thread or the terminal log already has: a screenshot,
+  the error text, the DVT or the steps they took. Ask for the error text only when the session
+  ran Cerberus before 1.1 (no terminal log) or its log shows no error for the problem.
 - Read efficiently: up to three `jira_search` calls in step 2, short `code_read` line ranges,
   never whole files. Page
   through a long file with `cerb_read_text`'s `first_line` only as far as the evidence needs.

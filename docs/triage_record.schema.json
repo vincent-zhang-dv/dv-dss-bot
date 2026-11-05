@@ -32,6 +32,19 @@
 				"cerberus_version": {"type": ["string", "null"], "description": "The analyst's last session."},
 				"prod_version": {"type": ["string", "null"], "description": "Prod when the DSS ticket was filed."},
 				"last_error": {"type": ["string", "null"], "description": "The last failed session's error text."},
+				"terminal_log": {
+					"description": "That session's terminal log, which Cerberus writes from 1.1 on: its errors before the DSS ticket (each with the end of its traceback) and warnings, each with its line number, or why there is none. Null when no session was found.",
+					"type": ["object", "null"],
+					"required": ["found"],
+					"additionalProperties": false,
+					"properties": {
+						"found": {"type": "boolean"},
+						"path": {"type": "string"},
+						"errors": {"type": "array", "items": {"type": "string"}},
+						"warnings": {"type": "array", "items": {"type": "string"}},
+						"why": {"type": "string"}
+					}
+				},
 				"inputs": {"type": "object", "additionalProperties": {"type": "boolean"}}
 			}
 		},

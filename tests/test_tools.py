@@ -200,7 +200,10 @@ def index(monkeypatch):
 	def get(url_path, into=None, part=None):
 		if not url_path.startswith('/?'):
 			parts = [urllib.parse.unquote(piece) for piece in url_path[1:].split('/')]
-			data = files['\\'.join(parts)]
+			path = '\\'.join(parts)
+			if path not in files:
+				raise RuntimeError('no such file in the project index')  # as cerb._get says a 404
+			data = files[path]
 			if part is not None:
 				data = data[part[0] : part[1] + 1]  # an HTTP range: first to last byte
 			if into is None:
@@ -243,7 +246,95 @@ def test_last_session_is_the_reporters_newest_before_the_ticket(index):
 	assert found['file'] == 'DoeJane_telemetry_2026-10-20_09-00-00_11.log'
 	assert found['cerb'] == '1.0.3' and found['last_config'] == 'configs/pe deliv.json'
 	assert [run['name'] for run in found['failed_runs']] == ['make_doc']
+	assert found['terminal_log'] == {
+		'found': False,
+		'why': 'Cerberus 1.0.3 writes no terminal log; Cerberus 1.1 and later do',
+	}
 	assert cerb.find_project(1234) == {'projects': [PROJECT]}
+
+
+MAPS = 'cerberus.modules.common.clientinfo_maps:is_value_available:90'
+CATCALL = 'cerberus.app.views.wi_views.cat_view:run_analysis_on_click:2538'
+FAILED = 'CATCALL run failed: pp_depths max must be >= the maximum d_orig'
+BANNER = 'cerberus.modules.integrity.burst.pdf_export_config:_log_huge_error:69'
+
+
+def log_line(time: str, level: str, where: str, message: str) -> str:
+	"""A line as loguru writes it to a Cerberus terminal log."""
+	return f'2026-11-04 {time}.000 | {level:<8} | {where} - {message}'
+
+
+TERMINAL_LOG = [
+	log_line('09:00:05', 'DEBUG', 'cerberus.modules.common.ticket:model_post_init:77', 'Init'),
+	log_line('09:00:06', 'WARNING', MAPS, 'Ground Level value is missing'),
+	log_line('09:01:00', 'ERROR', CATCALL, FAILED),
+	'Traceback (most recent call last):',
+	'',
+	'  File "C:\\py\\threading.py", line 1002, in _bootstrap',
+	'    self._bootstrap_inner()',
+	'    └ <Thread(asyncio_1, started 2184)>',
+	'  File "C:\\cerberus\\cat_view.py", line 2530, in run_analysis_on_click',
+	'    resample(pp_depths, d_orig)',
+	'  File "C:\\cerberus\\resample.py", line 197, in _validate',
+	'    assert max(pp_depths) >= d_orig.max(), (',
+	'           │              └ array([1.0, 2.0])',
+	'           └ [1.0, 1.5]',
+	'AssertionError: pp_depths max must be >= the maximum d_orig',
+	log_line('09:02:00', 'WARNING', MAPS, 'KB Height value is missing'),
+	log_line('09:03:00', 'ERROR', CATCALL, FAILED),
+	log_line('09:04:00', 'ERROR', BANNER, ''),
+	'!!!!!!!!!!!!!!!!!!!!',
+	"!!  ADOBE PDF PRESET 'BurstPressure.joboptions' WAS NOT FOUND",
+	'!!!!!!!!!!!!!!!!!!!!',
+	log_line('09:20:00', 'CRITICAL', 'cerberus.defect:process_defects:1655', 'after the ticket'),
+]
+
+
+def test_the_terminal_log_beside_a_1_1_session_gives_its_problems(index):
+	index[TELEMETRY + r'\DoeJane_telemetry_2026-11-04_09-00-00_11.log'] = (
+		b'event=session phase=start schema=1 cerb=1.1.0.68'
+	)
+	log = PROJECT + r'\cerberus\terminal_log\DoeJane_terminal_log_2026-11-04_09-00-00_11.log'
+	index[log] = '\n'.join(TERMINAL_LOG).encode()
+	found = cerb.last_session(PROJECT, 'Jane Doe', '2026-11-04_09-10-00')
+	assert found['terminal_log'] == {
+		'found': True,
+		'path': log,
+		'errors': [
+			'\n'.join(
+				[
+					f'line 17: ERROR {CATCALL} - {FAILED} (2 times)',  # the newest line
+					'  File "C:\\cerberus\\cat_view.py", line 2530, in run_analysis_on_click',
+					'    resample(pp_depths, d_orig)',
+					'  File "C:\\cerberus\\resample.py", line 197, in _validate',
+					'    assert max(pp_depths) >= d_orig.max(), (',
+					'AssertionError: pp_depths max must be >= the maximum d_orig',
+				]
+			),
+			f"line 18: ERROR {BANNER}\n!!  ADOBE PDF PRESET 'BurstPressure.joboptions' WAS NOT FOUND",
+		],
+		'warnings': [f'line 2: WARNING {MAPS} - Ground Level value is missing (2 times)'],
+	}
+	del index[log]
+	found = cerb.last_session(PROJECT, 'Jane Doe', '2026-11-04_09-10-00')
+	assert found['terminal_log'] == {
+		'found': False,
+		'why': 'terminal log not read: no such file in the project index',
+	}
+
+
+@pytest.mark.parametrize(
+	('version', 'writes'),
+	[
+		('1.1.0.68', True),
+		('1.2', True),
+		('1.0.4+uat20261031', False),
+		('0.19.1', False),
+		('', False),
+	],
+)
+def test_cerberus_writes_a_terminal_log_from_1_1_on(version, writes):
+	assert cerb.writes_terminal_log(version) is writes
 
 
 def test_last_session_says_when_there_is_none_and_checks_its_input(index):

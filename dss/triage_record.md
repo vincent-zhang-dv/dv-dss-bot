@@ -7,8 +7,9 @@ field exactly the shape described here: a list shown as [{...}] holds objects wi
 every other list holds plain strings.
 
 The prompt gives the DSS ticket record that code read before you started: reporter, DVT, project
-folder, workflow, Toolbox Name, the reporter's Cerberus version and last failed run, and the prod
-version. Use these facts instead of reading them again. Read a source again only when its fact is
+folder, workflow, Toolbox Name, the reporter's Cerberus version and last failed run, that
+session's terminal log (Cerberus 1.1 and later: its errors with the end of each traceback, and
+its warnings, with line numbers; before 1.1 there is none), and the prod version. Use these facts instead of reading them again. Read a source again only when its fact is
 null or looks wrong, and then say why under `flags`. The record has no summary or description:
 read those with `jira_get_issue`.
 
@@ -41,8 +42,8 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
 - `where`: where the cause lives, {"kind", "path", "detail"}, with kind one of `data_file`,
   `folder`, `setting`, `code`, `version` or `outside`; null when unknown.
 - `evidence`: the proved results (the rules' Checked), [{"fact", "ref"}]. `ref` is the tool call
-  that read the fact, such as `cerb_client_info:1234`, `code_read:cerberus/plots.py:120` or
-  `slack_thread:reply 1 screenshot`, or `computed`.
+  that read the fact, such as `cerb_client_info:1234`, `code_read:cerberus/plots.py:120`,
+  `slack_thread:reply 1 screenshot` or `terminal_log:line 1201`, or `computed`.
 - `not_proved`: strings, each the check a developer would make to settle what could not be
   proved, such as "Read DVT4932's Perf Info dvStage for client stages 69-71 to confirm they share
   one DV stage". The post lists them as the developers' "Confirm" actions.
