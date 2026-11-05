@@ -33,7 +33,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `slack_thread` | The ticket's Slack thread: the workflow's post and every reply, oldest first, with screenshots as images and text files as text. Only threads of "created DSS-…" posts in the watched channel. |
 | `jira_get_issue`, `jira_search` | A ticket's triage fields, with its resolution, fix versions (released or not), newest comments and attachment names; and similar tickets with their resolution and fix versions. |
 | `cerb_find_project`, `cerb_list`, `cerb_read_text` | The DVT's project folder, a folder's entries, and a text file in 400-line pages, through the project index. |
-| `cerb_last_session` | The reporter's newest Cerberus telemetry log before the ticket: version, failed script runs, last saved config. |
+| `cerb_last_session` | The reporter's newest Cerberus telemetry log before the ticket: version, failed script runs, last saved config. From Cerberus 1.1 on, also the session's terminal log (`cerberus\terminal_log`, named like the telemetry log): its errors before the ticket, each with the end of its traceback, and its warnings, with line numbers. Before 1.1 there is no terminal log. |
 | `cerb_client_info` | A `client_info.xlsm` as Cerberus reads it. |
 | `cerb_read_sheet` | Any `.xlsx` or `.xlsm` on the share (statistics spreadsheets, other client info sheets): its sheets and sizes, then 100-row pages with Excel's row numbers, optionally only the rows containing a text. Copied through the index and read with openpyxl in the Cerberus venv. |
 | `cerb_read_document` | The text of a `.pdf` or `.docx` on the share (deliverable reports, intro pages): up to 20 pages per answer (Word in parts of about 3,000 characters), optionally only the pages containing a text. Pages that are only a picture show no text. Read with pypdf and python-docx in the Cerberus venv. |
@@ -100,7 +100,7 @@ Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, 
 
 `python -m dss trial` runs the triage record design (the DSS Triage Flow page) by hand, without changing the bot. It takes the same arguments as `triage` and runs the same locked-down Claude with the same steps and rules. Four things differ:
 
-- Before Claude starts, code reads the `dss_ticket` block: the reporter, DVT, project folder, workflow, Toolbox Name, the reporter's Cerberus version and last failed run, and the prod version. A source that fails leaves its facts null and is noted; it doesn't stop the triage.
+- Before Claude starts, code reads the `dss_ticket` block: the reporter, DVT, project folder, workflow, Toolbox Name, the reporter's Cerberus version, last failed run and terminal log (1.1 and later), and the prod version. A source that fails leaves its facts null and is noted; it doesn't stop the triage.
 - Claude answers with one JSON object (the `triage` and `class` blocks), following [dss/triage_record.md](dss/triage_record.md) in place of `triage.md`'s Markdown answer section.
 - Code checks the record against `docs/triage_record.schema.json`.
 - Code renders a post (the decision) and a thread reply (the proof), as the Slack bot posts them (below). An answer that fails the check is shown as given, with the problems.

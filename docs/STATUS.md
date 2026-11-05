@@ -1,5 +1,44 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-05 (later): Cerberus's terminal log as a source (Vincent, with Claude)
+- **Why:** from Cerberus 1.1 (`ab952f341`, DTN-3710), each session writes loguru's DEBUG output
+  to `<project>\cerberus\terminal_log\<login>_terminal_log_<start>_<pid>.log`, named like its
+  telemetry log. The bot can read the error text itself instead of asking the analyst. Cerberus
+  1.0.4, and the UAT build `1.0.4+uat20261031`, write none.
+- **Done** (branch `terminal-log`):
+  - `cerb.last_session` also reads the terminal log paired with the session
+    (`cerb.terminal_log`, `cerb.log_problems`):
+    - Only lines before the ticket time are read.
+    - Each distinct ERROR or CRITICAL is listed once, at its newest line, with how often it fired.
+      It keeps the end of its traceback (its deepest frames and the exception) or its banner's
+      lines, without the variable values loguru prints.
+    - Each WARNING call site is listed once, at its first line.
+    - Every item has its line number for `cerb_read_text`.
+  - With no log: "Cerberus 1.0.4 writes no terminal log; Cerberus 1.1 and later do", or why a
+    1.1 session's log wasn't read. Only the second becomes a note for the reviewer.
+  - The record's `dss_ticket` block has a new `terminal_log` field (schema, example), so Claude
+    gets the errors without a tool call.
+  - `triage.md`:
+    - Step 1 reads the last session.
+    - Gates B and C and the crash playbook look in the terminal log first.
+    - Claude asks for the error text only for sessions before 1.1, or when the log shows no error
+      for the problem.
+  - `triage_record.md`: the new fact, and `terminal_log:line <n>` as an evidence ref.
+  - README updated.
+- **Checked:**
+  - 198 tests pass, 7 of them new.
+  - Ruff is clean on the changed files, apart from the old SIM108 in `cerb_client_info`.
+  - mypy reports the same 13 older errors in `cerb.py`.
+  - Live, code only, on the terminal logs of two recent DSS tickets' projects. A 716 KB log
+    became about 4,000 characters, including a CATCALL assertion with its frames and a
+    PermissionError while saving the defect summary.
+  - DSS-1247's facts at its post time: Cerberus 1.0.4, no log, no note. At a later time: the
+    reporter's 1.1.0.68 session, with 1 error and 7 warning call sites, passing the schema.
+- **Not done:**
+  - No Claude trial: no DSS ticket yet comes after a 1.1 session.
+  - Not committed. The live bot needs a restart after the merge.
+  - The DSS Triage Flow page still lists the terminal log as planned.
+
 ### 2026-11-05: a shorter thread under the post (Vincent, with Claude)
 - **Decided by Vincent**, after Annika's and Sean's comments:
   - The thread keeps Why, Past issues, Evidence, What the questions settle, Details, Also found

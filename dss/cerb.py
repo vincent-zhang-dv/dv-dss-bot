@@ -79,6 +79,16 @@ WHEEL = re.compile(r'cerberus-(\d+(?:\.\d+)+)-py3-none-any\.whl')
 TELEMETRY_LOG = re.compile(r'(.+)_telemetry_(\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d)_\d+\.log')
 START_TIME = re.compile(r'\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d')
 LOGFMT_PAIR = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S*)')
+# From Cerberus 1.1 on, <project>\cerberus\terminal_log holds loguru's DEBUG output of each
+# session, named like its telemetry log (cerberus/modules/utility/terminal_log.py)
+TERMINAL_LOG_SINCE = (1, 1)
+# loguru's line: 2026-11-04 22:48:19.480 | ERROR    | cerberus.x.y:function:52 - message
+LOG_RECORD = re.compile(r'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d{3} \| (\w+)\s*\| (\S+) - (.*)')
+LOG_VALUES = re.compile(r'\s*[│└]')  # the variable values loguru prints under a traceback line
+MAX_LOG_ERRORS = 8  # distinct errors of a terminal log, the newest
+MAX_LOG_WARNINGS = 10  # warning call sites, the first
+MAX_ERROR_DETAIL = 6  # lines kept under an error: the end of a traceback, the deepest frames
+LOG_LINE_CHARS = 300
 
 
 def client_info(path: str) -> dict:
@@ -418,7 +428,109 @@ def last_session(project: str, user: str, before: str = '') -> dict:
 		return {'found': False, 'folder': folder, 'user': user, 'before': before}
 	started, name = max(logs)
 	text = _fetch(ntpath.join(folder, name)).decode('utf-8', errors='replace')
-	return {'found': True, 'file': name, 'started': started, **session_facts(text)}
+	facts = session_facts(text)
+	log = terminal_log(project, name, facts['cerb'], before)
+	return {'found': True, 'file': name, 'started': started, **facts, 'terminal_log': log}
+
+
+def terminal_log(project: str, telemetry_file: str, version: str, before: str = '') -> dict:
+	"""The errors and warnings (:func:`log_problems`) of the terminal log paired with
+	*telemetry_file* in *project*, or why there is none: Cerberus writes one from 1.1 on."""
+	name = telemetry_file.replace('_telemetry_', '_terminal_log_')
+	path = ntpath.join(_inside_index(project), 'cerberus', 'terminal_log', name)
+	try:
+		text = _fetch(path).decode('utf-8', errors='replace')
+	except RuntimeError as error:
+		if version and not writes_terminal_log(version):
+			why = f'Cerberus {version} writes no terminal log; Cerberus 1.1 and later do'
+		else:
+			why = f'terminal log not read: {error}'
+		return {'found': False, 'why': why}
+	return {'found': True, 'path': path, **log_problems(text, before)}
+
+
+def writes_terminal_log(version: str) -> bool:
+	"""Whether Cerberus *version*, such as 1.1.0.68 or 1.0.4+uat20261031, writes a terminal log."""
+	numbers = re.match(r'(\d+)\.(\d+)', version)
+	if not numbers:
+		return False
+	return (int(numbers[1]), int(numbers[2])) >= TERMINAL_LOG_SINCE
+
+
+def log_problems(text: str, before: str = '') -> dict:
+	"""The errors and warnings of a terminal log, logged before *before* (as for
+	:func:`last_session`), each with its line number for `cerb_read_text`.
+
+	Each distinct error is listed once, at its newest line, with the end of its traceback (the
+	deepest frames and the exception) or the lines of its message, without the variable values
+	loguru prints. Each warning call site is listed once, at its first line, with how often it
+	fired.
+	"""
+	cutoff = ''
+	if before:
+		day, clock = before.split('_')
+		cutoff = f'{day} {clock.replace("-", ":")}'
+	records: list[dict] = []
+	for number, line in enumerate(text.splitlines(), 1):
+		match = LOG_RECORD.match(line)
+		if match:
+			if cutoff and match[1] >= cutoff:
+				break  # the log is in time order
+			records.append(
+				{'line': number, 'level': match[2], 'where': match[3], 'message': match[4]}
+			)
+			records[-1]['detail'] = []
+		elif records and _is_detail(line):
+			records[-1]['detail'].append(line.rstrip()[:LOG_LINE_CHARS])
+	errors: dict = {}
+	warnings: dict = {}
+	for record in records:
+		if record['level'] in ('ERROR', 'CRITICAL'):
+			key = (record['where'], record['message'])
+			error = {**record, 'count': 1}
+			previous = errors.pop(key, None)  # added again last, so the newest errors end the list
+			if previous:
+				error['count'] = previous['count'] + 1
+				if not error['detail']:
+					error['detail'] = previous['detail']  # the newest traceback it has
+			errors[key] = error
+		elif record['level'] == 'WARNING':
+			if record['where'] not in warnings:
+				warnings[record['where']] = {**record, 'count': 0}
+			warnings[record['where']]['count'] += 1
+	found: dict = {'errors': [], 'warnings': []}
+	for error in list(errors.values())[-MAX_LOG_ERRORS:]:
+		detail = error['detail']
+		if detail and detail[0].startswith('Traceback'):
+			detail = detail[-MAX_ERROR_DETAIL:]
+			while len(detail) > 1 and not detail[0].lstrip('> ').startswith('File '):
+				detail = detail[1:]  # start at a frame, not in the middle of one
+		else:
+			detail = detail[:MAX_ERROR_DETAIL]
+		found['errors'].append('\n'.join([_log_line(error), *detail]))
+	for warning in list(warnings.values())[:MAX_LOG_WARNINGS]:
+		found['warnings'].append(_log_line(warning))
+	if len(warnings) > MAX_LOG_WARNINGS:
+		found['warnings'].append(f'and {len(warnings) - MAX_LOG_WARNINGS} more warning call sites')
+	return found
+
+
+def _is_detail(line: str) -> bool:
+	"""Whether a line under a log record is kept: not blank, not a variable value loguru prints
+	under a traceback line, and not a row of a banner's !s."""
+	stripped = line.strip()
+	return bool(stripped) and not LOG_VALUES.match(line) and set(stripped) != {'!'}
+
+
+def _log_line(record: dict) -> str:
+	"""One terminal log record as "line 141: ERROR where - message (3 times)"."""
+	text = f'line {record["line"]}: {record["level"]} {record["where"]}'
+	if record['message'].strip():  # a banner's message is in the lines under it
+		text += f' - {record["message"].strip()}'
+	text = text[:LOG_LINE_CHARS]
+	if record['count'] > 1:
+		text += f' ({record["count"]} times)'
+	return text
 
 
 def session_facts(text: str) -> dict:
@@ -1098,7 +1210,9 @@ def register(server) -> None:
 	@server.tool()
 	def cerb_last_session(project: str, user: str, before: str = '') -> dict:
 		"""The reporter's newest Cerberus session in *project* before the ticket time
-		(`YYYY-MM-DD_HH-MM-SS`): Cerberus version, failed script runs, last saved config."""
+		(`YYYY-MM-DD_HH-MM-SS`): Cerberus version, failed script runs, last saved config, and from
+		Cerberus 1.1 on its terminal log's errors (with the end of each traceback) and warnings,
+		each with its line number for `cerb_read_text`. Before 1.1 there is no terminal log."""
 		return last_session(project, user, before)
 
 	@server.tool()
