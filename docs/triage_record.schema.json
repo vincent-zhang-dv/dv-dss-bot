@@ -121,15 +121,13 @@
 					}
 				},
 				"escalate": {
-					"description": "An existing DTN ticket, or a ready-to-send draft. A person sends it.",
+					"description": "The existing DTN ticket that covers this problem. The bot writes no DTN drafts: the team writes DTN tickets with its own skill.",
 					"type": ["object", "null"],
-					"required": ["kind"],
-					"minProperties": 2,
+					"required": ["kind", "dtn_ticket"],
 					"additionalProperties": false,
 					"properties": {
 						"kind": {"enum": ["bug", "feature", "docs"]},
-						"dtn_ticket": {"$ref": "#/$defs/dtn_key"},
-						"draft": {"$ref": "#/$defs/text"}
+						"dtn_ticket": {"$ref": "#/$defs/dtn_key"}
 					}
 				},
 				"reply": {

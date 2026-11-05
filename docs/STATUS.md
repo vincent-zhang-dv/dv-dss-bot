@@ -1,5 +1,45 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-05: a shorter thread under the post (Vincent, with Claude)
+- **Decided by Vincent**, after Annika's and Sean's comments:
+  - The thread keeps Why, Past issues, Evidence, What the questions settle, Details, Also found
+    and Confidence.
+  - The bot writes no DTN drafts, since the team writes DTN tickets with its own skill.
+  - The class, the labels, the existing DTN ticket (`escalate`) and the facts code read leave
+    the thread but stay in the saved record.
+- **Done** (branch `thread-sections`):
+  - `record._proof` renders the seven sections:
+    - Claude's flags and code's notes fold into the Confidence line as "could not read", each
+      said once.
+    - Also found shows only the cause.
+    - Confidence reads "high, settled at the wrong numbers playbook".
+  - A past issue's text now ends in a full stop before the reason it applies; the two ran
+    together.
+  - `_planning`, `_labels` and `_facts` are removed, and so is `_request`, which nothing called.
+  - `escalate` takes only an existing DTN ticket: the schema refuses a `draft`, and
+    `triage_record.md` says to write none. The developers' "raise a DTN ticket" todo no longer
+    points to a draft.
+  - README: the thread as a table.
+- **Token cost of these changes** (16 saved trials, 17 logged runs since 2026-10-30):
+  - The thread changes cost nothing either way: code renders the thread after Claude answers.
+  - 2 of the 16 trials wrote a DTN draft (517 and 903 characters, about 130 to 230 tokens). A
+    run's median output is 6,847 tokens, so dropping drafts saves well under 1% of output.
+  - Most of a run's cost is reading: the cached context is read again on every turn (median
+    about 225k cache-read tokens; 1.2M on a 58-turn run). Fewer turns is the lever for cost.
+- **Checked:**
+  - 191 tests pass, one of them new.
+  - Ruff is clean on the changed files.
+  - mypy is clean on `record.py`; the 13 errors it reports are all in `cerb.py`.
+  - The example record was rendered by hand.
+  - No live trial: the prompt change is one phrase.
+- **Not done:**
+  - Not committed. The live bot runs `main` from the main checkout and needs a restart after the
+    merge.
+  - From Annika: Jira's comments, outcome, status and links leak the answer into trials of older
+    DSS tickets. Only the Slack thread is cut at the post. Next: an as-posted Jira built from the
+    change history.
+  - The DSS Triage Flow page and the Reply Quality Tracker still describe the older format.
+
 ### 2026-11-04 (night): todo titles, links and a shorter footer (Vincent, with Claude)
 - **Asked by Vincent:**
   - number the todos 1., 2. (Slack letters a list inside a bullet a., b.);
