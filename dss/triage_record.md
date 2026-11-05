@@ -53,11 +53,11 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
   here: code adds those.
   - Analyst: correct an input (name the file, sheet and row or cell, and the value to set), update
     Cerberus and rerun, or wait for the release.
-  - Developers: raise a DTN ticket (draft in `escalate`), set a fix version, regenerate the
+  - Developers: raise a DTN ticket (say what for), set a fix version, regenerate the
     deliverable from a fixed branch or PR (name it), or review or merge an existing PR (name it).
     Give a deadline when the analyst's review date makes one matter.
-- `escalate`: {"kind", "dtn_ticket"} for an existing DTN ticket, or {"kind", "draft"} with a
-  ready-to-send DTN draft, with kind one of `bug`, `feature` or `docs`; null when not needed.
+- `escalate`: {"kind", "dtn_ticket"} for the existing DTN ticket that covers this problem, with
+  kind one of `bug`, `feature` or `docs`; null when there is none. Write no DTN draft.
 - `reply`: the reply to the analyst, as a data developer would write it: at most 3 short
   sentences, the answer or solution first. Give exact facts they can check (the design, stage,
   joint or file, the counts, the sheet and column where they see it), and only proved ones. Leave

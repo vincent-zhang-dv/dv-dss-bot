@@ -101,7 +101,8 @@ def test_needs_info_with_a_question_needs_no_cause():
 		('class', 'known_cause', 'Casing Record'),
 		('class', 'dtn_tickets', ['DSS-1100']),
 		('triage', 'similar_dss_tickets', ['DTN-3000']),
-		('triage', 'escalate', {'kind': 'bug'}),  # neither a DTN ticket nor a draft
+		('triage', 'escalate', {'kind': 'bug'}),  # no DTN ticket
+		('triage', 'escalate', {'kind': 'docs', 'draft': 'Add a note'}),  # the bot writes no drafts
 		('triage', 'request', {'output': None, 'expected': None, 'asks': 'help'}),
 		('triage', 'settled_at', 'record'),  # step 1 is the request since dss-triage/2
 		('triage', 'headline', 'x' * 61),  # a few words, not a sentence
@@ -118,11 +119,8 @@ def test_blocks_are_named_by_project():
 	assert errors(record)
 
 
-@pytest.mark.parametrize(
-	'escalate',
-	[{'kind': 'bug', 'dtn_ticket': 'DTN-3000'}, {'kind': 'docs', 'draft': 'Add a note'}],
-)
-def test_escalate_takes_a_dtn_ticket_or_a_draft(escalate):
+def test_escalate_takes_an_existing_dtn_ticket():
+	escalate = {'kind': 'bug', 'dtn_ticket': 'DTN-3000'}
 	assert errors(with_value('triage', 'escalate', escalate)) == []
 
 

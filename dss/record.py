@@ -402,7 +402,9 @@ def _todos(lines: list[str], title: str, items: list[str]) -> None:
 
 
 def _proof(record: dict, notes: list[str]) -> str:
-	ticket, answer, planning = record['dss_ticket'], record['triage'], record['class']
+	"""The thread: why, past issues, evidence, what the questions settle, details, also found and
+	confidence. The class, labels, escalate and the facts code read stay in the saved record."""
+	answer = record['triage']
 	lines = []
 	if answer.get('cause'):
 		why = _text(answer['cause'])
@@ -414,7 +416,7 @@ def _proof(record: dict, notes: list[str]) -> str:
 		lines.append('**Past issues**')
 		for number, item in enumerate(past, 1):
 			state = f'{_words(item["state"])}, applies: {item["applies"]}'
-			what = f'{_text(item["what"])} {_text(item["why"])}'
+			what = f'{_sentence(item["what"])} {_text(item["why"])}'
 			lines.append(f'{number}. {_text(item["ref"])} ({state}): {what}')
 	else:
 		lines.append('**Past issues:** none found')
@@ -427,14 +429,6 @@ def _proof(record: dict, notes: list[str]) -> str:
 	for question in answer.get('questions') or []:
 		settles.append(f'{question["ask"]}: settles {question["settles"]}')
 	_bullets(lines, 'What the questions settle', settles)
-	escalate = answer.get('escalate')
-	if escalate:
-		kind = _words(escalate['kind'])
-		if escalate.get('dtn_ticket'):
-			lines.append(f'**DTN ({kind}):** {escalate["dtn_ticket"]}')
-		if escalate.get('draft'):
-			# the blank line ends the quote; Markdown would run the next line into it
-			lines.append(f'**DTN draft ({kind}):**\n{_quote(escalate["draft"])}\n')
 	details = []
 	for name, value in (answer.get('details') or {}).items():
 		if name != 'playbook':
@@ -442,20 +436,24 @@ def _proof(record: dict, notes: list[str]) -> str:
 	_bullets(lines, 'Details', details, escape=False)  # _value escapes
 	secondary = []
 	for finding in answer.get('secondary') or []:
-		planning = _planning(finding['class'], with_family=True)
-		secondary.append(f'{_text(finding["cause"])} ({planning})')
-	_bullets(lines, 'Also found', secondary, escape=False)
-	_bullets(lines, 'Could not read', answer.get('flags') or [])
-	settled = f'{answer["confidence"]} confidence, settled at {_words(answer["settled_at"])}'
-	if answer.get('playbook'):
-		settled += f' ({_words(answer["playbook"])} playbook)'
+		secondary.append(finding['cause'])
+	_bullets(lines, 'Also found', secondary)
+	step = _words(answer['settled_at'])
+	playbook = answer.get('playbook')
+	if playbook and answer['settled_at'] == 'playbook':
+		step = f'the {_words(playbook)} playbook'
+	elif playbook:
+		step += f' ({_words(playbook)} playbook)'
+	settled = f'{answer["confidence"]}, settled at {step}'
+	unread = []  # what Claude and code could not read, each said once
+	for item in (answer.get('flags') or []) + notes:
+		if item not in unread:
+			unread.append(item)
+	if unread:
+		settled += '; could not read:'
 	lines.append(f'**Confidence:** {settled}')
-	lines.append(f"**Class** (Claude's proposal): {_planning(planning, with_family=True)}")
-	labels = _labels(planning.get('labels') or {}, ticket)
-	if labels:
-		lines.append(f'**Labels to set:** {labels}')
-	lines.append(f'**Facts read by code:** {_facts(ticket)}')
-	_bullets(lines, 'Code could not read', notes)
+	for item in unread:
+		lines.append(f'- {_text(item)}')
 	return _joined(lines)
 
 
@@ -502,59 +500,6 @@ def _bullets(lines: list[str], title: str, items: list[str], escape: bool = True
 			lines.append(f'- {item}')
 
 
-def _planning(planning: dict, with_family: bool) -> str:
-	"""The class fields in one line; cause_family only *with_family* (the DM head shows it)."""
-	parts = []
-	if with_family and planning.get('cause_family'):
-		parts.append(_words(planning['cause_family']))
-	for name in ('feature', 'known_cause', 'impact', 'fix_type', 'prevent', 'module'):
-		if planning.get(name):
-			parts.append(f'{_words(name)} `{planning[name]}`')
-	if planning.get('prevent_note'):
-		parts.append(_text(planning['prevent_note']))
-	if planning.get('dtn_tickets'):
-		parts.append(', '.join(planning['dtn_tickets']))
-	if not parts:
-		return 'not known yet'
-	return ' · '.join(parts)
-
-
-def _labels(labels: dict, ticket: dict) -> str:
-	"""The Jira labels Claude suggests, leaving out a Toolbox Name the DSS ticket already has."""
-	parts = []
-	if labels.get('toolbox') and labels['toolbox'] != ticket.get('toolbox'):
-		parts.append(f'Toolbox {_text(labels["toolbox"])}')
-	if labels.get('outcome'):
-		parts.append(f'Outcome {_text(labels["outcome"])}')
-	return ' · '.join(parts)
-
-
-def _facts(ticket: dict) -> str:
-	parts = [_text(ticket['reporter'])]
-	if ticket.get('dvt') is not None:
-		parts.append(f'DVT{ticket["dvt"]}')
-	if ticket.get('project'):
-		parts.append(f'`{ntpath.basename(ticket["project"])}`')
-	parts.append(ticket['workflow'])
-	if ticket.get('cerberus_version'):
-		parts.append(f'Cerberus {ticket["cerberus_version"]}')
-	if ticket.get('prod_version'):
-		parts.append(f'prod {ticket["prod_version"]}')
-	if ticket.get('last_error'):
-		parts.append(f'last failed run: {_text(ticket["last_error"])}')
-	return ' · '.join(parts)
-
-
-def _request(request: dict) -> str:
-	"""The analyst's request in one line: what they ask for, where, and what they expected."""
-	parts = [_words(request['asks'])]
-	if request.get('output'):
-		parts.append(f'in {_text(request["output"])}')
-	if request.get('expected'):
-		parts.append(f'expected {_text(request["expected"])}')
-	return ' · '.join(parts)
-
-
 def _where(where: dict) -> str:
 	text = _words(where['kind'])
 	if where.get('path'):
@@ -589,6 +534,14 @@ def _text(value) -> str:
 	for index in range(0, len(parts), 2):  # the even parts lie outside code spans
 		parts[index] = MARKDOWN_MARK.sub(r'\\\1', parts[index])
 	return ''.join(parts)
+
+
+def _sentence(text) -> str:
+	"""*text* escaped (:func:`_text`), ending in a full stop, so the next sentence doesn't run on."""
+	text = _text(text).rstrip()
+	if text and text[-1] not in '.!?':
+		text += '.'
+	return text
 
 
 def _quote(text: str) -> str:

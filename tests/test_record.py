@@ -243,7 +243,7 @@ def test_a_trial_notes_a_cerberus_refresh_that_failed(sources, monkeypatch):
 	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), prompts))
 	assert result['notes'] == [note]
 	assert f'Code could not read:\n- {note}' in prompts[0]
-	assert '**Code could not read**\n- prod Cerberus not unpacked' in result['thread']  # reviewer
+	assert 'could not read:\n- prod Cerberus not unpacked' in result['thread']  # for the reviewer
 
 
 def test_a_malformed_block_is_a_problem_not_a_crash(sources):
@@ -298,14 +298,15 @@ def test_the_post_decides_and_the_thread_proves_without_repeats(sources):
 		f'**Why:** {answer["cause"]} (data file `DVT1234_client_info.xlsm`, Casing Record row 3)\n'
 		'**Past issues**\n1. DSS-1100 (explained, applies: partly): Wall'
 	)
+	assert 'differed from the tally. Same known cause' in thread  # what, then why
 	# a blank line ends each list, or the next heading joins its last item and numbers run on
 	assert 'on its own\n\n**Evidence**\n1. Casing Record row 3' in thread
 	assert '- reported: 19.97% (Defect Summary, joint 57)' in thread
 	assert '- first difference: casing ID' in thread
-	assert '**Confidence:** high confidence, settled at playbook (wrong numbers playbook)' in thread
-	assert "**Class** (Claude's proposal): input data · feature `wi_wall_loss`" in thread
-	assert '**Labels to set:** Outcome User Error' in thread  # the Toolbox Name is already set
-	assert 'Cerberus 1.0.3 · prod 1.0.4 · last failed run: casing\\_tally: KeyError: ID' in thread
+	assert thread.endswith('\n**Confidence:** high, settled at the wrong numbers playbook')
+	# the class, labels and the facts code read stay in the saved record
+	for label in ('Class', 'Labels', 'Facts read by code', 'wi\\_wall\\_loss', 'KeyError'):
+		assert label not in thread
 	assert dm.endswith('\n\n_Trial · draft by Claude, for you only · 5,000 tokens · ≈ $0.30 · 0 s_')
 
 
@@ -313,7 +314,7 @@ def test_questions_and_what_is_not_proved_become_actions(sources):
 	check = 'Read the RAID run config to confirm which DVCalipers it used'
 	text = answer_text(
 		status='likely',
-		actions={'analyst': [], 'developers': ['Raise a DTN ticket (draft in the thread)']},
+		actions={'analyst': [], 'developers': ['Raise a DTN ticket for the header overlap']},
 		not_proved=[check],
 		questions=[QUESTION],
 	)
@@ -322,7 +323,7 @@ def test_questions_and_what_is_not_proved_become_actions(sources):
 	dm, thread = result['dm'], result['thread']
 	assert f'**Ann Analyst Todos:**\n1. Answer: {QUESTION["ask"]}\n\n' in dm
 	assert (
-		'**Data Dev Todos:**\n1. Raise a DTN ticket (draft in the thread)\n'
+		'**Data Dev Todos:**\n1. Raise a DTN ticket for the header overlap\n'
 		f'2. Confirm: {check}\n\n**Draft Reply:**'
 	) in dm
 	assert check not in thread  # said once, as an action
@@ -392,13 +393,27 @@ def test_claude_text_shows_as_written(sources):
 	assert '> Rerun it.\n> Thanks\n\n_Trial' in result['dm']  # the footer is not quoted with it
 
 
-def test_the_dtn_draft_is_in_the_thread_and_the_reply_ends_the_post(sources):
-	escalate = {'kind': 'bug', 'draft': 'The header text overlaps.'}
+def test_the_dtn_ticket_stays_in_the_record_and_the_reply_ends_the_post(sources):
+	escalate = {'kind': 'bug', 'dtn_ticket': 'DTN-3000'}
 	text = answer_text(escalate=escalate, reply='Rerun it.')
 	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
-	assert '**DTN draft (bug):**\n> The header text overlaps.\n\n' in result['thread']
+	assert result['record']['triage']['escalate'] == escalate
 	assert '**Draft Reply:**\n> Rerun it.\n\n_Trial' in result['dm']
-	assert 'header text' not in result['dm']
+	assert 'DTN-3000' not in result['dm'] and 'DTN-3000' not in result['thread']
+
+
+def test_also_found_shows_the_cause_and_what_was_unread_is_said_once(sources, monkeypatch):
+	note = 'no Cerberus telemetry log of Ann Analyst before the post'
+	monkeypatch.setattr(code, 'refresh', lambda: [note])
+	second = {'cause': 'The calipers sit in a subfolder', 'class': EXAMPLE['class']}
+	text = answer_text(secondary=[second], flags=['the screenshot', note])
+	thread = record.trial('DSS-1234', POSTED, ask=claude(text, []))['thread']
+	assert '**Also found**\n- The calipers sit in a subfolder\n\n**Confidence:**' in thread
+	assert 'wi\\_wall\\_loss' not in thread  # its class stays in the record
+	assert thread.endswith(
+		'**Confidence:** high, settled at the wrong numbers playbook; could not read:\n'
+		f'- the screenshot\n- {note}'
+	)
 
 
 def test_empty_fields_are_left_out(sources):
@@ -422,8 +437,9 @@ def test_empty_fields_are_left_out(sources):
 	assert dm.startswith('**DSS-1234 · One question for the analyst · needs info**\n')
 	assert f'**Ann Analyst Todos:**\n1. Answer: {QUESTION["ask"]}\n\n_Trial' in dm
 	assert 'Data Dev Todos' not in dm and 'Reply' not in dm
-	for label in ('Why:', 'Evidence', 'Details', 'DTN'):
+	for label in ('Why:', 'Evidence', 'Details', 'DTN', 'Also found', 'could not read'):
 		assert label not in thread
+	assert thread.endswith('**Confidence:** low, settled at Gate C')
 
 
 def test_the_record_may_come_in_a_code_fence(sources):
