@@ -56,6 +56,7 @@ packages to this repo's dependencies.
 |---|---|
 | DataDHPython (`darkvisiontech/DataDHPython`) | Cerberus. The `code_*` tools read it through git at the prod release commit, and `cerb_client_info` runs in its venv. |
 | dv-auto-setup-agent | Arsenii's casing intake and auto-setup project, the source of the copied code. |
+| DataAnalysis (`darkvisiontech/DataAnalysis`) | MATLAB CAT, which Cerberus was ported from. The `matlab_*` tools read it through git at origin/master, as a reference for intended behaviour beside the Confluence SOPs. |
 
 arch (DataDHPython's `arch-master` branch) is not a source: Cerberus reads only the client info
 and the other spreadsheets in the DVT folder. If Cerberus starts reading arch directly, add a

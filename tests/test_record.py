@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from dss import __main__ as cli
-from dss import cerb, code, jira, record, runner
+from dss import cerb, code, jira, record, runner, triage
 
 EXAMPLE = json.loads(record.SCHEMA_FILE.with_name('triage_record.example.json').read_text('utf-8'))
 PROJECT = r'\\server\projects\ACME\DVT1234_2026-10-20_WI_Well-1'
@@ -201,6 +201,15 @@ def test_the_trial_keeps_the_bots_steps_and_asks_for_the_record():
 		assert f'`{cause["slug"]}`' in prompt
 	assert '$' not in prompt
 	assert len(prompt) < 20_000  # it goes on the claude command line, which Windows caps at 32,767
+
+
+def test_a_broken_known_causes_file_is_named_not_blamed_on_claude(tmp_path, monkeypatch):
+	broken = tmp_path / 'known_causes.json'
+	broken.write_text("mo'r[\n\t{}\n]\n", encoding='utf-8')  # keys typed into the open file
+	monkeypatch.setattr(record, 'KNOWN_CAUSES_FILE', broken)
+	with pytest.raises(ValueError, match=r'known_causes\.json is not valid JSON') as caught:
+		record.system_prompt()
+	assert triage.explain(caught.value).startswith('The triage failed: known_causes.json is not')
 
 
 def test_the_trial_runs_the_same_locked_down_claude(sources, monkeypatch):

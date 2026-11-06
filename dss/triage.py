@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from dss import code, runner
+from dss import code, matlab, runner
 from dss.worker import ROOT
 
 TIME_FORMAT = '%Y-%m-%d_%H-%M-%S'  # local time, as Cerberus names its telemetry logs
@@ -37,12 +37,13 @@ def triage(
 	*posted* is the ticket time in TIME_FORMAT; the triage looks for the reporter's Cerberus
 	session before it. *post* is the support-request workflow's message, when there is one, and
 	*thread_ts* its Slack ts, which `slack_thread` reads. *ask* is :func:`dss.runner.run_reply`
-	(faked in tests). The bot's Cerberus copies are brought up to date first (:func:`dss.code.refresh`).
+	(faked in tests). The bot's Cerberus and MATLAB copies are brought up to date first
+	(:func:`dss.code.refresh`, :func:`dss.matlab.refresh`).
 	"""
 	prompt = PROMPT.format(
 		key=key,
 		posted=posted,
-		notes=noted(code.refresh()),
+		notes=noted(code.refresh() + matlab.refresh()),
 		thread=slack_thread(thread_ts),
 		post=workflow_post(post),
 	)
@@ -134,4 +135,4 @@ def explain(error: Exception) -> str:
 	text = str(error)
 	if 'login' in text.lower() or 'api key' in text.lower():
 		return 'Claude is not logged in here. Run `claude` once and log in.'
-	return f'Claude failed: {text[:500]}'
+	return f'The triage failed: {text[:500]}'  # Claude's own failures say `claude -p`

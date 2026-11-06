@@ -21,12 +21,13 @@ Owners: Vincent Zhang and Annika. Status log: [docs/STATUS.md](docs/STATUS.md).
        cerb_*        dss/cerb.py        project folder, telemetry, files (project index);
                                         client info (Cerberus venv)
        code_*        dss/code.py        Cerberus source at the prod release commit (git)
+       matlab_*      dss/matlab.py      MATLAB CAT, which Cerberus was ported from (git)
        confluence_*  dss/confluence.py  SOPs and how-tos
   -> #data-dev-support-assist: the decision, with the proof in its thread (never #data-dev-support);
      the record is saved in out/trial/, and out/answers/ notes which tickets are done
 ```
 
-The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude first states the request, then searches past issues: DSS and DTN tickets, git history and branches, and troubleshooting pages. It then checks whether a past fix applies to this analyst's build. Only after that does it investigate. It goes through Gate A (is it a Cerberus issue?), Gate B (is it a known setup problem?) and Gate C (are the inputs there?), then follows one playbook for the symptom. Only proved results go under "Checked"; everything else goes under "Not proved", with what would settle it. Trial mode enforces the order: the record must state the request and the past issues, and the run's trace must show the Jira and git searches before any code or project file is read.
+The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude first states the request, then searches past issues: DSS and DTN tickets, git history and branches, and troubleshooting pages. It then checks whether a past fix applies to this analyst's build. Only after that does it investigate. It goes through Gate A (is it a Cerberus issue?), Gate B (is it a known setup problem?) and Gate C (are the inputs there?), then follows one playbook for the symptom. Only proved results go under "Checked"; everything else goes under "Not proved", with what would settle it. Trial mode enforces the order: the record must state the request and the past issues, and the run's trace must show the Jira and git searches before any code or project file is read. The `dss` server holds those reads back until both searches have run (`DSS_STEP_ORDER`, set by the runner), so a run cannot fail the order check by reading too early.
 
 | Tool | Reads |
 |---|---|
@@ -43,6 +44,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `cerb_prod_version` | The version of the prod Cerberus wheel. |
 | `code_grep`, `code_read`, `code_log_s` | Cerberus source through git at the prod release commit, never the working tree. |
 | `code_log`, `code_branches`, `code_contains` | Cerberus history: recent commits on a file or folder, branches named with a DTN key or word, and whether a build (prod, a release or the analyst's UAT build) includes a commit. Git reads only. |
+| `matlab_grep`, `matlab_read`, `matlab_log` | MATLAB CAT (DataAnalysis), which Cerberus was ported from, through git at origin/master: what a step did before the port, and when a behaviour came in. A second reference for intended behaviour beside the Confluence SOPs; the two can disagree, and the rules send the decision to the developers when they do. |
 | `confluence_search`, `confluence_page` | Confluence pages. |
 
 `cerb_client_info` and `cerb_read_sheet` run in the Cerberus venv through [dss/worker.py](dss/worker.py), so this repo needs none of its dependencies.
@@ -122,6 +124,7 @@ The bot reads the Cerberus analysts run, not whatever branch a developer has che
 
 - `code_*` read the bot's own clone (`DSS_CERB_GIT`) at the commit of the version in the prod folder (`release: v1.0.4`), never a working tree. Each triage first fetches every branch, so new releases, fix branches and pushed UAT builds are seen. A UAT build made only on a developer's PC is invisible until it is pushed.
 - `cerb_client_info` runs Cerberus's own client info reader from the prod wheel itself, unpacked into `DSS_CERB_PROD_CODE/<version>` the first time a version is seen. The Cerberus venv still provides the dependencies; only Cerberus's own code comes from the wheel.
+- `matlab_*` read the bot's own clone of DataAnalysis (`DSS_MATLAB_GIT`) at origin/master, fetched before each triage like the Cerberus clone. The clone leaves out files over 1 MB (data, not code), so it is about 30 MB.
 
 ```powershell
 uv run python -m dss cerberus   # clone if missing, fetch, unpack the prod wheel, and say what each tool reads
@@ -194,6 +197,7 @@ All of them can go in `.env`; see [.env.example](.env.example).
 |---|---|
 | `DSS_CERB_PY`, `DSS_CERB_CWD` | The Cerberus venv's python and checkout: `cerb_client_info` and `cerb_read_sheet` run in it; `code_*` read the checkout when `DSS_CERB_GIT` is not set. |
 | `DSS_CERB_GIT` | The bot's own Cerberus clone, read by `code_*` and fetched before each triage. |
+| `DSS_MATLAB_GIT` | The bot's own MATLAB CAT (DataAnalysis) clone, read by `matlab_*` and fetched before each triage. Unset, the `matlab_*` tools are off. |
 | `DSS_CERB_PROD_CODE` | Where the prod wheel is unpacked, one folder per version, so `cerb_client_info` runs the Cerberus analysts installed. |
 | `DV_PROJECT_INDEX_USER`, `DV_PROJECT_INDEX_PASSWORD` | Login for the project index. Sent as HTTP Basic auth over plain HTTP. |
 | `DV_PROJECT_INDEX_URL`, `DV_PROJECT_INDEX_ROOT` | The index address and the share it indexes. Default `http://192.168.25.120` and `\\192.168.24.252\projects`. |

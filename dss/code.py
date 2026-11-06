@@ -419,7 +419,7 @@ def _run(*args: str, cwd: str = '', timeout: float = GIT_TIMEOUT_S) -> subproces
 
 def _checked(path: str) -> str:
 	if path.startswith('-') or '..' in Path(path).parts:
-		raise ValueError(f'{path!r} is not a path inside the Cerberus repo')
+		raise ValueError(f'{path!r} is not a path inside the repo')
 	return path
 
 

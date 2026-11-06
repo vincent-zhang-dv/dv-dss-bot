@@ -1,5 +1,57 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-06: DSS-1249's two failures, and MATLAB CAT as a reference (Vincent, with Claude)
+- **Why:** the live bot posted two failures for DSS-1249 to the test channel:
+  - ":warning: Could not triage DSS-1249: Claude failed: Expecting value: line 1 column 1".
+    `docs/known_causes.json` had four stray characters typed before its `[` (saved Nov 5, never
+    committed). The record prompt reads that file, so the triage stopped before Claude ran.
+  - After the file was fixed and the bot restarted on `106dc63`, catch-up re-triaged it
+    ($0.93). Claude searched Jira, then read code before any git history search, so the order
+    check refused the answer and the post said "failed the record check".
+- **Done** (branch `step-order-gate`):
+  - `server.ReportingTools.waiting`: with `DSS_STEP_ORDER=1`, which the runner now sets, the
+    reading tools (`record.INVESTIGATION_TOOLS`) answer "Not yet" until the run has called
+    `jira_search` and a git history tool. A search that failed counts, so a source that is down
+    never blocks the triage. The held-back call is traced as `blocked`, and `traced_tools`
+    leaves it out of the order check. `triage.md` step 2 says so.
+  - A JSON file the record prompt reads that is not valid JSON is named in the error
+    (`record._json_file`). `triage.explain` says "The triage failed:" instead of "Claude
+    failed:"; Claude's own failures already say `claude -p`.
+  - New known cause `las-maxpen-not-peak-preserved` (DSS-1249): with a Depth Step, the
+    Cerberus LAS resamples `idMaxPen` with `np.interp`. Checked on the ticket's project: the LAS
+    equals the interpolated full-resolution curve to 4 decimals, so a 0.30 in pit reads 0.239 in.
+    The MATLAB export (`cat_export_deliv_las.m` in DataAnalysis) has peak-preserved `idMaxPen`
+    and `idMaxWL` since 2023-02-09, while its Confluence SOP says LAS resampling does not
+    preserve peaks "and that's OK". DSS-1249 was resolved the same day: the LAS has no
+    peak-preservation requirement (DTN-3747 cancelled). The known cause says so.
+  - The record module's docstring no longer says the Slack bot does not use it.
+  - The lesson from DSS-1249: whether a behaviour is intended needs both references, the
+    Confluence SOP and the MATLAB CAT code Cerberus was ported from, and either can be wrong.
+    Here the SOP says LAS resampling keeps no peaks "and that's OK", while CAT has kept the
+    `idMaxPen` and `idMaxWL` peaks since 2023-02-09 (CAT 2.0).
+    - New `dss/matlab.py`: `matlab_grep`, `matlab_read` and `matlab_log` read DataAnalysis
+      through git at origin/master. The bot's own clone (`DSS_MATLAB_GIT`, made by
+      `python -m dss cerberus` without files over 1 MB) is about 30 MB and is fetched before
+      each triage. Paths are confined by `code._checked`; git reads only.
+    - `matlab_read` is an investigation tool, so it waits for the past-issue searches too.
+    - New rule in `triage.md`: when code alone can't say whether a behaviour is intended, check
+      the SOP and CAT, quote each, and leave a disagreement to the developers under Not proved.
+    - CLAUDE.md lists DataAnalysis as a read-only related repo; README and `.env.example`
+      updated.
+- **Checked:** 202 tests pass, 4 of them new. Ruff is clean on the changed files. The record
+  prompt is 19,561 characters (limit 20,000). The MATLAB tools found the CAT peak preservation
+  and its 2023 commit on the real clone. Live:
+  - DSS-1249 re-triaged with the order gate ($0.58), posted to the test channel: it passed the
+    check, searching Jira and git history before reading code with no call held back.
+  - A trial with the MATLAB tools ($0.27): passed the check, read `cat_export_deliv_las.m` and
+    the Cerberus LAS page, cited the Jira resolution, and left the restore decision to the
+    developers.
+- **Not done:**
+  - The record prompt has about 400 characters left before the command-line limit; the next
+    rule or known cause needs room made first.
+  - Refused posts for schema problems remain possible (2 of 17 trials so far); a repair turn is
+    an option.
+
 ### 2026-11-05 (later): Cerberus's terminal log as a source (Vincent, with Claude)
 - **Why:** from Cerberus 1.1 (`ab952f341`, DTN-3710), each session writes loguru's DEBUG output
   to `<project>\cerberus\terminal_log\<login>_terminal_log_<start>_<pid>.log`, named like its

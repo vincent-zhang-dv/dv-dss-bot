@@ -75,12 +75,16 @@ def main() -> None:
 
 		bot()
 	elif args.command == 'cerberus':
-		from dss import code
+		from dss import code, matlab
 
 		try:
 			lines = code.setup()
 		except Exception as error:  # one readable line instead of a traceback
 			raise SystemExit(f'cannot set up Cerberus: {error}') from error
+		try:
+			lines += matlab.setup()
+		except Exception as error:  # noqa: BLE001 - Cerberus is set up; say what MATLAB lacks
+			lines.append(f'cannot set up MATLAB CAT: {error}')
 		for line in lines:
 			print(line)
 	elif args.command == 'eval':

@@ -29,7 +29,9 @@ gives a proved answer, and say which step that was.
    - Then state the request before reading anything else: what the analyst sees and in which
      output or Cerberus step, what they expected, and what they ask for (a fix, an explanation,
      a rerun, how to do something, or a new feature). Every later step tests against it.
-2. **Past issues: was it reported or fixed before?** Search before investigating:
+2. **Past issues: was it reported or fixed before?** Search before investigating. `code_read`,
+   `cerb_read_text`, `cerb_read_sheet` and `cerb_client_info` answer "Not yet" until
+   `jira_search` and a git search below have run:
    - `jira_search` for DSS and DTN tickets with the same output, symptom or error text, such as
      `project in (DSS, DTN) AND text ~ "eccentricity scale" ORDER BY created DESC`. Up to three
      searches, each with different words.
@@ -89,6 +91,10 @@ Rules:
   Everything else goes under Not proved, with what would settle it.
 - "Possible by design" is not a root cause. Call a result expected only after finding the code
   path that produced that specific value.
+- When code alone can't say whether a behaviour is intended or a bug, check both references:
+  the Confluence SOP and the MATLAB CAT code Cerberus was ported from (`matlab_grep`,
+  `matlab_read`). Either can be wrong. Quote each; if they disagree, the decision goes to the
+  developers under Not proved.
 - If you could not see the reported symptom yourself (in a screenshot, a file or a log), say so
   and keep confidence low. Don't give the analyst an action that rests on a mechanism you
   didn't read.
