@@ -5,13 +5,14 @@ CAT shows what a step did before the port, so it is a reference for intended beh
 Confluence SOPs. The two can disagree, and either can be wrong: CAT's code may do more or less
 than its SOP says. Every call reads origin/master of the bot's own clone (DSS_MATLAB_GIT, made by
 `python -m dss cerberus` without files over 1 MB), which :func:`refresh` fetches before each
-triage. Searches cover MATLAB files (`*.m`) only.
+triage. Searches cover MATLAB files (`*.m`) only. In a replay (:mod:`dss.cutoff`) they read
+origin/master as it was at the ticket's post (:func:`ref`).
 """
 
 import os
 from pathlib import Path
 
-from dss import code
+from dss import code, cutoff
 
 REPO_URL = 'https://github.com/darkvisiontech/DataAnalysis.git'
 REF = 'origin/master'
@@ -23,20 +24,22 @@ def grep(pattern: str, path: str = 'CAT', regex: bool = False) -> str:
 	kind = '-F'
 	if regex:
 		kind = '-E'
-	found = _git('grep', '-n', '-I', kind, '-e', pattern, REF, '--', _matlab_files(path))
-	lines = [line.removeprefix(f'{REF}:') for line in found.splitlines()]
-	return code._capped(f'MATLAB CAT at {REF}, matches of {pattern!r} in {path}', lines)
+	at = ref()
+	found = _git('grep', '-n', '-I', kind, '-e', pattern, at, '--', _matlab_files(path))
+	lines = [line.removeprefix(f'{at}:') for line in found.splitlines()]
+	return code._capped(f'MATLAB CAT at {at}, matches of {pattern!r} in {path}', lines)
 
 
 def read(path: str, start: int = 1, end: int = 0) -> str:
 	"""Lines *start* to *end* of one file; *end* 0 means the last line."""
-	lines = _git('show', f'{REF}:{code._checked(path)}').splitlines()
+	at = ref()
+	lines = _git('show', f'{at}:{code._checked(path)}').splitlines()
 	start = max(start, 1)
 	if not end:
 		end = len(lines)
 	end = min(end, start + code.MAX_LINES - 1, len(lines))
 	numbered = [f'{number}\t{lines[number - 1]}' for number in range(start, end + 1)]
-	return f'{path} at {REF}, lines {start}-{end} of {len(lines)}:\n' + '\n'.join(numbered)
+	return f'{path} at {at}, lines {start}-{end} of {len(lines)}:\n' + '\n'.join(numbered)
 
 
 def log(path: str = 'CAT', text: str = '') -> str:
@@ -53,11 +56,22 @@ def log(path: str = 'CAT', text: str = '') -> str:
 		f'-{code.MAX_COMMITS}',
 		'--format=%h %ad %an | %s',
 		'--date=short',
-		REF,
+		ref(),
 		'--',
 		code._checked(path),
 	)
 	return code._capped(title, found.splitlines())
+
+
+def ref() -> str:
+	"""The commit the tools read: REF, or in a replay the commit REF pointed to at the cutoff, by
+	commit date (GitHub's push history is read for the Cerberus repo only)."""
+	if cutoff.when() is None:
+		return REF
+	found = _git('log', '-1', '--first-parent', *code._until(), '--format=%h', REF).strip()
+	if not found:
+		raise LookupError(cutoff.refusal('every MATLAB CAT commit'))
+	return found
 
 
 def repo_dir() -> str:

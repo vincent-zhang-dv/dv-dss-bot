@@ -53,12 +53,13 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 
 | Path | What it does |
 |---|---|
-| `dss/__main__.py` | CLI: `triage`, `eval`, `slack`, `mcp`. Reads `.env`. |
+| `dss/__main__.py` | CLI: `triage`, `trial`, `replay`, `eval`, `cerberus`, `slack`, `mcp`. Reads `.env`. |
 | `dss/triage.md` | The triage system prompt. Most behaviour changes happen here. |
 | `dss/triage.py` | One triage: prompt, Claude run, tokens and cost. |
 | `dss/eval.py`, `docs/golden.example.jsonl` | Scores saved answers against the golden set; a made-up golden row. |
 | `docs/triage_record.schema.json`, `docs/triage_record.example.json`, `docs/known_causes.json` | The triage record's schema (a proposal), a made-up example, and a draft list of known causes. Only trial mode uses them. |
 | `dss/record.py`, `dss/triage_record.md` | Trial mode: the triage as a checked record, and the answer section that replaces `triage.md`'s. |
+| `dss/replay.py`, `dss/cutoff.py` | Replay mode: old tickets triaged as they stood when posted, and the cutoff every tool answers by. |
 | `dss/runner.py` | The locked-down `claude -p` command line. |
 | `dss/server.py` | The `dss` MCP server. |
 | `dss/thread.py`, `jira.py`, `cerb.py`, `code.py`, `confluence.py` | The tools, one module per source. |
@@ -89,6 +90,8 @@ uv run python -m dss triage DSS-1234 --posted 2026-10-21_09-30-00    # an older 
 uv run python -m dss triage DSS-1234 --post-file post.txt            # with the workflow's Slack post
 uv run python -m dss triage DSS-1234 --thread <permalink of the post> # with its Slack thread
 uv run python -m dss trial DSS-1234 --thread ... --post-file ...     # the same triage as a checked record
+uv run python -m dss replay DSS-1229 DSS-1101                        # old tickets as posted: the plan only
+uv run python -m dss replay DSS-1229 --go [--post-test]              # run them (see Replay mode)
 uv run python -m dss slack                                           # the bot
 ```
 
@@ -108,6 +111,26 @@ Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, 
 - Code renders a post (the decision) and a thread reply (the proof), as the Slack bot posts them (below). An answer that fails the check is shown as given, with the problems.
 
 The command prints the DM, then the thread reply. Each trial is saved as `out/trial/<key>_<run time>.json`, never in `out/answers/`, the folder the bot reads to tell which tickets are done. The trial doesn't post to Slack; whoever runs it delivers the DM and the thread reply to the reviewer.
+
+### Replay mode
+
+`python -m dss replay <keys> [--golden out/eval/golden.jsonl]` triages existing DSS tickets as they stood when the workflow posted them, so an answer can't come from what happened later. It finds each ticket's "created DSS-…" post in #data-dev-support, takes the post's time as the cutoff, and runs a trial in which every tool answers as of then:
+
+| Source | What a replay sees |
+|---|---|
+| Slack | The workflow's post only, none of the thread's replies; a post edited since says so. Threads posted later are refused. |
+| Cerberus code | The analyst's build, from their last session before the post; without one, the release that was prod then. History is what GitHub held at the post: GitHub's push history (its activity API, through `gh`, kept in `out/archive/github_activity.json`) gives each branch's commit then, so history searches walk only those, `code_branches` lists the branches of then (deleted ones too, when the clone has them), and a commit made before the post but pushed after it is refused. Without the push history, commit dates stand in. `cerb_client_info` runs the analyst's build, exported from git (no wheel is built). |
+| Prod version | The newest release that was out by then: a release counts from the latest of its release commit, the day after its Jira release date (DTN's `CERBERUS v…` versions) and, for today's wheel, when the wheel was written. |
+| Jira | Each ticket as it stood then, rebuilt from its whole changelog (status, resolution, Toolbox Name, Investigation Outcome, links, fix versions by name only, description). The replayed ticket shows no comments; other tickets show only comments written before the post, and a comment edited since shows no text. Tickets created later are refused. Searches may test only what a ticket keeps once filed (project, key, type, created, reporter, summary, description), with absolute dates, sorted by created or key: `status = Done`, the Outcome, links, functions such as `linkedIssues()` and dates such as `-30d` would pick tickets by what happened later, so they are refused. `text ~` searches only the summary and description, and as Jira matches today's text, a hit edited since is kept only if its text then has the searched words. |
+| Project share | Sessions started later are left out, and log lines from the post on. A listing marks files changed since (`changed_after_ticket`, without when or their size now). Reading one gives the file as it is now and says so: if it shows the fix (a corrected client info value, say), Claude writes the answer as the ticket stood, as if not fixed, and notes the fix (`replay.fixed_later`), shown in the post as "Fixed later in a file". Left out of listings: changed files and folders whose name says they were made later (the ticket's key, or a later date such as `Analysis 2026-10-30.docx`), and any path through such a folder is refused (a `Deliverables\DSS-1163` folder). Projects dated after the ticket's month aren't found. |
+| Confluence | Pages created later aren't found. A page is read at the version it had then, however many versions it has, and searched by its text then: a hit changed since is kept only if that version has the searched words, and shows that version's title and an excerpt from it. Versions read are kept in `out/archive/confluence/`, an archive of pages as they were that grows with each replay. |
+| Prompt | Known causes learned only from this ticket or later ones, and any line naming it or a later ticket, are left out; the general rules stay. |
+
+A refusal never says when the hidden thing happened, as that would date the fix. The tools stop answering after 30 calls (Claude then answers with what it has), and claude stops a run at $1.50. Code looks in every tool answer for the ticket's own key, for later DSS tickets (keys are numbered in order) and for dates after it; Claude also lists anything that looked later. Both go in the record's `replay` block. The post shows Claude's leaks, each with the tool call it came through, and how many tool answers code flagged; the thread lists those.
+
+What can still leak, as no source keeps it: a ticket or page that matched a search then but no longer does isn't found (only today's matches are checked against their text then), and Jira and Confluence rank hits by today's text; the project index has no creation times or old file contents, so a file made later with a plain name is listed as changed, and a changed file is read as it is now (by design, with the fix noted).
+
+Without `--go`, the command shows each ticket's post time, build and commit, and runs nothing. With it, each replay is a real triage under your login; results go to `out/replay/<date>/` with their traces, and a summary line per ticket is printed. `--post-test` also posts each post and thread to #data-dev-support-assist-test (`DSS_SLACK_TEST_CHANNEL`); the command refuses #data-dev-support. It needs `DSS_SLACK_BOT_TOKEN` to read the channel.
 
 ### Scoring answers
 
@@ -210,6 +233,8 @@ All of them can go in `.env`; see [.env.example](.env.example).
 | `DSS_SLACK_POST_CHANNEL` | Where the bot posts analyses: #data-dev-support-assist's channel id. Never #data-dev-support. |
 | `DSS_SLACK_REVIEWER` | The Slack member id whose DM gets the analyses when `DSS_SLACK_POST_CHANNEL` is not set. |
 | `DSS_SLACK_CHANNEL` | The channel to watch. Default #data-dev-support. |
+| `DSS_SLACK_TEST_CHANNEL` | Where `replay --post-test` posts. Default #data-dev-support-assist-test. Never #data-dev-support. |
+| `DSS_GH` | The gh CLI a replay reads GitHub's push history with (GET only, under your gh login). Default `gh` on the PATH, else `C:\Program Files\GitHub CLI\gh.exe`. |
 | `DSS_TRACE` | `1` writes each triage's tool calls to `out/trace/`. |
 
 ## Origin

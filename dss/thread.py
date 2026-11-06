@@ -65,6 +65,8 @@ def thread(ts: str) -> list[str | Image]:
 			if float(message['ts']) <= float(until):
 				shown.append(message)
 		messages = shown
+		if not messages:  # a ticket posted after the replayed one
+			raise ValueError(f'thread {ts} was posted after the ticket time; it cannot be read')
 	names = slack.Names(client)
 	found: list[str | Image] = [
 		f'Thread {ts}: the post and {len(messages) - 1} replies, oldest first, in local time.'
@@ -74,6 +76,9 @@ def thread(ts: str) -> list[str | Image]:
 		label = f'Reply {number}' if number else 'Post'
 		when = datetime.fromtimestamp(float(message['ts'])).strftime(SHOWN_TIME)
 		lines = [f'--- {label} · {_author(message, names)} · {when}']
+		edited = (message.get('edited') or {}).get('ts', '')
+		if until and edited and float(edited) > float(until):  # Slack keeps only the new text
+			lines.append('(edited after the ticket time: the text below is the edited one)')
 		if message.get('text'):
 			lines.append(names.plain(message['text']))
 		attached: list[str | Image] = []

@@ -8,6 +8,11 @@ indexed share. The login comes from DV_PROJECT_INDEX_USER and DV_PROJECT_INDEX_P
 DSS_CERB_PROD_CODE, `client_info` runs the Cerberus of that prod wheel (:func:`prod_code`), not
 the developer checkout the venv is installed from. Settings are read at each call, so a `.env`
 file loaded after this module is imported still applies.
+
+In a replay (:mod:`dss.cutoff`) the project tools answer as of the ticket time: sessions and log
+lines after it are left out, a listing marks the files changed since, and reading one of those
+says it is the file as it is now (:func:`as_now`). `client_info` runs the analyst's build, exported
+from git, and the prod version is the newest release by then.
 """
 
 import base64
@@ -26,8 +31,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from dss import cutoff
 from dss.worker import run_in
 
 DEFAULT_INDEX_URL = 'http://192.168.25.120'
@@ -89,6 +96,17 @@ MAX_LOG_ERRORS = 8  # distinct errors of a terminal log, the newest
 MAX_LOG_WARNINGS = 10  # warning call sites, the first
 MAX_ERROR_DETAIL = 6  # lines kept under an error: the end of a traceback, the deepest frames
 LOG_LINE_CHARS = 300
+# A replay reads a .log changed since the ticket up to the ticket time: telemetry lines start
+# with ts=2026-11-05T13:28:34.675, terminal log lines with 2026-11-05 13:28:34.675
+LOG_TIME = re.compile(r'(?:ts=)?(\d{4}-\d\d-\d\d)[T ](\d\d):(\d\d):(\d\d)')
+PROJECT_FOLDER = re.compile(r'DVT[0-9]+_', re.IGNORECASE)
+FILETIME_START = datetime(1601, 1, 1, tzinfo=UTC)  # the index's date_modified counts
+# 100 ns steps from here
+CHANGED_NOW = (
+	'changed after the ticket: this is the file as it is now, and it may already hold the fix. '
+	'Settle the ticket as it stood then; if this version shows the fix, add it to '
+	'replay.fixed_later.'
+)
 
 
 def client_info(path: str) -> dict:
@@ -322,6 +340,28 @@ def _window_picture(values, depths, units) -> dict:
 	return _encoded(Image.open(buffer))
 
 
+def client_info_run(local: str) -> dict:
+	""":func:`client_info` of the file *local*, run by the prod wheel's Cerberus (:func:`prod_code`).
+
+	In a replay it runs the analyst's build (DV_CERB_REF, exported from git by
+	:func:`dss.code.export`), and `cerberus` says which ran: today's prod when that build cannot
+	run in today's venv.
+	"""
+	ref = os.environ.get('DV_CERB_REF', '')
+	if cutoff.when() is None or not ref:
+		return run_in('cerb', __name__, 'client_info', first_path=prod_code(), path=local)
+	from dss import code  # not at the top: code imports this module
+
+	try:
+		found = run_in('cerb', __name__, 'client_info', first_path=code.export(ref), path=local)
+	except Exception as error:  # noqa: BLE001 - an old build may not import in today's venv
+		found = run_in('cerb', __name__, 'client_info', first_path=prod_code(), path=local)
+		found['cerberus'] = f"today's prod; the analyst's build {ref} failed here: {error}"[:500]
+		return found
+	found['cerberus'] = f"the analyst's build {ref}"
+	return found
+
+
 def cerberus_found() -> dict:
 	"""Where this python's Cerberus comes from, and its version. Runs in the Cerberus venv."""
 	import cerberus
@@ -387,14 +427,19 @@ def _json_cell(value):
 def find_project(dvt: int) -> dict:
 	"""Project folders of DVT *dvt* on the share: <client>\\DVT<dvt>_<date>_<type>_<well>.
 
-	The index can lag behind a folder made minutes ago, so no match means not indexed yet.
+	The index can lag behind a folder made minutes ago, so no match means not indexed yet. In a
+	replay, a project dated after the ticket is left out (:func:`dss.cutoff.named_later`).
 	"""
 	root = _index_root()
 	prefix = f'DVT{int(dvt)}_'
 	found = []
 	for hit in _search(f'folder: {prefix} path:"{root}\\"'):
 		in_client_folder = _key(ntpath.dirname(hit['path'])) == _key(root)
-		if hit['type'] == 'folder' and hit['name'].startswith(prefix) and in_client_folder:
+		# by the month only (DVT1234_2026-10_WI or _2026-10-20_WI): a job can be dated a little
+		# after the ticket filed about it
+		later = cutoff.named_later(hit['name'][len(prefix) : len(prefix) + 7])
+		project = hit['type'] == 'folder' and hit['name'].startswith(prefix) and in_client_folder
+		if project and not later:
 			found.append(ntpath.join(hit['path'], hit['name']))
 	return {'projects': sorted(found)}
 
@@ -404,10 +449,14 @@ def last_session(project: str, user: str, before: str = '') -> dict:
 
 	Logs are named after the Windows login (SurnameGiven), so a log matches when the first and
 	last parts of *user* both appear in its login. *before* is the ticket time as
-	`YYYY-MM-DD_HH-MM-SS` (local); empty means the newest log.
+	`YYYY-MM-DD_HH-MM-SS` (local); empty means the newest log. In a replay it is never later than
+	the cutoff, and the session's lines from then on are left out.
 	"""
 	if before and not START_TIME.fullmatch(before):
 		raise ValueError(f'before must look like 2026-10-20_12-17-30, not {before!r}')
+	then = cutoff.name_time()
+	if then and (not before or before > then):
+		before = then
 	folder = ntpath.join(_inside_index(project), 'cerberus', 'telemetry')
 	names = re.findall(r'[a-z]+', user.lower())
 	if not names:
@@ -428,9 +477,18 @@ def last_session(project: str, user: str, before: str = '') -> dict:
 		return {'found': False, 'folder': folder, 'user': user, 'before': before}
 	started, name = max(logs)
 	text = _fetch(ntpath.join(folder, name)).decode('utf-8', errors='replace')
+	cut = False
+	if then:
+		lines = text.splitlines()
+		kept = _lines_before(lines, then)
+		cut = len(kept) < len(lines)
+		text = '\n'.join(kept)
 	facts = session_facts(text)
 	log = terminal_log(project, name, facts['cerb'], before)
-	return {'found': True, 'file': name, 'started': started, **facts, 'terminal_log': log}
+	found = {'found': True, 'file': name, 'started': started, **facts, 'terminal_log': log}
+	if cut:
+		found['cut_at_ticket'] = True  # the session went on after the ticket; that part is left out
+	return found
 
 
 def terminal_log(project: str, telemetry_file: str, version: str, before: str = '') -> dict:
@@ -555,29 +613,78 @@ def session_facts(text: str) -> dict:
 
 
 def list_folder(folder: str) -> dict:
-	"""Files and folders directly inside *folder*, folders first, with file sizes in bytes."""
+	"""Files and folders directly inside *folder*, folders first, with file sizes in bytes.
+
+	In a replay, a file changed after the ticket is marked `changed_after_ticket`, without when or
+	its size now. Left out: a changed file, or any folder, whose name says it was made later
+	(:func:`dss.cutoff.named_later`); the index has no creation times, and a folder's change time
+	moves with what is in it.
+	"""
 	folder = _inside_index(folder)
+	_not_made_later([ntpath.basename(folder)])  # the folders above it are checked already
 	entries = []
 	for hit in _search(f'parent:"{folder}"', MAX_LISTED + 1):
-		if _key(hit['path']) == _key(folder):
-			entries.append({'name': hit['name'], 'type': hit['type'], 'size': hit.get('size', '')})
+		if _key(hit['path']) != _key(folder):
+			continue
+		entry = {'name': hit['name'], 'type': hit['type'], 'size': hit.get('size', '')}
+		changed = _changed(hit)
+		later = hit['type'] == 'file' and changed is not None and cutoff.after(changed)
+		if (later or hit['type'] == 'folder') and cutoff.named_later(hit['name']):
+			continue
+		if later:
+			entry['changed_after_ticket'] = True
+			del entry['size']
+		entries.append(entry)
 	entries.sort(key=_folders_first)
 	return {'folder': folder, 'entries': entries[:MAX_LISTED], 'cut': len(entries) > MAX_LISTED}
 
 
 def read_text(path: str, first_line: int = 1) -> dict:
-	"""Up to MAX_TEXT_LINES lines of a text file on the share, from *first_line* on."""
+	"""Up to MAX_TEXT_LINES lines of a text file on the share, from *first_line* on.
+
+	In a replay, a .log changed since the ticket is read up to the ticket time (`cut_at_ticket`),
+	as its lines carry their time; any other file changed since is read as it is now (the tool
+	marks it, :func:`as_now`).
+	"""
 	data = _fetch(path)
 	if b'\0' in data[:8192]:
 		raise ValueError(f'{path} is not a text file')
 	lines = data.decode('utf-8', errors='replace').splitlines()
+	cut = False
+	if cutoff.when() is not None and path.lower().endswith('.log'):
+		changed = _modified(path)
+		kept = _lines_before(lines, cutoff.name_time())
+		if changed is not None and cutoff.after(changed) and kept:
+			lines = kept
+			cut = True
 	start = max(first_line, 1) - 1
-	return {
+	found = {
 		'path': path,
 		'first_line': start + 1,
 		'total_lines': len(lines),
 		'text': '\n'.join(lines[start : start + MAX_TEXT_LINES]),
 	}
+	if cut:
+		found['cut_at_ticket'] = True
+	return found
+
+
+def _lines_before(lines: list[str], before: str) -> list[str]:
+	"""The *lines* of a telemetry or terminal log up to the first one logged at or after *before*
+	(`YYYY-MM-DD_HH-MM-SS`, local); none when no line has a time."""
+	kept = []
+	timed = False
+	for line in lines:
+		logged = LOG_TIME.match(line)
+		if logged:
+			timed = True
+			day, hours, minutes, seconds = logged.groups()
+			if f'{day}_{hours}-{minutes}-{seconds}' >= before:
+				break
+		kept.append(line)
+	if not timed:
+		return []
+	return kept
 
 
 def read_sheet(path: str, sheet: str = '', first_row: int = 1, contains: str = '') -> str:
@@ -943,9 +1050,9 @@ def _prune(copies: Path) -> None:
 	"""Delete copies older than COPY_KEEP_S, and the folders they leave empty."""
 	if not copies.exists():
 		return
-	cutoff = time.time() - COPY_KEEP_S
+	expired = time.time() - COPY_KEEP_S
 	for path in copies.rglob('*'):
-		if path.is_file() and path.stat().st_mtime < cutoff:
+		if path.is_file() and path.stat().st_mtime < expired:
 			path.unlink(missing_ok=True)
 	for path in sorted(copies.rglob('*'), reverse=True):  # a folder after everything in it
 		if path.is_dir() and not any(path.iterdir()):
@@ -954,7 +1061,25 @@ def _prune(copies: Path) -> None:
 
 
 def prod_version() -> str:
-	"""Version of the Cerberus wheel analysts install from the prod folder (the highest one)."""
+	"""Version of the Cerberus wheel analysts install from the prod folder (the highest one). In
+	a replay, the newest release by then (:func:`dss.code.release_then`), since the folder keeps
+	only today's wheel."""
+	if cutoff.when() is not None:
+		from dss import code  # not at the top: code imports this module
+
+		return code.release_then()[0]
+	return _wheel_version()
+
+
+def prod_wheel() -> tuple[str, datetime]:
+	"""The version of the prod folder's wheel and when it was written there (local time)."""
+	version = _wheel_version()
+	written = (_prod_dir() / f'cerberus-{version}-py3-none-any.whl').stat().st_mtime
+	return version, datetime.fromtimestamp(written).astimezone()
+
+
+def _wheel_version() -> str:
+	"""Version of the highest Cerberus wheel in the prod folder."""
 	prod_dir = _prod_dir()
 	found = []
 	for path in prod_dir.glob('cerberus-*.whl'):
@@ -977,7 +1102,7 @@ def prod_code() -> str:
 	root = os.environ.get('DSS_CERB_PROD_CODE', '')
 	if not root:
 		return ''
-	version = prod_version()
+	version = _wheel_version()
 	folder = Path(root, version)
 	if not (folder / 'cerberus' / '__init__.py').exists():
 		_unpack(_prod_dir() / f'cerberus-{version}-py3-none-any.whl', version, folder)
@@ -1036,12 +1161,62 @@ def _inside_index(path: str) -> str:
 	root = _index_root()
 	if not _key(normal).startswith(_key(root) + '\\'):
 		raise ValueError(f'{path} is outside the project share {root}')
+	_not_made_later(normal[len(root) + 1 :].split('\\')[:-1])  # the folders it goes through
 	return normal
+
+
+def _not_made_later(folders: list[str]) -> None:
+	"""In a replay, refuse a path through one of *folders* whose name says it was made after the
+	ticket (:func:`dss.cutoff.named_later`), such as Deliverables\\DSS-1163: it can hold the fix.
+	Project folders (DVT1234_<date>_...) carry the job's date and are kept."""
+	if cutoff.when() is None:
+		return
+	for name in folders:
+		if not PROJECT_FOLDER.match(name) and cutoff.named_later(name):
+			raise ValueError(cutoff.refusal(f'the folder {name}'))
 
 
 def _search(query: str, count: int = MAX_LISTED) -> list[dict]:
 	params = {'search': query, 'json': 1, 'path_column': 1, 'size_column': 1, 'count': count}
+	params['date_modified_column'] = 1
 	return json.loads(_get('/?' + urllib.parse.urlencode(params))).get('results', [])
+
+
+def _changed(hit: dict) -> datetime | None:
+	"""When the index last saw the file of *hit* change; None when it gave no time."""
+	filetime = str(hit.get('date_modified') or '')
+	if not filetime.isdigit():
+		return None
+	return FILETIME_START + timedelta(microseconds=int(filetime) // 10)
+
+
+def _modified(path: str) -> datetime | None:
+	"""When the file at *path* on the share last changed, by the index; None when it is not
+	listed."""
+	inside = _inside_index(path)
+	folder, name = ntpath.split(inside)
+	for hit in _search(f'parent:"{folder}" "{name}"'):
+		if _key(hit['path']) == _key(folder) and _key(hit['name']) == _key(name):
+			return _changed(hit)
+	return None
+
+
+def as_now(path: str, result):
+	"""What a read tool found in *path*, marked (CHANGED_NOW) when, in a replay, the file changed
+	after the ticket: it is the file as it is now. A log already cut at the ticket time is as it
+	was then, and is not marked."""
+	if cutoff.when() is None or not path.startswith('\\\\'):
+		return result
+	if isinstance(result, dict) and result.get('cut_at_ticket'):
+		return result
+	changed = _modified(path)
+	if changed is None or not cutoff.after(changed):
+		return result
+	if isinstance(result, dict):
+		return {'changed_after_ticket': CHANGED_NOW, **result}
+	if isinstance(result, list):
+		return [f'{path}: {CHANGED_NOW}', *result]
+	return f'{path}: {CHANGED_NOW}\n{result}'
 
 
 def _fetch(path: str) -> bytes:
@@ -1144,7 +1319,7 @@ def register(server) -> None:
 			local = local_copy(path)
 		else:
 			local = Path(path).resolve()
-		return run_in('cerb', __name__, 'client_info', first_path=prod_code(), path=str(local))
+		return as_now(path, client_info_run(str(local)))
 
 	@server.tool()
 	def cerb_find_project(dvt: int) -> dict:
@@ -1160,7 +1335,7 @@ def register(server) -> None:
 	def cerb_read_text(path: str, first_line: int = 1) -> dict:
 		"""Up to 400 lines of a text file on the project share (config, log, csv) from
 		*first_line* on, with the file's total line count."""
-		return read_text(path, first_line)
+		return as_now(path, read_text(path, first_line))
 
 	@server.tool()
 	def cerb_read_sheet(path: str, sheet: str = '', first_row: int = 1, contains: str = '') -> str:
@@ -1169,7 +1344,7 @@ def register(server) -> None:
 		from *first_row* (Excel row numbers, cells tab-separated, formulas as last saved), the
 		sheet's top 3 rows first for the column names, and where the next page starts.
 		*contains* keeps only the rows with a cell containing that text."""
-		return read_sheet(path, sheet, first_row, contains)
+		return as_now(path, read_sheet(path, sheet, first_row, contains))
 
 	@server.tool()
 	def cerb_read_document(path: str, first: int = 1, contains: str = '') -> str:
@@ -1177,7 +1352,7 @@ def register(server) -> None:
 		2D log intro pages: up to 20 pages from page *first* (a Word file comes in parts of about
 		3,000 characters), and where the next answer starts. *contains* keeps only the pages
 		with that text. Pages that are only an image show no text."""
-		return read_document(path, first, contains)
+		return as_now(path, read_document(path, first, contains))
 
 	@server.tool()
 	def cerb_read_image(path: str, page: int = 0) -> list[str | Image]:
@@ -1185,7 +1360,7 @@ def register(server) -> None:
 		Deliverables), or at the pictures in page *page* of a PDF on the share (plots that
 		cerb_read_document cannot read, like the 2D log overview plots). Large images are scaled
 		to 1568 pixels; logos are left out."""
-		return read_image(path, page)
+		return as_now(path, read_image(path, page))
 
 	@server.tool()
 	def cerb_read_table(path: str, table: str = '', first_row: int = 1, contains: str = '') -> str:
@@ -1193,7 +1368,7 @@ def register(server) -> None:
 		on the project share: up to 100 rows from *first_row*, row 1 being the column names, and
 		where the next page starts. A .db file without *table* lists its tables. *contains*
 		keeps only the rows with a cell containing that text. Pickle files are never read."""
-		return read_table(path, table, first_row, contains)
+		return as_now(path, read_table(path, table, first_row, contains))
 
 	@server.tool()
 	def cerb_read_caliper(
@@ -1205,7 +1380,7 @@ def register(server) -> None:
 		the highest values, each with the min, mean and max over its elements, and a picture of
 		the window (depth across, elements down). Big files are read in parts: only the window is
 		fetched, at most 20,000 slices."""
-		return read_caliper(path, depth_from, depth_to)
+		return as_now(path, read_caliper(path, depth_from, depth_to))
 
 	@server.tool()
 	def cerb_last_session(project: str, user: str, before: str = '') -> dict:

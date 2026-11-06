@@ -15,10 +15,15 @@ import time
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from dss import cutoff
 from dss.record import HISTORY_TOOLS, INVESTIGATION_TOOLS
 
 MODULES = ('thread', 'jira', 'cerb', 'code', 'matlab', 'confluence')
 TRACE_CHARS = 2000  # result text kept per call in a trace line
+SPENT = (
+	'This replay has used its {calls} tool calls: stop investigating and answer now with what '
+	'you have, putting what is not proved under not_proved.'
+)
 
 
 def build() -> MCPServer:
@@ -37,12 +42,15 @@ class ReportingTools:
 	<name>", which would hide messages such as "Jira is not set up on this machine".
 	When DSS_TRACE_FILE names a file, each call also appends one JSON line to it (see
 	:func:`trace`). With DSS_STEP_ORDER=1 (the runner sets it), the tools that read code or
-	project files wait until the run has searched past issues (:meth:`waiting`).
+	project files wait until the run has searched past issues (:meth:`waiting`). In a replay,
+	calls past DSS_REPLAY_MAX_CALLS are refused with SPENT, so Claude answers with what it has; a
+	call held back reads nothing and does not count.
 	"""
 
 	def __init__(self, server: MCPServer) -> None:
 		self.server = server
 		self.called: set[str] = set()  # the tools this run has called, failed ones too
+		self.calls = 0  # calls that ran, for a replay's cap
 
 	def tool(self, *args, **kwargs):
 		"""The server's `tool()` decorator, with the tool's exceptions raised as `ToolError`."""
@@ -52,11 +60,17 @@ class ReportingTools:
 			@functools.wraps(function)
 			def reported(*call_args, **call_kwargs):
 				started = time.monotonic()
+				limit = int(os.environ.get('DSS_REPLAY_MAX_CALLS') or 0)
+				if limit and self.calls >= limit:
+					spent = ToolError(SPENT.format(calls=limit))
+					trace(function.__name__, call_kwargs, started, error=spent)
+					raise spent
 				reason = self.waiting(function.__name__)
 				if reason:
 					trace(function.__name__, call_kwargs, started, error=reason, blocked=True)
 					raise ToolError(reason)
 				self.called.add(function.__name__)
+				self.calls += 1
 				try:
 					result = function(*call_args, **call_kwargs)
 				except ToolError as error:
@@ -99,7 +113,8 @@ def trace(
 
 	The line has the tool, its arguments and the seconds it took, then either the error or the
 	result's size in characters and its first TRACE_CHARS characters. A call that had to wait
-	(:meth:`ReportingTools.waiting`) is marked `blocked`, with the reason as its error.
+	(:meth:`ReportingTools.waiting`) is marked `blocked`, with the reason as its error. In a
+	replay it also has the `leaks` found in the whole result (:func:`dss.cutoff.leaks`).
 	"""
 	path = os.environ.get('DSS_TRACE_FILE')
 	if not path:
@@ -116,5 +131,8 @@ def trace(
 			text = json.dumps(result, ensure_ascii=False, default=str)
 		line['chars'] = len(text)
 		line['result'] = text[:TRACE_CHARS]
+		leaks = cutoff.leaks(tool, arguments, text)
+		if leaks:
+			line['leaks'] = leaks
 	with open(path, 'a', encoding='utf-8') as file:
 		file.write(json.dumps(line, ensure_ascii=False, default=str) + '\n')

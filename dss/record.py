@@ -13,6 +13,7 @@ Each is saved in TRIAL_DIR; the bot's own record of what it posted is in out/ans
 import functools
 import json
 import ntpath
+import os
 import re
 import string
 import traceback
@@ -21,7 +22,7 @@ from pathlib import Path
 
 import jsonschema  # type: ignore[import-untyped]
 
-from dss import cerb, code, jira, matlab, runner, triage
+from dss import cerb, code, cutoff, jira, matlab, runner, triage
 from dss.worker import ROOT
 
 SCHEMA_ID = 'dss-triage/3'
@@ -62,6 +63,28 @@ RAW_CHARS = 3000  # of a refused answer, in the thread
 TRIAL_LABEL = 'Trial · draft by Claude, for you only'
 LIST_ITEM = re.compile(r'\s*(\d+\.|-) ')  # a list item, nested ones too
 LINKED_KEY = re.compile(r'\b(?:DSS|DTN)-[0-9]+\b')  # linked to Jira in the post and the thread
+DSS_NUMBER = re.compile(r'DSS-([0-9]+)')
+ARGUMENT_CHARS = 120  # of a tool call's arguments, in a leak line
+# Added to a replay's prompt (python -m dss replay): what the tools hide, and the answer's block
+REPLAY = """
+
+This is a replay of an old ticket: every tool answers as of {posted}, when it was posted, and
+leaves out what came later (thread replies, Jira comments and changes, later tickets, commits,
+releases and branches, later sessions, log lines and files). Settle it as the bot would have then.
+- `cut_at_ticket` marks a session or log read only up to the ticket time: nothing in it is later.
+- A project file changed since is listed with `changed_after_ticket`, and reading it says it is
+  the file as it is now. If that version shows the issue fixed (a corrected client info value,
+  say), write the answer as the ticket stood then, as if it were not fixed, and add the file and
+  what was fixed to `replay.fixed_later`.
+- Jira searches test only fields a ticket keeps once filed (project, key, type, created,
+  reporter, summary, description) with absolute dates.
+- If anything you read looks like it comes from after {posted} (an answer, a fix, a later date),
+  say what, and the tool call it came through, in `replay.leaks`.
+- After {calls} tool calls the tools stop answering: then answer with what you have.
+
+Add this block to your JSON, next to `triage` and `class`:
+"replay": {{"fixed_later": [{{"file": "<path>", "fix": "<what the file shows fixed>"}}],
+"leaks": [{{"via": "<tool(arguments)>", "what": "<what>"}}]}}"""
 
 
 def trial(
@@ -73,6 +96,9 @@ def trial(
 	label: str = TRIAL_LABEL,
 	ticket_link: str = '',
 	analyst: str = '',
+	replay: dict | None = None,
+	folder: Path | None = None,
+	trace: Path | None = None,
 ) -> dict:
 	"""One trial triage of *key*, checked, rendered and saved in TRIAL_DIR.
 
@@ -84,6 +110,9 @@ def trial(
 	code could not read), `record` (None when the answer had no JSON), `problems` (empty when the
 	record passed the check), `dm` and `thread` (Markdown), Claude's raw `text`, its cost, and
 	`file`.
+
+	A replay (:mod:`dss.replay`) gives *replay*, code's part of the record's `replay` block
+	(cutoff, build and code_ref), and saves in its own *folder* with its own *trace* file.
 	"""
 	if not jira.ISSUE_KEY.fullmatch(key):
 		raise ValueError(f'{key!r} is not an issue key like DSS-1234')
@@ -92,15 +121,25 @@ def trial(
 	ticket, notes = build_ticket(key, posted)
 	notes += code.refresh() + matlab.refresh()
 	asked = prompt(key, posted, ticket, notes, post, thread_ts)
-	trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
+	if replay is not None:
+		asked += replay_prompt()
+	if trace is None:
+		trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
 	answer = triage.run(key, posted, asked, ask, trace=trace)
 	record, crash = None, ''
+	facts = None
+	if replay is not None:
+		facts = {**replay, 'leaks_found': traced_leaks(trace)}
 	try:
-		record, problems = assemble(ticket, answer['text'])
+		record, problems = assemble(ticket, answer['text'], facts)
 		if record is not None:
 			problems += order_problems(record, traced_tools(trace))
 		if record is None or problems:
 			dm, thread = render_refused(key, problems, answer['text'], ticket_link)
+			if facts is not None:  # a leak is said even when the answer failed its check
+				said = {**facts, 'fixed_later': [], 'leaks': []}
+				dm = _joined([dm, *_leak_lines(said)])
+				thread = _joined([thread, *_code_leak_lines(said)])
 		else:
 			dm, thread = render(record, notes, links(record, notes), ticket_link, analyst)
 	except Exception as error:  # noqa: BLE001 - a paid answer is never lost to a bug in this code
@@ -110,8 +149,10 @@ def trial(
 	usage = f'{answer["tokens"]:,} tokens · ≈ ${answer["cost_usd"]:.2f} · {answer["seconds"]} s'
 	# the blank line keeps the footer out of a quoted reply above it
 	dm += f'\n\n_{label} · {usage}_'
-	TRIAL_DIR.mkdir(parents=True, exist_ok=True)
-	path = TRIAL_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.json'
+	if folder is None:
+		folder = TRIAL_DIR
+	folder.mkdir(parents=True, exist_ok=True)
+	path = folder / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.json'
 	result = {
 		'key': key,
 		'posted': posted,
@@ -134,7 +175,12 @@ def trial(
 
 
 def system_prompt() -> str:
-	"""triage.md's steps and rules, with ANSWER_FILE's record answer in place of its Markdown one."""
+	"""triage.md's steps and rules, with ANSWER_FILE's record answer in place of its Markdown one.
+
+	In a replay, known causes learned only from the replayed ticket or later ones are left out,
+	and so is any line naming the replayed ticket or a later one: they would give the answer away.
+	The general rules stay.
+	"""
 	steps = runner.SYSTEM.read_text(encoding='utf-8')
 	cut = steps.find(ANSWER_HEADING)
 	if cut < 0:
@@ -142,7 +188,8 @@ def system_prompt() -> str:
 	defs = _schema()['$defs']
 	causes = []
 	for cause in _json_file(KNOWN_CAUSES_FILE):
-		causes.append(f'- `{cause["slug"]}`: {cause["cause"]}')
+		if not learned_later(cause):
+			causes.append(f'- `{cause["slug"]}`: {cause["cause"]}')
 	answer = string.Template(ANSWER_FILE.read_text(encoding='utf-8')).substitute(
 		cause_families=_choices(defs['cause_family']['enum']),
 		features=_choices(defs['feature']['enum']),
@@ -150,7 +197,48 @@ def system_prompt() -> str:
 		fix_types=_choices(defs['class']['properties']['fix_type']['enum']),
 		known_causes='\n'.join(causes),
 	)
-	return steps[:cut] + answer
+	return _without_later_tickets(steps[:cut] + answer)
+
+
+def _without_later_tickets(prompt: str) -> str:
+	"""*prompt* without the lines that name the replayed DSS ticket or a later one; all of it
+	outside a replay."""
+	replayed = DSS_NUMBER.fullmatch(cutoff.key())
+	if not replayed:
+		return prompt
+	kept = []
+	for line in prompt.split('\n'):
+		later = False
+		for number in DSS_NUMBER.findall(line):
+			if int(number) >= int(replayed[1]):
+				later = True
+		if not later:
+			kept.append(line)
+	return '\n'.join(kept)
+
+
+def learned_later(cause: dict) -> bool:
+	"""Whether, in a replay, the known *cause* was learned only from the replayed DSS ticket or
+	later ones: it names DSS tickets, and none is older. False outside a replay."""
+	replayed = DSS_NUMBER.fullmatch(cutoff.key())
+	if not replayed or not cause.get('dss_tickets'):
+		return False
+	for key in cause['dss_tickets']:
+		found = DSS_NUMBER.fullmatch(key)
+		if found and int(found[1]) < int(replayed[1]):
+			return False
+	return True
+
+
+def replay_prompt() -> str:
+	"""The end of a replay's prompt: what the tools hide as of the cutoff, and the `replay` block
+	the answer adds (REPLAY)."""
+	then = cutoff.when()
+	posted = 'the ticket time'
+	if then is not None:
+		posted = cutoff.shown(then)
+	calls = os.environ.get('DSS_REPLAY_MAX_CALLS') or 'a set number of'
+	return REPLAY.format(posted=posted, calls=calls)
 
 
 def build_ticket(key: str, posted: str) -> tuple[dict, list[str]]:
@@ -232,21 +320,33 @@ def prompt(
 	)
 
 
-def assemble(ticket: dict, text: str) -> tuple[dict | None, list[str]]:
+def assemble(ticket: dict, text: str, replay: dict | None = None) -> tuple[dict | None, list[str]]:
 	"""The record made of *ticket* and Claude's answer *text*, and what is wrong with it.
 
-	The record is None when *text* holds no JSON object.
+	The record is None when *text* holds no JSON object. In a replay, *replay* is code's part of
+	the `replay` block, and the answer's `replay` block gives the rest.
 	"""
 	try:
 		answer = parse(text)
 	except ValueError as error:
 		return None, [str(error)]
 	record = {'schema': SCHEMA_ID, 'dss_ticket': ticket}
+	blocks = {'triage', 'class'}
 	for block in ('triage', 'class'):
 		if block in answer:
 			record[block] = answer[block]
+	if replay is not None:
+		blocks.add('replay')
+		given = answer.get('replay')
+		if not isinstance(given, dict):
+			given = {}
+		record['replay'] = {
+			**replay,
+			'fixed_later': given.get('fixed_later') or [],
+			'leaks': given.get('leaks') or [],
+		}
 	problems = check(record)
-	extra = sorted(set(answer) - {'triage', 'class'})
+	extra = sorted(set(answer) - blocks)
 	if extra:
 		problems.append(f'the answer has blocks the record does not take: {", ".join(extra)}')
 	return record, problems
@@ -271,6 +371,26 @@ def check(record: dict) -> list[str]:
 		where = '.'.join(str(part) for part in error.absolute_path) or 'record'
 		problems.append(f'{where}: {error.message}'[:PROBLEM_CHARS])
 	return problems
+
+
+def traced_leaks(trace: Path) -> list[str]:
+	"""What code found in a replay's tool answers that may come from after the ticket (the
+	`leaks` of its *trace*, :func:`dss.cutoff.leaks`), one line per tool call."""
+	if not trace.exists():
+		return []
+	found = []
+	for line in trace.read_text(encoding='utf-8').splitlines():
+		if not line.strip():
+			continue
+		call = json.loads(line)
+		if not call.get('leaks'):
+			continue
+		arguments = []
+		for name, value in call['arguments'].items():
+			arguments.append(f'{name}={value}')
+		shown = ', '.join(arguments)[:ARGUMENT_CHARS]
+		found.append(f'{call["tool"]}({shown}): {"; ".join(call["leaks"])}')
+	return found
 
 
 def traced_tools(trace: Path) -> list[str]:
@@ -385,7 +505,10 @@ def _decision(record: dict, ticket_link: str = '', analyst: str = '') -> str:
 	ticket, answer = record['dss_ticket'], record['triage']
 	key = _key(ticket['key'], ticket_link)
 	head = f'**{key} · {_text(answer["headline"])} · {_words(answer["status"])}**'
-	lines = [head, f'**Bot Summary:** {_text(answer["what"])}']
+	lines = [head]
+	if record.get('replay'):
+		lines.extend(_leak_lines(record['replay']))
+	lines.append(f'**Bot Summary:** {_text(answer["what"])}')
 	analyst_todos = list(answer['actions']['analyst'])
 	for question in answer.get('questions') or []:
 		analyst_todos.append(f'Answer: {question["ask"]}')
@@ -399,6 +522,32 @@ def _decision(record: dict, ticket_link: str = '', analyst: str = '') -> str:
 	if answer.get('reply'):
 		lines.append(f'**Draft Reply:**\n{_quote(answer["reply"])}')
 	return _joined(lines)
+
+
+def _leak_lines(replay: dict) -> list[str]:
+	"""What a replay could not keep from Claude, for the post: each file whose version now shows
+	the fix (the answer is written as if it were not fixed), each possible leak Claude saw with the
+	tool call it came through, and how many tool answers code flagged (listed in the thread,
+	:func:`_code_leak_lines`)."""
+	lines = []
+	for fixed in replay['fixed_later']:
+		lines.append(f'**Fixed later in a file:** {_text(fixed["file"])}: {_text(fixed["fix"])}')
+	for leak in replay['leaks']:
+		lines.append(f'**Possible leak:** {_text(leak["what"])} (via {_text(leak["via"])})')
+	flagged = len(replay['leaks_found'])
+	if flagged:
+		answers = f'{flagged} tool answers'
+		if flagged == 1:
+			answers = '1 tool answer'
+		lines.append(f'**Possible leaks found by code:** {answers}, listed in the thread')
+	return lines
+
+
+def _code_leak_lines(replay: dict) -> list[str]:
+	"""The tool answers code flagged in a replay (:func:`dss.cutoff.leaks`), for the thread."""
+	lines: list[str] = []
+	_bullets(lines, 'Possible leaks found by code', replay['leaks_found'])
+	return lines
 
 
 def _todos(lines: list[str], title: str, items: list[str]) -> None:
@@ -464,6 +613,8 @@ def _proof(record: dict, notes: list[str]) -> str:
 	lines.append(f'**Confidence:** {settled}')
 	for item in unread:
 		lines.append(f'- {_text(item)}')
+	if record.get('replay'):
+		lines.extend(_code_leak_lines(record['replay']))
 	return _joined(lines)
 
 

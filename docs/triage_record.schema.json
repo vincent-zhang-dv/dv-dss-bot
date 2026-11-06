@@ -10,7 +10,8 @@
 		"dss_ticket": {"$ref": "#/$defs/dss_ticket"},
 		"triage": {"$ref": "#/$defs/triage"},
 		"class": {"$ref": "#/$defs/class"},
-		"resolved": {"$ref": "#/$defs/resolved"}
+		"resolved": {"$ref": "#/$defs/resolved"},
+		"replay": {"$ref": "#/$defs/replay"}
 	},
 	"$defs": {
 		"dss_key": {"type": "string", "pattern": "^DSS-[0-9]+$"},
@@ -284,6 +285,38 @@
 				"closed": {"type": "string", "format": "date"},
 				"class": {"$ref": "#/$defs/class"},
 				"fixed_in": {"type": ["string", "null"], "description": "The release that fixed it, for code fixes."}
+			}
+		},
+		"replay": {
+			"description": "Replay mode only (python -m dss replay): an old ticket triaged as it stood when posted. Code fills cutoff, build, code_ref and leaks_found; Claude fills fixed_later and leaks.",
+			"type": "object",
+			"required": ["cutoff", "build", "code_ref", "fixed_later", "leaks", "leaks_found"],
+			"additionalProperties": false,
+			"properties": {
+				"cutoff": {"type": "string", "format": "date-time", "description": "When the workflow posted the ticket; every tool answered as of then."},
+				"build": {"type": ["string", "null"], "description": "The analyst's Cerberus version in their last session before the ticket; null without one."},
+				"code_ref": {"type": "string", "description": "The Cerberus commit the code tools read: the analyst's build, else the newest release by then."},
+				"fixed_later": {
+					"type": "array",
+					"description": "Project files changed after the ticket whose version now shows the fix. The answer is written as the ticket stood then, as if not fixed; these notes say it was fixed in the file.",
+					"items": {
+						"type": "object",
+						"required": ["file", "fix"],
+						"additionalProperties": false,
+						"properties": {"file": {"$ref": "#/$defs/text"}, "fix": {"$ref": "#/$defs/text"}}
+					}
+				},
+				"leaks": {
+					"type": "array",
+					"description": "What Claude read that looked later than the ticket, and the tool call it came through.",
+					"items": {
+						"type": "object",
+						"required": ["via", "what"],
+						"additionalProperties": false,
+						"properties": {"via": {"$ref": "#/$defs/text"}, "what": {"$ref": "#/$defs/text"}}
+					}
+				},
+				"leaks_found": {"type": "array", "items": {"type": "string"}, "description": "What code found in the tool answers: the ticket's own key, later DSS tickets or dates after it, one line per call."}
 			}
 		}
 	}
