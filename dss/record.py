@@ -6,8 +6,8 @@ then checks the record against `docs/triage_record.schema.json`, checks in the r
 past issues were searched before the investigation, and renders the reviewer's DM (the decision)
 and its thread reply (the proof). The design is on the DSS Triage Flow page.
 
-The Slack bot does not use this yet. `python -m dss trial <key>` runs one by hand and saves it in
-TRIAL_DIR, away from the bot's saved answers.
+The Slack bot triages every new ticket this way. `python -m dss trial <key>` runs one by hand.
+Each is saved in TRIAL_DIR; the bot's own record of what it posted is in out/answers.
 """
 
 import functools
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import jsonschema  # type: ignore[import-untyped]
 
-from dss import cerb, code, jira, runner, triage
+from dss import cerb, code, jira, matlab, runner, triage
 from dss.worker import ROOT
 
 SCHEMA_ID = 'dss-triage/3'
@@ -47,7 +47,13 @@ WORDS = {
 }
 HISTORY_TOOLS = {'code_log_s', 'code_log', 'code_branches'}  # triage.md step 2's git searches
 # Reading code or project files is investigation (steps 4 to 7); past issues are searched before
-INVESTIGATION_TOOLS = {'code_read', 'cerb_read_text', 'cerb_read_sheet', 'cerb_client_info'}
+INVESTIGATION_TOOLS = {
+	'code_read',
+	'matlab_read',
+	'cerb_read_text',
+	'cerb_read_sheet',
+	'cerb_client_info',
+}
 CODE_SPAN = re.compile(r'(`[^`\n]*`)')
 MARKDOWN_MARK = re.compile(r'([\\*_~<>\[\]])')  # shown as typed once escaped: \cerberus, __init__
 MAX_PROBLEMS = 10  # schema problems listed in the DM
@@ -84,7 +90,7 @@ def trial(
 	if ask is None:
 		ask = functools.partial(runner.run_reply, system=system_prompt())
 	ticket, notes = build_ticket(key, posted)
-	notes += code.refresh()
+	notes += code.refresh() + matlab.refresh()
 	asked = prompt(key, posted, ticket, notes, post, thread_ts)
 	trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
 	answer = triage.run(key, posted, asked, ask, trace=trace)
@@ -135,7 +141,7 @@ def system_prompt() -> str:
 		raise ValueError(f'{runner.SYSTEM.name} has no "{ANSWER_HEADING}" section to replace')
 	defs = _schema()['$defs']
 	causes = []
-	for cause in json.loads(KNOWN_CAUSES_FILE.read_text(encoding='utf-8')):
+	for cause in _json_file(KNOWN_CAUSES_FILE):
 		causes.append(f'- `{cause["slug"]}`: {cause["cause"]}')
 	answer = string.Template(ANSWER_FILE.read_text(encoding='utf-8')).substitute(
 		cause_families=_choices(defs['cause_family']['enum']),
@@ -268,13 +274,16 @@ def check(record: dict) -> list[str]:
 
 
 def traced_tools(trace: Path) -> list[str]:
-	"""The tools a run called, in order, from its *trace*; none when it called none."""
+	"""The tools a run called, in order, from its *trace*; none when it called none. A call the
+	server held back until past issues were searched read nothing, so it is left out."""
 	if not trace.exists():
 		return []
 	tools = []
 	for line in trace.read_text(encoding='utf-8').splitlines():
 		if line.strip():
-			tools.append(json.loads(line)['tool'])
+			call = json.loads(line)
+			if not call.get('blocked'):
+				tools.append(call['tool'])
 	return tools
 
 
@@ -656,7 +665,17 @@ def _last_session(ticket: dict, posted: str, notes: list[str]) -> None:
 
 @functools.cache
 def _schema() -> dict:
-	return json.loads(SCHEMA_FILE.read_text(encoding='utf-8'))
+	return _json_file(SCHEMA_FILE)
+
+
+def _json_file(path: Path):
+	"""The JSON in *path*; a ValueError naming the file when it is not valid JSON."""
+	try:
+		return json.loads(path.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as error:
+		raise ValueError(
+			f'{path.name} is not valid JSON ({error}); fix it or restore it with git'
+		) from error
 
 
 @functools.cache

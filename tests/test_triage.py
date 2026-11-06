@@ -111,12 +111,12 @@ def test_spend_adds_every_token_kind_and_tolerates_missing_usage():
 		(FileNotFoundError('claude'), 'The Claude Code CLI is not installed here.'),
 		(subprocess.TimeoutExpired('claude', 900), 'Claude took longer than 900 s.'),
 		(RuntimeError('Invalid API key · Please run /login'), 'Claude is not logged in here.'),
-		(RuntimeError('x' * 600), 'Claude failed: ' + 'x' * 500),
+		(RuntimeError('x' * 600), 'The triage failed: ' + 'x' * 500),
 	],
 )
 def test_explain_tells_the_reviewer_what_to_do(error, expected):
 	assert triage.explain(error).startswith(expected)
-	assert len(triage.explain(error)) <= len('Claude failed: ') + 500
+	assert len(triage.explain(error)) <= len('The triage failed: ') + 500
 
 
 @pytest.fixture

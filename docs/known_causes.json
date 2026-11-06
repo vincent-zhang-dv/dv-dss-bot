@@ -186,5 +186,16 @@
 		"prevent": "code_fix",
 		"dss_tickets": ["DSS-883", "DSS-1147"],
 		"dtn_tickets": []
+	},
+	{
+		"slug": "las-maxpen-not-peak-preserved",
+		"cause": "With a Depth Step, the Cerberus deliverable LAS resamples every curve linearly (np.interp in dhlas.py), so a pit a few slices wide reads lower in idMaxPen than in the Defect Summary, AIA and 2D Log, which take the full-resolution maximum. Accepted: DSS-1249 resolved that the LAS has no peak-preservation requirement, though MATLAB CAT peak-preserved idMaxPen.",
+		"prove": "The LAS ~Well STEP is coarser than the curves caliper's slice spacing, and the LAS idMaxPen at the pit equals the full-resolution MAX_ID_PEN interpolated to that depth, while the Defect Summary's Max Penetration equals the full-resolution peak.",
+		"fix": "Explain it; re-export the LAS with Full Resolution Mode ticked when exact peaks are needed.",
+		"cause_family": "works_as_designed",
+		"feature": "wi_las_export",
+		"prevent": "docs",
+		"dss_tickets": ["DSS-1249"],
+		"dtn_tickets": ["DTN-3747"]
 	}
 ]

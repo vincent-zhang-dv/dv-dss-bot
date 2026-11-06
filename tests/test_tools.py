@@ -24,7 +24,7 @@ from typing import ClassVar
 import pytest
 from mcp import Client
 
-from dss import cerb, code, jira
+from dss import cerb, code, jira, matlab
 from dss.server import build
 
 
@@ -1164,6 +1164,59 @@ def test_a_developer_checkout_is_never_fetched(released, monkeypatch):
 	assert code.refresh() == []  # no clone of its own: nothing to fetch
 	with pytest.raises(RuntimeError, match="only the bot's own clone is fetched"):
 		code.fetch()
+
+
+@pytest.fixture
+def matlab_clone(tmp_path, monkeypatch):
+	"""The bot's own clone (DSS_MATLAB_GIT) of a DataAnalysis-like repo standing in for GitHub."""
+	repo = tmp_path / 'DataAnalysis'
+	(repo / 'CAT' / 'Export').mkdir(parents=True)
+	export = repo / 'CAT' / 'Export' / 'cat_export_las.m'
+	git(repo, 'init', '-q')
+	export.write_text('vals = interp1(depths, vals, dref);\n')
+	(repo / 'CAT' / 'notes.txt').write_text('interp1 is mentioned here too\n')  # not MATLAB
+	git(repo, 'add', '.')
+	git(repo, 'commit', '-q', '-m', 'Export the LAS')
+	export.write_text('% Peak preserve maxPen\nvals = resample2const(vals, dref);\n')
+	git(repo, 'commit', '-q', '-am', 'Keep the maxPen peaks')
+	git(repo, 'update-ref', 'refs/heads/master', 'HEAD')
+	monkeypatch.setattr(matlab, 'REPO_URL', str(repo))
+	clone = tmp_path / 'bot' / 'DataAnalysis'
+	monkeypatch.setenv('DSS_MATLAB_GIT', str(clone))
+	assert matlab.clone() is True
+	return repo, clone
+
+
+def test_matlab_tools_read_cat_at_origin_master(matlab_clone):
+	repo, clone = matlab_clone
+	assert matlab.clone() is False  # there already
+	found = matlab.grep('resample2const')
+	assert 'CAT/Export/cat_export_las.m:2:vals = resample2const(vals, dref);' in found
+	assert 'nothing found' in matlab.grep('interp1')  # gone from master; notes.txt is not MATLAB
+	assert '1\t% Peak preserve maxPen' in matlab.read('CAT/Export/cat_export_las.m', 1, 1)
+	history = matlab.log('CAT/Export', text='resample2const')
+	assert 'Keep the maxPen peaks' in history and 'Export the LAS' not in history
+	assert 'Export the LAS' in matlab.log('CAT')
+	with pytest.raises(ValueError, match='not a path inside the repo'):
+		matlab.read('../secrets.m')
+	(repo / 'CAT' / 'Export' / 'cat_qc_las.m').write_text('qc = 1;\n')
+	git(repo, 'add', '.')
+	git(repo, 'commit', '-q', '-m', 'Newer CAT')
+	git(repo, 'update-ref', 'refs/heads/master', 'HEAD')  # pushed to GitHub
+	assert matlab.refresh() == []
+	assert 'Newer CAT' in matlab.log('CAT')
+	git(clone, 'remote', 'set-url', 'origin', str(repo.parent / 'gone'))
+	(note,) = matlab.refresh()  # GitHub out of reach: the last fetch still serves
+	assert note.startswith('MATLAB CAT clone not updated')
+	assert matlab.setup()[-1].startswith(f'matlab tools: {clone}, origin/master = ')
+
+
+def test_matlab_tools_say_how_to_set_them_up(monkeypatch, mcp_call):
+	monkeypatch.delenv('DSS_MATLAB_GIT', raising=False)
+	assert matlab.refresh() == []  # nothing to fetch, and no note on every triage
+	assert matlab.setup() == ['DSS_MATLAB_GIT is not set: the matlab tools are off']
+	failed, text = mcp_call('matlab_grep', {'pattern': 'interp1'})
+	assert failed and 'set DSS_MATLAB_GIT' in text
 
 
 def test_setup_says_what_each_tool_reads(released, bot_clone, tmp_path, monkeypatch):

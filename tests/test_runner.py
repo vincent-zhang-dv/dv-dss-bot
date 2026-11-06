@@ -10,7 +10,7 @@ import pytest
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from dss import cerb, runner
+from dss import cerb, record, runner
 from dss.__main__ import load_env
 from dss.runner import command
 from dss.server import TRACE_CHARS, ReportingTools, build
@@ -69,6 +69,7 @@ def test_run_reply_names_the_trace_file_only_when_asked(tmp_path, monkeypatch):
 	runner.run_reply('New ticket DSS-1234')
 	assert envs[0]['DSS_TRACE_FILE'] == str(tmp_path / 'DSS-1234.jsonl')
 	assert 'DSS_TRACE_FILE' not in envs[1]  # an inherited value never leaks into another triage
+	assert envs[0]['DSS_STEP_ORDER'] == envs[1]['DSS_STEP_ORDER'] == '1'  # reads wait for step 2
 
 
 def test_server_serves_the_triage_tools():
@@ -94,6 +95,9 @@ def test_server_serves_the_triage_tools():
 		'code_log',
 		'code_branches',
 		'code_contains',
+		'matlab_grep',
+		'matlab_read',
+		'matlab_log',
 		'confluence_search',
 		'confluence_page',
 	}
@@ -168,6 +172,48 @@ def test_reporting_tools_trace_each_call_when_the_runner_asks(tmp_path, monkeypa
 	assert lines[1]['chars'] > TRACE_CHARS and len(lines[1]['result']) == TRACE_CHARS  # capped
 	assert lines[2]['error'] == "KeyError: 'dvt'" and 'result' not in lines[2]
 	assert lines[3]['error'] == 'ToolError: not allowed'
+
+
+def test_reads_wait_until_past_issues_are_searched(tmp_path, monkeypatch, mcp_call):
+	server = MCPServer('test')
+	tools = ReportingTools(server)
+
+	@tools.tool()
+	def jira_search() -> str:
+		"""Search Jira."""
+		return 'DSS-1'
+
+	@tools.tool()
+	def code_log_s() -> str:
+		"""Search git history; down here."""
+		raise RuntimeError('git is not set up')
+
+	@tools.tool()
+	def code_read() -> str:
+		"""Read code."""
+		return 'code'
+
+	# only the runner asks for the order
+	assert mcp_call('code_read', {}, server) == (False, 'code')
+	trace = tmp_path / 'DSS-1234.jsonl'
+	monkeypatch.setenv('DSS_STEP_ORDER', '1')
+	monkeypatch.setenv('DSS_TRACE_FILE', str(trace))
+	tools.called.clear()  # a new run
+	failed, text = mcp_call('code_read', {}, server)
+	assert failed and 'Not yet' in text and '`jira_search`' in text and 'git history' in text
+	mcp_call('jira_search', {}, server)
+	failed, text = mcp_call('code_read', {}, server)
+	assert failed and '`jira_search`' not in text and 'git history' in text
+	failed, _ = mcp_call('code_log_s', {}, server)
+	assert failed  # and it still counts, so a source that is down never blocks the triage
+	assert mcp_call('code_read', {}, server) == (False, 'code')
+	lines = [json.loads(line) for line in trace.read_text(encoding='utf-8').splitlines()]
+	blocked = []
+	for line in lines:
+		blocked.append(line.get('blocked', False))
+	assert blocked == [True, False, True, False, False]
+	assert lines[0]['error'].startswith('Not yet')
+	assert record.traced_tools(trace) == ['jira_search', 'code_log_s', 'code_read']
 
 
 def test_tool_errors_reach_claude_with_their_message(tmp_path, monkeypatch, mcp_call):
