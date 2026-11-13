@@ -71,11 +71,19 @@ REPLAY = """
 This is a replay of an old ticket: every tool answers as of {posted}, when it was posted, and
 leaves out what came later (thread replies, Jira comments and changes, later tickets, commits,
 releases and branches, later sessions, log lines and files). Settle it as the bot would have then.
+- Read the thread first. It shows the request, its first reply "Screenshot of error:" with the
+  analyst's screenshot (what the analyst saw), and anything the analyst added before anyone else
+  replied; nobody else's replies.
 - `cut_at_ticket` marks a session or log read only up to the ticket time: nothing in it is later.
 - A project file changed since is listed with `changed_after_ticket`, and reading it says it is
-  the file as it is now. If that version shows the issue fixed (a corrected client info value,
-  say), write the answer as the ticket stood then, as if it were not fixed, and add the file and
-  what was fixed to `replay.fixed_later`.
+  the file as it is now.
+- Compare the project files with what the screenshot and the description show. When a file
+  differs from them:
+  - Marked `changed_after_ticket`: the analyst likely fixed it there. Write the answer as the
+    ticket stood then, as if it were not fixed, and add the file and what was fixed (the value
+    then, from the screenshot or description, and the value now) to `replay.fixed_later`.
+  - Not marked: the file was like this when the ticket was posted, so nothing was fixed there.
+    Say the analyst may have looked at another file, run or version.
 - Jira searches test only fields a ticket keeps once filed (project, key, type, created,
   reporter, summary, description) with absolute dates.
 - If anything you read looks like it comes from after {posted} (an answer, a fix, a later date),

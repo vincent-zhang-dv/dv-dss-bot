@@ -30,6 +30,8 @@ MAX_VERSIONS = 250  # a page's versions per request in a replay, newest first
 MAX_VERSION_PAGES = 8
 ARCHIVE_DIR = ROOT / 'out' / 'archive' / 'confluence'  # <page id>-<version>.json, as read
 EXCERPT_CHARS = 120  # each side of the first searched word, in a replay's excerpt
+# A page last edited this long before the ticket may describe an older Cerberus
+OUT_OF_DATE_AFTER = timedelta(days=365)
 ENV = ('CONFLUENCE_URL', 'CONFLUENCE_EMAIL', 'CONFLUENCE_TOKEN')
 HEADINGS = ('h1', 'h2', 'h3', 'h4', 'h5', 'h6')
 BREAKS = frozenset({'p', 'br', 'div', 'tr', 'pre', 'table', *HEADINGS})  # tags that end a line
@@ -79,26 +81,46 @@ def search(text: str, limit: int = 10) -> list[dict]:
 				continue  # it matches only by words written after the ticket
 			shown.update(title=old['title'], updated=old['updated'])
 			shown['excerpt'] = _excerpt(old['text'], terms[0])
-		pages.append(shown)
+		pages.append(_aged(shown))
 	return pages
 
 
 def page(page_id: str) -> dict:
-	"""One page as plain text (headings, lists and table rows kept as lines); in a replay, the
-	version it had at the cutoff, from ARCHIVE_DIR once read."""
+	"""One page as plain text (headings, lists and table rows kept as lines), marked when it may be
+	out of date (:func:`_aged`); in a replay, the version it had at the cutoff, from ARCHIVE_DIR
+	once read."""
 	if not re.fullmatch(r'\d{1,20}', str(page_id)):
 		raise ConfluenceError(f'page id {page_id!r} must be the number from search results')
 	if cutoff.when() is None:
-		return _shown(page_id, _get(f'/wiki/api/v2/pages/{page_id}', {'body-format': 'storage'}))
+		found = _get(f'/wiki/api/v2/pages/{page_id}', {'body-format': 'storage'})
+		return _aged(_shown(page_id, found))
 	number = _version_then(page_id)
 	kept = ARCHIVE_DIR / f'{page_id}-{number}.json'
 	if kept.exists():
-		return json.loads(kept.read_text(encoding='utf-8'))
+		return _aged(json.loads(kept.read_text(encoding='utf-8')))
 	params = {'body-format': 'storage', 'version': str(number)}
 	found = _shown(page_id, _get(f'/wiki/api/v2/pages/{page_id}', params))
 	ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 	kept.write_text(json.dumps(found), encoding='utf-8')
-	return found
+	return _aged(found)
+
+
+def _aged(shown: dict) -> dict:
+	"""*shown* (a page or a search hit) with `may_be_out_of_date` when it was last edited more than
+	OUT_OF_DATE_AFTER before the ticket: before the replay's cutoff, else before now. Such a page
+	may describe an older Cerberus."""
+	try:
+		edited = datetime.fromisoformat(shown.get('updated', '')).astimezone()  # naive: local
+	except ValueError:  # no time given
+		return shown
+	ticket = cutoff.when()
+	if ticket is None:  # a live triage: the ticket is new
+		ticket = datetime.now().astimezone()
+	if ticket - edited <= OUT_OF_DATE_AFTER:
+		return shown
+	years = (ticket - edited).days / 365
+	note = f'last edited {edited.astimezone():%Y-%m-%d}, {years:.1f} years before the ticket'
+	return {**shown, 'may_be_out_of_date': note}
 
 
 def _shown(page_id: str, found: dict) -> dict:
@@ -241,12 +263,14 @@ def register(server) -> None:
 	def confluence_search(text: str, limit: int = 10) -> list[dict]:
 		"""Search DarkVision's Confluence (SOPs, how-tos, known issues) for *text*.
 
-		Returns id, title, space, excerpt, updated and url per page; read one with
-		confluence_page. Cite the page url when you use it.
+		Returns id, title, space, excerpt, updated and url per page, and may_be_out_of_date for
+		a page last edited over a year before the ticket; read one with confluence_page. Cite the
+		page url when you use it.
 		"""
 		return search(text, limit)
 
 	@server.tool()
 	def confluence_page(page_id: str) -> dict:
-		"""The text of the Confluence page *page_id* (an id from confluence_search)."""
+		"""The text of the Confluence page *page_id* (an id from confluence_search), with
+		may_be_out_of_date when it was last edited over a year before the ticket."""
 		return page(page_id)

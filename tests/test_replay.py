@@ -260,6 +260,22 @@ def test_search_words_match_the_words_that_start_as_they_do():
 # Confluence
 
 
+def test_a_pages_age_counts_from_the_ticket_not_from_today(replaying, monkeypatch):
+	edited = {'40': at(-24 * 400), '41': at(-24 * 350)}  # hours before the post
+
+	def get(path, params):
+		page_id = path.split('/')[5]
+		if path.endswith('/versions'):
+			return {'results': [{'number': 1, 'createdAt': edited[page_id].isoformat()}]}
+		version = {'createdAt': edited[page_id].isoformat()}
+		return {'title': 'SOP', 'body': {'storage': {'value': '<p>steps</p>'}}, 'version': version}
+
+	monkeypatch.setattr(confluence, '_get', get)
+	assert confluence.page('40')['may_be_out_of_date'].endswith('1.1 years before the ticket')
+	# 350 days before the post is over a year before today, but not before the ticket
+	assert 'may_be_out_of_date' not in confluence.page('41')
+
+
 def test_a_much_edited_page_is_paged_back_to_its_version_then(replaying, monkeypatch):
 	pages = {
 		None: {
@@ -874,19 +890,60 @@ def test_a_replay_answer_without_its_block_or_json_still_says_the_leaks(
 	assert '- code\\_log\\_s(text=round): names DSS-1234' in refused['thread']
 
 
-def test_a_later_thread_is_refused_and_an_edited_post_says_so(replaying, monkeypatch):
-	edited = {**workflow_post(), 'edited': {'ts': f'{float(TS) + 3600:.6f}'}}
-	reply = {'ts': f'{float(TS) + 60:.6f}', 'user': 'U2', 'text': 'Fixed it: casing ID'}
-	threads = {TS: [edited, reply], '1900000000.000001': [workflow_post(ts='1900000000.000001')]}
+def after(seconds: float, **message) -> dict:
+	"""A thread message *seconds* after the replayed post."""
+	return {'ts': f'{float(TS) + seconds:.6f}', **message}
+
+
+def test_a_replays_thread_is_the_ticket_as_raised_by_its_analyst(replaying, monkeypatch):
+	edited = {**workflow_post(), 'edited': {'ts': f'{float(TS) + 3600:.6f}'}}  # by U1, the analyst
+	screenshot = after(1, bot_id='B1', text='Screenshot of error:', files=[{'name': 'error.png'}])
+	reminder = after(2, bot_id='B1', text="Don't forget to check the troubleshooting page")
+	more = after(40, user='U1', text='One more screenshot', files=[{'name': 'more.png'}])
+	answer = after(60, user='U2', text='Fixed it: casing ID')  # someone else: the thread stops
+	again = after(90, user='U1', text='Thanks, that worked')
+	threads = {TS: [edited, screenshot, reminder, more, answer, again]}
 	monkeypatch.setenv('DSS_SLACK_BOT_TOKEN', 'xoxb-test')
-	monkeypatch.setenv('DSS_THREAD_UNTIL', TS)
 	monkeypatch.setattr(thread, '_client', lambda: FakeSlack())
 	monkeypatch.setattr(thread, '_replies', lambda client, channel, ts: threads[ts])
 	found = thread.thread(TS)
-	assert found[0].endswith('the post and 0 replies, oldest first, in local time.')
-	assert '(edited after the ticket time' in found[1] and 'Fixed it' not in str(found)
+	assert found[0].endswith('the post and 3 replies, oldest first, in local time.')
+	assert '(edited after the ticket time' in found[1]
+	assert 'Screenshot of error:' in found[2] and 'error.png' in found[2]
+	assert 'One more screenshot' in found[4] and 'more.png' in found[4]
+	assert 'Fixed it' not in str(found) and 'that worked' not in str(found)
+	monkeypatch.delenv('DSS_REPLAY_AT')  # outside a replay, the whole thread shows
+	assert 'that worked' in str(thread.thread(TS))
+
+
+def test_a_replay_reads_the_analysts_follow_ups_for_30_minutes(replaying, monkeypatch):
+	soon = after(25 * 60, user='U1', text='The plot from the rerun', files=[{'name': 'b.png'}])
+	solved = after(45 * 60, user='U1', text='Never mind, fixed it by resetting the casing ID')
+	threads = {TS: [workflow_post(), soon, solved]}  # nobody else replied
+	monkeypatch.setenv('DSS_SLACK_BOT_TOKEN', 'xoxb-test')
+	monkeypatch.setattr(thread, '_client', lambda: FakeSlack())
+	monkeypatch.setattr(thread, '_replies', lambda client, channel, ts: threads[ts])
+	found = str(thread.thread(TS))
+	assert 'The plot from the rerun' in found and 'Never mind' not in found
+
+
+def test_a_replay_reads_other_tickets_threads_only_as_they_were(replaying, monkeypatch):
+	older, later = f'{float(TS) - 86400:.6f}', '1900000000.000001'
+	threads = {
+		older: [
+			workflow_post('DSS-1100', older),
+			after(-80000, user='U2', text='Known issue: reset the casing ID'),
+			after(60, user='U2', text='Closing it now'),  # after the replayed post
+		],
+		later: [workflow_post('DSS-1300', later)],
+	}
+	monkeypatch.setenv('DSS_SLACK_BOT_TOKEN', 'xoxb-test')
+	monkeypatch.setattr(thread, '_client', lambda: FakeSlack())
+	monkeypatch.setattr(thread, '_replies', lambda client, channel, ts: threads[ts])
+	found = str(thread.thread(older))
+	assert 'Known issue' in found and 'Closing it now' not in found
 	with pytest.raises(ValueError, match='posted after the ticket time'):
-		thread.thread('1900000000.000001')
+		thread.thread(later)
 
 
 # The replay command
@@ -899,8 +956,8 @@ def workflow_post(key: str = 'DSS-1234', ts: str = TS, **extra) -> dict:
 class FakeSlack:
 	"""A slack_sdk WebClient stand-in: channel history, names, links and posts, recorded."""
 
-	def __init__(self, history=()):
-		self.history = list(history)
+	def __init__(self, history=(), replies=()):
+		self.history, self.replies = list(history), list(replies)
 		self.calls: list = []
 
 	def __getattr__(self, method):
@@ -908,6 +965,8 @@ class FakeSlack:
 			self.calls.append((method, kwargs))
 			if method == 'conversations_history':
 				return {'messages': self.history}
+			if method == 'conversations_replies':
+				return {'messages': self.replies}
 			if method == 'users_info':
 				return {'user': {'profile': {'display_name': 'Ann'}}}
 			if method == 'chat_getPermalink':
@@ -970,13 +1029,15 @@ def test_a_replay_runs_as_of_the_post_and_a_stopped_one_is_saved(sources, monkey
 	settings = []
 
 	def ask(prompt, trace=None):
-		settings.append((os.environ['DSS_THREAD_UNTIL'], os.environ['DV_CERB_REF']))
+		settings.append((os.environ.get('DSS_THREAD_UNTIL'), os.environ['DV_CERB_REF']))
 		return replay_claude({'triage': EXAMPLE['triage'], 'class': EXAMPLE['class']}, [])(
 			prompt, trace
 		)
 
 	result = replay.replay(PLAN, tmp_path, ask)
-	assert settings == [(TS, 'abc1234')]  # only the post of the thread; the analyst's build
+	# no time cut on the thread (thread._as_raised cuts it at the first reply from someone else),
+	# and the analyst's build
+	assert settings == [(None, 'abc1234')]
 	assert result['record']['replay']['code_ref'] == 'abc1234'
 	assert (
 		'Replay of DSS-1234 as posted 2026-10-22 10:00 · Cerberus 1.0.3 at abc1234' in result['dm']
@@ -992,31 +1053,65 @@ def test_a_replay_runs_as_of_the_post_and_a_stopped_one_is_saved(sources, monkey
 	assert replay.outcome(stopped).startswith('DSS-1234: stopped:')
 
 
-def test_the_command_shows_its_plan_or_runs_and_posts_only_to_the_test_channel(monkeypatch):
+def test_the_command_shows_its_plan_or_runs_and_posts_only_to_the_test_channel(
+	monkeypatch, tmp_path
+):
 	monkeypatch.setattr(code, 'refresh', list)  # nothing to note
 	monkeypatch.setattr(replay, 'prepare', lambda key, client, names: {**PLAN, 'key': key})
 	ran = []
+	saved = tmp_path / 'DSS-1234.json'
 
 	def run(plan, folder, ask):
 		ran.append(plan['key'])
-		return {'key': plan['key'], 'dm': 'decision', 'thread': 'proof', 'stopped': 'x'}
+		result = {'key': plan['key'], 'dm': 'decision', 'thread': 'proof', 'stopped': 'x'}
+		saved.write_text(json.dumps(result), encoding='utf-8')
+		return {**result, 'file': str(saved)}
 
 	monkeypatch.setattr(replay, 'replay', run)
 	monkeypatch.setattr(replay, 'outcome', lambda result: f'{result["key"]} done')
 	said: list[str] = []
-	client = FakeSlack()
+	answered = [workflow_post(), after(41 * 60, user='U2', text='Which casing record?')]
+	client = FakeSlack(replies=answered)
 	replay.main(['DSS-1234', 'DSS-1234'], client=client, say=said.append)
 	assert said[0].startswith('note: no GitHub push history, so commit dates stand in')
 	assert ran == [] and said[-1].startswith('dry run') and len(said) == 3  # each ticket once
 	replay.main(['DSS-1234'], go=True, post_test=True, client=client, say=said.append)
+	# the developers' time, from the whole thread, read after the replay and saved with it
+	assert json.loads(saved.read_text(encoding='utf-8'))['developers']['response_minutes'] == 41
 	posts = [call for method, call in client.calls if method == 'chat_postMessage']
 	assert [post['channel'] for post in posts] == [replay.TEST_CHANNEL, replay.TEST_CHANNEL]
-	assert 'thread_ts' not in posts[0] and posts[1]['thread_ts'] == '900.1'
+	first = [method for method, _ in client.calls].index('chat_postMessage') + 1
+	assert 'thread_ts' not in posts[0] and posts[1]['thread_ts'] == f'900.{first}'
 	monkeypatch.setenv('DSS_SLACK_TEST_CHANNEL', slack.CHANNEL)
 	with pytest.raises(ValueError, match='never go to #data-dev-support'):
 		replay.main(['DSS-1234'], go=True, post_test=True, client=client, say=said.append)
 	with pytest.raises(RuntimeError, match='never go to #data-dev-support'):
 		slack.post(client, slack.CHANNEL, 'decision')
+
+
+def test_developer_time_runs_from_their_first_reply_to_their_last():
+	thread_then = [
+		workflow_post(),  # the analyst is U1
+		after(1, bot_id='B1', text='Screenshot of error:'),
+		after(5 * 60, user='U1', text='One more screenshot'),  # the analyst: not a developer
+		after(41 * 60, user='U2', text='Which casing record?'),
+		after(52 * 60, user='U1', text='Row 3'),
+		after(65 * 60, user='U3', text='Set it to 4.55 in'),
+		after(102 * 60, user='U2', text='Closing as User Error'),
+	]
+	found = replay.developer_time(thread_then, 'U1')
+	assert (found['replies'], found['response_minutes'], found['solving_minutes']) == (3, 41, 61)
+	assert found['first_reply'].startswith('2026-10-22T10:41:05')
+	assert replay._developers_line(found) == ' · developers 1 h 1 min (first reply 41 min in)'
+	unanswered = replay.developer_time(thread_then[:3], 'U1')
+	assert unanswered['solving_minutes'] is None
+	assert replay._developers_line(unanswered) == ' · no developer replied'
+	assert [replay._duration(minutes) for minutes in (0.5, 12, 125, 3000)] == [
+		'30 s',
+		'12 min',
+		'2 h 5 min',
+		'2 d 2 h',
+	]
 
 
 def test_the_cli_takes_tickets_or_a_golden_set(monkeypatch, tmp_path):

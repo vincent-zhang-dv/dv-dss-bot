@@ -1,5 +1,104 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-13: the replay work committed for the merge into main (Vincent, with Claude)
+- **Why:** Vincent read the six replays of 2026-11-12 and asked to merge the replay PR (#14).
+- **Done:** no code change. The branch's work since `4e4a3c0` (the four 2026-11-12 entries
+  below: the thread as raised with the screenshot, the Confluence age mark, bot and developer
+  time, the six replays) committed on `trial-replay` and pushed to PR #14.
+- **Checked:** `ruff check` and `ruff format --check` pass on the six changed Python files.
+  `uv run pytest` on `test_confluence`, `test_replay`, `test_thread`, `test_record`,
+  `test_triage` and `test_runner`: 149 passed.
+- **Not done / open:**
+  - The live bot's checkout is not pulled or restarted. From the next pull it also gets the
+    `may_be_out_of_date` mark on Confluence pages and the `triage.md` rule that goes with it.
+  - CLAUDE.md's few real triages before and after a `triage.md` change were not run for that
+    rule; the six replays ran with it.
+  - ruff findings in files this change does not touch, left as they are: SIM108 in
+    `dss/cerb.py` and `dss/code.py`, FURB167 and SIM110 in `dss/eval.py`, formatting in
+    `tests/test_eval.py`.
+  - PR #14 has no review from Annika.
+
+### 2026-11-12 (night): the six replays run again on the final replay code (Vincent, with Claude)
+- **Why:** Vincent wants the six DSS tickets Annika picked replayed with everything in place,
+  and the answers on the DSS Post Review page for the owners and Sean to rate.
+- **Done:** no code change. `python -m dss replay … --go` on DSS-1081, 1086, 1095, 1163, 1186
+  and 1191, nothing sent to Slack; results in `out/replay/2026-11-12/`. Total ≈ $3.10; 29 s to
+  2 min and $0.18 to $0.87 each.
+- **Checked** (each answer read against the real thread and Annika's note): none refused, none
+  over the $1.50 cap.
+  - DSS-1163 proved the cause the developers found (the bars' sort order in the erosion plot).
+  - DSS-1086 (a full disk, not Cerberus), DSS-1095 (works as designed) and DSS-1191 (wall loss
+    suppression) match. DSS-1191 used the raiser's own follow-up 18 minutes after the post,
+    which the as-raised rule lets a replay read.
+  - DSS-1186 found the right sheet but blamed its column headers; the real fix was a pass name
+    in it. The sheet changed after the ticket, and the replay flagged one possible leak.
+  - DSS-1081 said Techlog could not reach its license server and pointed at the network; the
+    server was switched off.
+  - DSS-1095 stopped at the 30-call cap.
+- **Outside the repo:** the review page shows the six replays with their real threads and Jira
+  outcomes in Annika's session; Vincent's and Sean's sessions have no tickets. Ratings are open:
+  each reviewer sees the others' as they are given, submitted or not.
+- **Not done / open:** Annika's note for DSS-1081 describes plot edits on a branch, not a
+  Techlog license: it may belong to another DSS ticket. `developer_time` counts every reply
+  that is not the raiser's or a bot's, so a manager's or another analyst's reply counts
+  (DSS-1191's 19 h 36 min ends at one).
+
+### 2026-11-12 (evening): bot time and developer time on each replay (Vincent, with Claude)
+- **Why:** Vincent wants to compare how long the bot and the developers take on each DSS.
+- **Done** (branch `trial-replay`): after each replay, the command reads the ticket's whole thread
+  (only then, so Claude never sees it) and saves `developers` with the result
+  (`replay.developer_time`): developer replies, first and last reply, minutes from the post to
+  the first (`response_minutes`) and from the first to the last (`solving_minutes`). Developers
+  are the people who replied other than the analyst who raised it; the workflow doesn't count.
+  The summary line gives the bot's time and cost next to it. `solving_minutes` is elapsed time,
+  waits included, not hours worked.
+- **Checked:** `uv run pytest`: 262 passed. Live, read-only, on the six replayed tickets: bot
+  28 s to 1 min; developers 6 min (DSS-1081) to 19 h 36 min (DSS-1191), first replies 30 s to
+  38 min after the post; added to their saved results in `out/replay/2026-11-05/`.
+- **Outside the repo:** the DSS Post Review page shows each ticket's bot and developer time, in
+  the ticket header, the real thread's outcome card, and a Results panel with medians.
+
+### 2026-11-12 (later): a Confluence page's age counts against it (Vincent, with Claude)
+- **Why:** Vincent: a page not edited within a year of the DSS post may be out of date; its last
+  edit should weigh on how much the bot trusts it.
+- **Done** (branch `trial-replay`, as `confluence.py` changed there):
+  - `confluence_search` hits and `confluence_page` pages last edited over a year before the
+    ticket carry `may_be_out_of_date` ("last edited 2025-06-30, 1.4 years before the ticket"):
+    before now in a live triage, before the post in a replay (by the page's version then).
+  - `triage.md` rule: check such a page against the code at the analyst's version, give its edit
+    date when citing it, settle nothing on it alone; when page and code disagree, the code wins.
+- **Checked:** `uv run pytest`: 261 passed. Live, code only: 3 of 50 hits for five typical searches
+  were over a year old (1.0 to 1.4 years).
+- **Not done:** CLAUDE.md asks for a few real triages before and after a `triage.md` change; not
+  run yet (one costs about $0.30 to $0.70). Not committed.
+
+### 2026-11-12: replays read the thread as raised, with the screenshot (Vincent, with Claude)
+- **Why:** the workflow posts in three parts within about 2 s: "@<analyst> created DSS-…", its
+  first reply "Screenshot of error:" with the analyst's screenshot, and a reminder (Data Support
+  Request, After Hours Support Request, and AggBI Support Request for 3 tickets). Replays cut the
+  thread at the post itself, so all six missed the screenshot. In 14 of 40 recent threads the
+  analyst added more (often screenshots) before anyone else replied, from 7 s to about 19 min
+  after. Vincent: always read "Screenshot of error:", and read the thread up to the first post by
+  anyone but the analyst named in "@… created DSS-…".
+- **Done** (branch `trial-replay`):
+  - A replay's own thread: the post, then the workflow's messages and the analyst's, up to the
+    first reply from anyone else and for at most 30 minutes (Vincent's cap: a later note by the
+    analyst may say how it was solved; `thread._as_raised`). Other tickets' threads: what was
+    posted by the cutoff. A replay no longer sets DSS_THREAD_UNTIL.
+  - The replay prompt says to read the thread first (the screenshot is what the analyst saw) and
+    to compare the project files with it and the description: differs and changed since, likely
+    fixed there (answer as then, note the file with the value then and now in
+    `replay.fixed_later`); differs but unchanged, nothing was fixed there, so the analyst may have
+    looked at another file or run.
+  - The live bot already reads the screenshot (its traces since DSS-1237 show the image sent), so
+    its prompt is unchanged.
+- **Checked:** `uv run pytest`: 259 passed. Live: DSS-1186's replay thread is the post, the
+  screenshot and the reminder; DSS-1245's adds the analyst's 4 follow-ups (2 more screenshots) and
+  stops before the first developer reply (28 messages in all); DSS-1229's runs to the analyst's
+  last note 18 min after, with 7 images.
+- **Not done:** the six replays aren't re-run with the screenshot, and this isn't committed yet.
+  A stray `gitdss-bot-cerberusprod/` folder sits in the replay worktree; left alone.
+
 ### 2026-11-06 (afternoon): replay kept apart from regular runs, and up to date with main (Vincent, with Claude)
 - **Why:** before merging, Vincent asked to confirm that trial mode (`replay`) is separate from the
   bot's regular runs, which may read every source, and to close what wasn't.

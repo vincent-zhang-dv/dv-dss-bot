@@ -4,7 +4,9 @@
 watched channel (#data-dev-support) and runs a trial (:func:`dss.record.trial`) with every tool
 answering as of that post (:mod:`dss.cutoff`):
 
-- Slack: the workflow's post only, none of the replies.
+- Slack: the ticket's thread as raised: the request, the workflow's "Screenshot of error:" reply
+  with the analyst's screenshot, and whatever the analyst added, up to the first reply from
+  anyone else (:func:`dss.thread._as_raised`).
 - Cerberus code: the analyst's build, from their last session before the post, else the newest
   release by then; git history is what GitHub held then (its push history), else what was
   committed by then. `cerb_client_info` runs that build from git.
@@ -31,7 +33,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from dss import code, cutoff, jira, record, runner, slack, triage
+from dss import code, cutoff, jira, record, runner, slack, thread, triage
 from dss.worker import ROOT
 
 REPLAY_DIR = ROOT / 'out' / 'replay'  # a folder per day; never out/answers, which the bot reads
@@ -79,6 +81,10 @@ def main(
 		if not go:
 			continue
 		result = replay(plan, folder, ask)
+		try:
+			result = with_developer_time(result, client, plan)
+		except Exception as error:  # noqa: BLE001 - the replay itself is saved already
+			say(f'{key}: developer time not read: {error}')
 		results.append(result)
 		say(outcome(result))
 		if to and 'dm' in result:
@@ -129,10 +135,12 @@ def prepare(key: str, client, names: slack.Names) -> dict:
 				ref = code.version_ref(build)
 			except (LookupError, ValueError) as error:  # a build no commit names
 				note = f'the code tools read the newest release by then, {ref}: {error}'
-	analyst = ''
+	analyst, raiser = '', ''
 	creator = slack.CREATOR.search(post.get('text', ''))
-	if creator and names.name(creator[1]) != creator[1]:
-		analyst = names.name(creator[1])  # a name, not a mention, which would notify them
+	if creator:
+		raiser = creator[1]
+		if names.name(raiser) != raiser:
+			analyst = names.name(raiser)  # a name, not a mention, which would notify them
 	return {
 		'key': key,
 		'ts': ts,
@@ -140,10 +148,48 @@ def prepare(key: str, client, names: slack.Names) -> dict:
 		'post': names.plain(post.get('text', '')),
 		'link': permalink(client, channel, ts),
 		'analyst': analyst,
+		'raiser': raiser,
 		'build': build,
 		'ref': ref,
 		'note': note,
 	}
+
+
+def developer_time(messages: list[dict], raiser: str) -> dict:
+	"""How developers answered a ticket's whole thread *messages*: their first and last reply (local
+	time), the minutes from the post to their first reply (`response_minutes`) and from their first
+	reply to their last (`solving_minutes`, the time they spent on it). Developers are the people
+	who replied other than the analyst who raised it (*raiser*); the workflow's messages don't
+	count. The times are None when nobody answered."""
+	replies = []
+	for message in messages[1:]:
+		person = message.get('user') and not message.get('bot_id')
+		if person and message['user'] != raiser:
+			replies.append(float(message['ts']))
+	found: dict = {
+		'replies': len(replies),
+		'first_reply': None,
+		'last_reply': None,
+		'response_minutes': None,
+		'solving_minutes': None,
+	}
+	if not messages or not replies:
+		return found
+	posted, first, last = float(messages[0]['ts']), min(replies), max(replies)
+	found['first_reply'] = datetime.fromtimestamp(first).astimezone().isoformat(timespec='seconds')
+	found['last_reply'] = datetime.fromtimestamp(last).astimezone().isoformat(timespec='seconds')
+	found['response_minutes'] = round((first - posted) / 60, 1)
+	found['solving_minutes'] = round((last - first) / 60, 1)
+	return found
+
+
+def with_developer_time(result: dict, client, plan: dict) -> dict:
+	"""*result* with `developers` (:func:`developer_time`) from the ticket's whole Slack thread,
+	read only now that Claude has answered, and saved to its file again."""
+	messages = thread._replies(client, slack.watched_channel(), plan['ts'])
+	result['developers'] = developer_time(messages, plan.get('raiser', ''))
+	Path(result['file']).write_text(json.dumps(result, indent=1), encoding='utf-8')
+	return result
 
 
 def find_post(client, channel: str, key: str, created: datetime) -> dict | None:
@@ -176,13 +222,12 @@ def replaying(key: str, ts: str, ref: str = ''):
 	"""The settings that make the tools answer as of the post *ts* (:mod:`dss.cutoff`), with the
 	code tools at *ref* when given; the previous settings come back after."""
 	saved = {}
-	for name in SETTINGS:
+	for name in SETTINGS:  # DSS_THREAD_UNTIL is cleared too: a replay's thread is cut as raised
 		saved[name] = os.environ.pop(name, None)
 	os.environ.update(
 		DSS_REPLAY_AT=ts,
 		DSS_REPLAY_KEY=key,
 		DSS_REPLAY_MAX_CALLS=str(MAX_CALLS),
-		DSS_THREAD_UNTIL=ts,  # slack_thread shows the post and none of the replies
 	)
 	if ref:
 		os.environ['DV_CERB_REF'] = ref
@@ -257,11 +302,14 @@ def planned(plan: dict) -> str:
 
 
 def outcome(result: dict) -> str:
-	"""How one replay ended, in a line: its status, cost, tool calls and possible leaks."""
+	"""How one replay ended, in a line: its status, the bot's time and cost, tool calls, possible
+	leaks, and the developers' time on the ticket (:func:`developer_time`)."""
 	key = result['key']
+	people = _developers_line(result.get('developers'))
 	if 'stopped' in result:
 		leaks = len(result['leaks_found'])
-		return f'{key}: stopped: {result["stopped"]} · {calls(result)} calls · {leaks} leaks'
+		stopped = f'{key}: stopped: {result["stopped"]} · {calls(result)} calls · {leaks} leaks'
+		return stopped + people
 	found = result['record']
 	if found is None or result['problems']:
 		ended = f'failed the record check ({len(result["problems"])} problems)'
@@ -271,8 +319,32 @@ def outcome(result: dict) -> str:
 		if found['replay']['fixed_later']:
 			ended += f', fixed later in {len(found["replay"]["fixed_later"])} file(s)'
 		leaks = len(found['replay']['leaks']) + len(found['replay']['leaks_found'])
-	spent = f'${result["cost_usd"]:.2f} · {calls(result)} calls · {leaks} leaks'
-	return f'{key}: {ended} · {spent} · {result["file"]}'
+	bot = f'bot {_duration(result["seconds"] / 60)}, ${result["cost_usd"]:.2f}'
+	spent = f'{bot} · {calls(result)} calls · {leaks} leaks'
+	return f'{key}: {ended} · {spent}{people} · {result["file"]}'
+
+
+def _developers_line(developers: dict | None) -> str:
+	"""The developers' time on a ticket for :func:`outcome`; empty when it wasn't read."""
+	if not developers:
+		return ''
+	if developers['solving_minutes'] is None:
+		return ' · no developer replied'
+	solving = _duration(developers['solving_minutes'])
+	return f' · developers {solving} (first reply {_duration(developers["response_minutes"])} in)'
+
+
+def _duration(minutes: float) -> str:
+	"""*minutes* as people say it: 40 s, 12 min, 2 h 5 min, 3 d 4 h."""
+	if minutes < 1:
+		return f'{round(minutes * 60)} s'
+	if minutes < 60:
+		return f'{round(minutes)} min'
+	if minutes < 24 * 60:
+		hours, rest = divmod(round(minutes), 60)
+		return f'{hours} h {rest} min'
+	days, rest = divmod(round(minutes / 60), 24)
+	return f'{days} d {rest} h'
 
 
 def calls(result: dict) -> int:

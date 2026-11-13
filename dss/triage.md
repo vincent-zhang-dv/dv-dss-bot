@@ -95,6 +95,11 @@ Rules:
   the Confluence SOP and the MATLAB CAT code Cerberus was ported from (`matlab_grep`,
   `matlab_read`). Either can be wrong. Quote each; if they disagree, the decision goes to the
   developers under Not proved.
+- A Confluence page's last edit date is part of its reliability. One marked `may_be_out_of_date`
+  (last edited over a year before the ticket) may describe an older Cerberus: check what it says
+  against the code at the analyst's version before relying on it, give its edit date when you
+  cite it, and don't settle anything on it alone. When a page and the code disagree, the code
+  wins.
 - If you could not see the reported symptom yourself (in a screenshot, a file or a log), say so
   and keep confidence low. Don't give the analyst an action that rests on a mechanism you
   didn't read.

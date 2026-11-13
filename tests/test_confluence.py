@@ -3,6 +3,7 @@
 import io
 import json
 import urllib.error
+from datetime import UTC, datetime, timedelta
 from email.message import Message
 
 import pytest
@@ -105,3 +106,27 @@ def test_without_named_spaces_the_search_covers_every_space(site, monkeypatch):
 	monkeypatch.delenv('CONFLUENCE_SPACES')
 	confluence.search('pup joints')
 	assert 'space' not in site[-1].full_url
+
+
+def test_a_page_not_edited_for_over_a_year_may_be_out_of_date(monkeypatch):
+	now = datetime.now(UTC)
+	edited = {'400': now - timedelta(days=400), '30': now - timedelta(days=30)}  # days ago
+
+	def get(path, params):
+		if path.endswith('/search'):
+			hits = []
+			for page_id, moment in edited.items():
+				hits.append({'content': {'id': page_id}, 'lastModified': moment.isoformat()})
+			return {'results': hits}
+		version = {'createdAt': edited[path.rsplit('/', 1)[1]].isoformat()}
+		return {'title': 'SOP', 'body': {'storage': {'value': '<p>steps</p>'}}, 'version': version}
+
+	monkeypatch.setattr(confluence, '_get', get)
+	note = confluence.page('400')['may_be_out_of_date']
+	assert note == f'last edited {edited["400"].astimezone():%Y-%m-%d}, 1.1 years before the ticket'
+	assert 'may_be_out_of_date' not in confluence.page('30')
+	hits = {}
+	for hit in confluence.search('casing tally'):
+		hits[hit['id']] = hit
+	assert hits['400']['may_be_out_of_date'] == note
+	assert 'may_be_out_of_date' not in hits['30']
