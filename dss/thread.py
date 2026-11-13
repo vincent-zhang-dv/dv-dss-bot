@@ -6,6 +6,12 @@ Every request is a GET: `conversations.replies`, `users.info`, and each file's p
 files.slack.com, which needs the app's `files:read` scope. Images go to Claude as images and text
 files as text. DSS_THREAD_UNTIL (a Slack ts, set by the CLI) leaves out later replies, so a
 triage of an older ticket sees the thread as the bot would have, without the developers' answers.
+
+The workflow (Data Support Request, After Hours Support Request) posts in three parts, within
+seconds: "@<analyst> created DSS-…", its first reply "Screenshot of error:" with the analyst's
+screenshot, and a reminder. The analyst often adds more (screenshots, details) before anyone else
+replies. In a replay (:mod:`dss.cutoff`) the replayed ticket's thread shows those and stops at the
+first reply from anyone else (:func:`_as_raised`).
 """
 
 import os
@@ -18,7 +24,7 @@ from datetime import datetime
 from mcp.server.mcpserver import Image
 from slack_sdk import WebClient
 
-from dss import slack
+from dss import cutoff, slack
 
 TS = re.compile(r'\d+\.\d+')
 MAX_MESSAGES = 200
@@ -30,6 +36,7 @@ FILE_HOST = 'files.slack.com'  # the only host that gets the bot token
 IMAGE_FORMATS = {'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/webp': 'webp'}
 SHOWN_TIME = '%Y-%m-%d %H:%M:%S'
 NOT_SENT = 'Slack sent a sign-in page instead of the file (the app needs the files:read scope)'
+AS_RAISED_S = 30 * 60  # a replay reads the analyst's own follow-ups this long after the post
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -45,8 +52,9 @@ OPENER = urllib.request.build_opener(_NoRedirect)
 def thread(ts: str) -> list[str | Image]:
 	"""The post *ts* and every reply in its thread, oldest first, with their images and text files.
 
-	Replies after DSS_THREAD_UNTIL are left out. A file that can't be read is named with the
-	reason, and the rest of the thread still comes back.
+	Replies after DSS_THREAD_UNTIL are left out; a replay shows the thread as raised instead
+	(:func:`_as_raised`). A file that can't be read is named with the reason, and the rest of the
+	thread still comes back.
 	"""
 	if not TS.fullmatch(ts):
 		raise ValueError(f'{ts!r} is not a Slack message ts like 1793475636.080799')
@@ -59,7 +67,11 @@ def thread(ts: str) -> list[str | Image]:
 	if post.get('ts') != ts or not from_workflow:
 		raise ValueError(f'{ts} is not a workflow\'s "created DSS-…" post in the watched channel')
 	until = os.environ.get('DSS_THREAD_UNTIL', '')
-	if until:
+	then = cutoff.when()
+	if then is not None:
+		messages = _as_raised(messages, then)
+		until = f'{then.timestamp():.6f}'  # what is marked as edited after the ticket
+	elif until:
 		shown = []
 		for message in messages:
 			if float(message['ts']) <= float(until):
@@ -74,6 +86,9 @@ def thread(ts: str) -> list[str | Image]:
 		label = f'Reply {number}' if number else 'Post'
 		when = datetime.fromtimestamp(float(message['ts'])).strftime(SHOWN_TIME)
 		lines = [f'--- {label} · {_author(message, names)} · {when}']
+		edited = (message.get('edited') or {}).get('ts', '')
+		if until and edited and float(edited) > float(until):  # Slack keeps only the new text
+			lines.append('(edited after the ticket time: the text below is the edited one)')
 		if message.get('text'):
 			lines.append(names.plain(message['text']))
 		attached: list[str | Image] = []
@@ -87,6 +102,42 @@ def thread(ts: str) -> list[str | Image]:
 		found.append('\n'.join(lines))
 		found.extend(attached)
 	return found
+
+
+def _as_raised(messages: list[dict], then: datetime) -> list[dict]:
+	"""A thread's *messages* as a replay at the cutoff *then* may read them.
+
+	The replayed ticket's own thread: its post, then what the workflow posted ("Screenshot of
+	error:" with the screenshot, the reminder) and what the analyst who raised it added (the
+	@mention in "@<analyst> created DSS-…"), up to the first reply from anyone else, however soon,
+	and for at most AS_RAISED_S: a later note by the analyst may say how it was solved.
+	Another ticket's thread: what was posted by *then*; ValueError for one posted after it.
+	"""
+	post = messages[0]
+	ticket = slack.TICKET.search(post.get('text', ''))
+	if not ticket or ticket[1] != cutoff.key():
+		shown = []
+		for message in messages:
+			if float(message['ts']) <= then.timestamp():
+				shown.append(message)
+		if not shown:  # a ticket posted after the replayed one
+			raise ValueError(
+				f'thread {post["ts"]} was posted after the ticket time; it cannot be read'
+			)
+		return shown
+	raiser = ''
+	creator = slack.CREATOR.search(post.get('text', ''))
+	if creator:
+		raiser = creator[1]
+	shown = [post]
+	for message in messages[1:]:
+		from_raiser = bool(raiser) and message.get('user') == raiser
+		if not message.get('bot_id') and not from_raiser:
+			break
+		if float(message['ts']) - float(post['ts']) > AS_RAISED_S:
+			break
+		shown.append(message)
+	return shown
 
 
 def _client() -> WebClient:

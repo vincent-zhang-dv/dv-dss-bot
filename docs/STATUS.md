@@ -1,5 +1,126 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-13: the replay work committed for the merge into main (Vincent, with Claude)
+- **Why:** Vincent read the six replays of 2026-11-12 and asked to merge the replay PR (#14).
+- **Done:** no code change. The branch's work since `4e4a3c0` (the four 2026-11-12 entries
+  below: the thread as raised with the screenshot, the Confluence age mark, bot and developer
+  time, the six replays) committed on `trial-replay` and pushed to PR #14.
+- **Checked:** `ruff check` and `ruff format --check` pass on the six changed Python files.
+  `uv run pytest` on `test_confluence`, `test_replay`, `test_thread`, `test_record`,
+  `test_triage` and `test_runner`: 149 passed.
+- **Not done / open:**
+  - The live bot's checkout is not pulled or restarted. From the next pull it also gets the
+    `may_be_out_of_date` mark on Confluence pages and the `triage.md` rule that goes with it.
+  - CLAUDE.md's few real triages before and after a `triage.md` change were not run for that
+    rule; the six replays ran with it.
+  - ruff findings in files this change does not touch, left as they are: SIM108 in
+    `dss/cerb.py` and `dss/code.py`, FURB167 and SIM110 in `dss/eval.py`, formatting in
+    `tests/test_eval.py`.
+  - PR #14 has no review from Annika.
+
+### 2026-11-12 (night): the six replays run again on the final replay code (Vincent, with Claude)
+- **Why:** Vincent wants the six DSS tickets Annika picked replayed with everything in place,
+  and the answers on the DSS Post Review page for the owners and Sean to rate.
+- **Done:** no code change. `python -m dss replay … --go` on DSS-1081, 1086, 1095, 1163, 1186
+  and 1191, nothing sent to Slack; results in `out/replay/2026-11-12/`. Total ≈ $3.10; 29 s to
+  2 min and $0.18 to $0.87 each.
+- **Checked** (each answer read against the real thread and Annika's note): none refused, none
+  over the $1.50 cap.
+  - DSS-1163 proved the cause the developers found (the bars' sort order in the erosion plot).
+  - DSS-1086 (a full disk, not Cerberus), DSS-1095 (works as designed) and DSS-1191 (wall loss
+    suppression) match. DSS-1191 used the raiser's own follow-up 18 minutes after the post,
+    which the as-raised rule lets a replay read.
+  - DSS-1186 found the right sheet but blamed its column headers; the real fix was a pass name
+    in it. The sheet changed after the ticket, and the replay flagged one possible leak.
+  - DSS-1081 said Techlog could not reach its license server and pointed at the network; the
+    server was switched off.
+  - DSS-1095 stopped at the 30-call cap.
+- **Outside the repo:** the review page shows the six replays with their real threads and Jira
+  outcomes in Annika's session; Vincent's and Sean's sessions have no tickets. Ratings are open:
+  each reviewer sees the others' as they are given, submitted or not.
+- **Not done / open:** Annika's note for DSS-1081 describes plot edits on a branch, not a
+  Techlog license: it may belong to another DSS ticket. `developer_time` counts every reply
+  that is not the raiser's or a bot's, so a manager's or another analyst's reply counts
+  (DSS-1191's 19 h 36 min ends at one).
+
+### 2026-11-12 (evening): bot time and developer time on each replay (Vincent, with Claude)
+- **Why:** Vincent wants to compare how long the bot and the developers take on each DSS.
+- **Done** (branch `trial-replay`): after each replay, the command reads the ticket's whole thread
+  (only then, so Claude never sees it) and saves `developers` with the result
+  (`replay.developer_time`): developer replies, first and last reply, minutes from the post to
+  the first (`response_minutes`) and from the first to the last (`solving_minutes`). Developers
+  are the people who replied other than the analyst who raised it; the workflow doesn't count.
+  The summary line gives the bot's time and cost next to it. `solving_minutes` is elapsed time,
+  waits included, not hours worked.
+- **Checked:** `uv run pytest`: 262 passed. Live, read-only, on the six replayed tickets: bot
+  28 s to 1 min; developers 6 min (DSS-1081) to 19 h 36 min (DSS-1191), first replies 30 s to
+  38 min after the post; added to their saved results in `out/replay/2026-11-05/`.
+- **Outside the repo:** the DSS Post Review page shows each ticket's bot and developer time, in
+  the ticket header, the real thread's outcome card, and a Results panel with medians.
+
+### 2026-11-12 (later): a Confluence page's age counts against it (Vincent, with Claude)
+- **Why:** Vincent: a page not edited within a year of the DSS post may be out of date; its last
+  edit should weigh on how much the bot trusts it.
+- **Done** (branch `trial-replay`, as `confluence.py` changed there):
+  - `confluence_search` hits and `confluence_page` pages last edited over a year before the
+    ticket carry `may_be_out_of_date` ("last edited 2025-06-30, 1.4 years before the ticket"):
+    before now in a live triage, before the post in a replay (by the page's version then).
+  - `triage.md` rule: check such a page against the code at the analyst's version, give its edit
+    date when citing it, settle nothing on it alone; when page and code disagree, the code wins.
+- **Checked:** `uv run pytest`: 261 passed. Live, code only: 3 of 50 hits for five typical searches
+  were over a year old (1.0 to 1.4 years).
+- **Not done:** CLAUDE.md asks for a few real triages before and after a `triage.md` change; not
+  run yet (one costs about $0.30 to $0.70). Not committed.
+
+### 2026-11-12: replays read the thread as raised, with the screenshot (Vincent, with Claude)
+- **Why:** the workflow posts in three parts within about 2 s: "@<analyst> created DSS-…", its
+  first reply "Screenshot of error:" with the analyst's screenshot, and a reminder (Data Support
+  Request, After Hours Support Request, and AggBI Support Request for 3 tickets). Replays cut the
+  thread at the post itself, so all six missed the screenshot. In 14 of 40 recent threads the
+  analyst added more (often screenshots) before anyone else replied, from 7 s to about 19 min
+  after. Vincent: always read "Screenshot of error:", and read the thread up to the first post by
+  anyone but the analyst named in "@… created DSS-…".
+- **Done** (branch `trial-replay`):
+  - A replay's own thread: the post, then the workflow's messages and the analyst's, up to the
+    first reply from anyone else and for at most 30 minutes (Vincent's cap: a later note by the
+    analyst may say how it was solved; `thread._as_raised`). Other tickets' threads: what was
+    posted by the cutoff. A replay no longer sets DSS_THREAD_UNTIL.
+  - The replay prompt says to read the thread first (the screenshot is what the analyst saw) and
+    to compare the project files with it and the description: differs and changed since, likely
+    fixed there (answer as then, note the file with the value then and now in
+    `replay.fixed_later`); differs but unchanged, nothing was fixed there, so the analyst may have
+    looked at another file or run.
+  - The live bot already reads the screenshot (its traces since DSS-1237 show the image sent), so
+    its prompt is unchanged.
+- **Checked:** `uv run pytest`: 259 passed. Live: DSS-1186's replay thread is the post, the
+  screenshot and the reminder; DSS-1245's adds the analyst's 4 follow-ups (2 more screenshots) and
+  stops before the first developer reply (28 messages in all); DSS-1229's runs to the analyst's
+  last note 18 min after, with 7 images.
+- **Not done:** the six replays aren't re-run with the screenshot, and this isn't committed yet.
+  A stray `gitdss-bot-cerberusprod/` folder sits in the replay worktree; left alone.
+
+### 2026-11-06 (afternoon): replay kept apart from regular runs, and up to date with main (Vincent, with Claude)
+- **Why:** before merging, Vincent asked to confirm that trial mode (`replay`) is separate from the
+  bot's regular runs, which may read every source, and to close what wasn't.
+- **Done** (branch `trial-replay`):
+  - Brought up to date with PR #13 (step-order gate, MATLAB CAT); the conflicts in `record.py`,
+    `runner.py`, `server.py`, `conftest.py` and this file keep both sides.
+  - In a replay the `matlab_*` tools read origin/master as of the post, by commit date (GitHub's
+    push history is read for Cerberus only), and refuse when CAT had no commit by then.
+  - A call held back by the step-order gate reads nothing, so it no longer counts toward a
+    replay's 30 calls, nor in the calls the replay reports. A `jira_search` refused by a replay's
+    JQL rules still counts as searched, as a failed search does live.
+  - Only a replay runs in one: `.env` never sets DSS_REPLAY_AT, DSS_REPLAY_KEY or
+    DSS_REPLAY_MAX_CALLS (`cutoff.SETTINGS`), and every command but `mcp` drops them at start,
+    with a line on stderr.
+- **Checked:** `uv run pytest`: 257 passed (5 new). Main's own tests (202) pass on this code, so
+  regular runs are unchanged. `ruff check` lists six findings, all on lines main already has
+  (`cerb.py:1318`, `code.py:195`, four in `eval.py`); left as they are.
+- **Not done:** known causes carry no date, so one learned after a post from an older ticket
+  still reaches that replay's prompt; replays share the Cerberus clone with the live bot, so two
+  fetches at once can collide; a folder per replay run (proposed); `--go` renamed to `--dry-run`
+  (proposed). The six replays aren't re-run on this code.
+
 ### 2026-11-06: DSS-1249's two failures, and MATLAB CAT as a reference (Vincent, with Claude)
 - **Why:** the live bot posted two failures for DSS-1249 to the test channel:
   - ":warning: Could not triage DSS-1249: Claude failed: Expecting value: line 1 column 1".
@@ -51,6 +172,83 @@
     rule or known cause needs room made first.
   - Refused posts for schema problems remain possible (2 of 17 trials so far); a repair turn is
     an option.
+
+### 2026-11-06 (morning): replay guards hardened after the first six replays (Vincent, with Claude)
+- **Why:** the six replays of 2026-11-05 still saw later files (DSS-1163 a `Deliverables\DSS-1163`
+  folder; DSS-1186's reply used the time a sheet was edited), and code's leak lines crowded the
+  post. Vincent asked to close what can be closed and to report the rest.
+- **Done** (branch `trial-replay`):
+  - Nothing says *when* a hidden thing happened: `changed_after_ticket` is a flag without time or
+    size, and refusals give no time.
+  - Project share: changed files and any folder whose name says they were made later (the
+    ticket's key, a later date) are left out of listings, and paths through such folders are
+    refused (`cutoff.named_later`); projects dated after the ticket's month aren't found.
+  - Jira: searches may test only fields a ticket keeps once filed, with absolute dates, sorted by
+    created or key (`jira._steady`), so `status = Done`, `linkedIssues()` and `-30d` are refused;
+    a cut changelog is read whole; a comment edited since shows no text.
+  - Slack: a thread posted after the ticket is refused; a post edited since says so.
+  - Confluence: a page with many versions is paged back to its version then.
+  - Leak checks: later DSS keys count as leaks. The post says how many tool answers code flagged;
+    the thread lists them.
+  - Outside the repo: the DSS Post Review page's thread pane kept the previous ticket after a
+    submit (Sean found it); fixed and republished.
+- **Then, on Vincent's answers about the bottlenecks:**
+  - Changed project files are read again, as they are now, and say so (`cerb.as_now`). When one
+    shows the fix, Claude answers as the ticket stood (as if not fixed) and notes it in
+    `replay.fixed_later` ("Fixed later in a file" in the post); this replaces `changed_file`
+    (stop there).
+  - Git as GitHub held it: GitHub's push history (activity API through `gh`, GET only; 9,066 rows,
+    33 s the first time, then only what's new; `out/archive/github_activity.json`) gives each
+    branch's commit at the post (`code.branches_then`). History searches walk those, branches
+    list those, and `code_contains` refuses commits GitHub didn't hold then. Commit dates stand in
+    when there is no push history.
+  - Dated archive for searches: Jira hits edited since are kept only if their summary and
+    description then have the searched words; Confluence hits changed since are judged, titled and
+    excerpted by their version then, kept in `out/archive/confluence/`.
+  - Prompt: lines naming the replayed ticket or a later one are left out; general rules stay.
+  - Vincent: tickets from before telemetry keep "the release that was prod then" (no fix exists).
+- **Checked:** `uv run pytest`: 246 passed. Live, code only: on DSS-1163's project the ticket's
+  folder is left out (18 entries then, 19 today) and refused; Jira refused `status = Done`; at
+  DSS-1191's post GitHub held 749 branches and 8,106 commits, including the same-day DTN-3633
+  commit its replay doubted (so no leak); at DSS-1163's post that commit is refused; Jira and
+  Confluence searches ran in about a second each.
+- **Not done:** the six replays aren't re-run on this code. Still open: a ticket or page that
+  matched a search then but no longer does isn't found, hits are ranked by today's text, and a
+  file made later with a plain name is listed as changed (the index has no creation times).
+
+### 2026-11-05 (evening): replay mode, old tickets as they stood when posted (Vincent, with Claude)
+- **Why:** trials of old tickets read today's sources: Jira comments and Outcome, later commits,
+  rewritten project files. Vincent set the rules: only the workflow's post, the poster's own build
+  with git cut at the post, Jira as first created (never the ticket's comments), project files only
+  as saved before, a cost cap, every leak named in the post, no remembered context, no wheel builds.
+- **Done** (branch `trial-replay`): `python -m dss replay <keys> [--golden] [--go] [--post-test]`
+  (`dss/replay.py`), and `dss/cutoff.py`, which every tool reads (DSS_REPLAY_AT, the post's ts):
+  - Slack: the post only. Jira: rebuilt from the changelog, no comments on the ticket itself,
+    later tickets refused, `text ~` kept to summary and description. Confluence: the page version
+    of then. Git: `--before` the post, branches as they were, later commits and releases refused;
+    `cerb_client_info` runs the analyst's build exported with `git archive`. Project share: later
+    sessions and log lines cut; files changed since are listed as changed and refused, and Claude
+    stops there (`replay.changed_file`; replaced on 2026-11-06 by reading them as they are now,
+    above). Known causes learned from this ticket or later dropped.
+  - Prod then (Vincent's choice): a release counts from the latest of its release commit, the day
+    after its Jira release date and, for today's wheel, its file time. Release commits come days
+    early (1.0.4: commit Oct 9, Jira Oct 13), and 1.1's wheel reached prod at 15:23 on Nov 4, two
+    minutes after DSS-1247, so commit dates alone were wrong.
+  - Caps (Vincent's choice): 30 tool calls, then the tools say "answer now"; `--max-budget-usd 1.50`.
+  - Leaks: code checks each tool answer for the ticket's key and later dates; Claude lists what
+    looked later. Both go in the record's new optional `replay` block and in the post.
+  - `slack.post` holds the posting the bot and `--post-test` share; it refuses #data-dev-support.
+- **Checked:** `uv run pytest`: 219 passed (20 new, all sources faked). Live, code only: Jira
+  rebuilds (DSS-1101 and DSS-1229: Done/Bug/toolbox and comments back to To Do with none), search
+  finds only older tickets, git cut at the post. Six real replays for the DSS Post Review
+  (DSS-1081, 1086, 1095, 1163, 1186, 1191): $2.49 together, 9-29 tool calls each, outputs in
+  `out/replay/2026-11-05/`. Fixed after them: the post's own due dates were flagged as leaks,
+  leak lines were double-escaped, a cut session log looked like a leak to Claude, and Jira's
+  "released <date>" on fix versions is no longer shown in replays.
+- **Not done:** listings still show when a file changed and files made after the post (DSS-1163
+  saw a folder named after the ticket); code-found leak lines make the post long; `dss eval`
+  doesn't score replay records yet. Two answers (DSS-1086, DSS-1095) were refused by the live
+  rule that git history is searched before the investigation.
 
 ### 2026-11-05 (later): Cerberus's terminal log as a source (Vincent, with Claude)
 - **Why:** from Cerberus 1.1 (`ab952f341`, DTN-3710), each session writes loguru's DEBUG output

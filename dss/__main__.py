@@ -4,13 +4,16 @@
 	                              [--thread <permalink or ts>]       # one triage, printed; no Slack
 	python -m dss trial DSS-1234 [--posted ...] [--post-file ...] [--thread ...]
 	                                                                 # the same as a checked record
+	python -m dss replay DSS-1229 ... [--golden out/eval/golden.jsonl] [--go] [--post-test]
+	                                          # old tickets as they stood when posted (dss.replay)
 	python -m dss eval out/eval/golden.jsonl out/eval/<run> [--judge] # score saved answers
 	python -m dss cerberus                                           # set up the bot's Cerberus
 	python -m dss slack                                              # the bot (see dss.slack)
 	python -m dss mcp                                                # the tools over stdio (MCP)
 
 Settings come from the environment. A `.env` file at the repo root (copy `.env.example`) fills
-in the ones that are not set.
+in the ones that are not set. A replay's own settings (:data:`dss.cutoff.SETTINGS`) are never
+read from it, and every command but `mcp` drops them, so only the tools a replay starts run in one.
 """
 
 import argparse
@@ -21,7 +24,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from dss import runner
+from dss import cutoff, runner
 from dss.cerb import START_TIME
 from dss.jira import ISSUE_KEY
 from dss.slack import TRIAGE_DELAY_S
@@ -33,14 +36,25 @@ PERMALINK = re.compile(r'/p(\d+)(\d{6})(?:[?#].*)?$')  # .../archives/<channel>/
 
 
 def load_env(path: Path = ROOT / '.env') -> None:
-	"""KEY=VALUE lines of *path* into the environment; what is already set wins."""
+	"""KEY=VALUE lines of *path* into the environment; what is already set wins. A replay's own
+	settings are left out: no setting file starts one."""
 	if not path.exists():
 		return
 	for line in path.read_text(encoding='utf-8').splitlines():
 		key, sep, value = line.partition('=')
 		key, value = key.strip(), value.strip().strip('"\'')
-		if sep and key and value and not key.startswith('#'):
+		if sep and key and value and not key.startswith('#') and key not in cutoff.SETTINGS:
 			os.environ.setdefault(key, value)
+
+
+def drop_replay_settings() -> list[str]:
+	"""Remove a replay's own settings from the environment; the names that were set. Outside a
+	replay they would cut every source at some other ticket's time."""
+	dropped = []
+	for name in cutoff.SETTINGS:
+		if os.environ.pop(name, None) is not None:
+			dropped.append(name)
+	return dropped
 
 
 def main() -> None:
@@ -53,6 +67,17 @@ def main() -> None:
 		'trial', help='triage one ticket as a checked record, print the DM and thread (no Slack)'
 	)
 	add_ticket_arguments(trial)
+	again = commands.add_parser(
+		'replay', help='triage old DSS tickets as they stood when posted (see dss.replay)'
+	)
+	again.add_argument('keys', nargs='*', help='ticket keys, e.g. DSS-1229')
+	again.add_argument('--golden', type=Path, help='also every ticket of a golden set')
+	again.add_argument(
+		'--go', action='store_true', help='run them; without it, only show what would run'
+	)
+	again.add_argument(
+		'--post-test', action='store_true', help='also post each to #data-dev-support-assist-test'
+	)
 	evaluate = commands.add_parser('eval', help='score saved answers against the golden set')
 	evaluate.add_argument('golden', type=Path, help='golden rows, e.g. out/eval/golden.jsonl')
 	evaluate.add_argument('run_dir', type=Path, help='folder with <key>.md and <key>_*.jsonl')
@@ -66,6 +91,10 @@ def main() -> None:
 	commands.add_parser('mcp', help='serve the triage tools over stdio (MCP)')
 	args = parser.parse_args()
 	load_env()
+	if args.command != 'mcp':  # the tools a replay starts get them from it (dss.replay)
+		dropped = drop_replay_settings()
+		if dropped:
+			print(f'ignored {", ".join(dropped)}: only a replay sets them', file=sys.stderr)
 	if args.command == 'mcp':  # stdout is the MCP protocol from here on: print nothing
 		from dss.server import build
 
@@ -96,6 +125,21 @@ def main() -> None:
 			raise SystemExit(f'cannot score: {error}') from error
 		for result in scores:
 			print(scoring.summary(result))
+	elif args.command == 'replay':
+		from dss import replay
+
+		keys = list(args.keys)
+		if args.golden:
+			try:
+				keys += replay.golden_keys(args.golden)
+			except (OSError, ValueError, KeyError) as error:
+				parser.error(f'cannot read --golden: {error}')
+		for key in keys:
+			if not ISSUE_KEY.fullmatch(key):
+				parser.error(f'{key!r} is not an issue key like DSS-1234')
+		if not keys:
+			parser.error('name the DSS tickets to replay, or give --golden')
+		replay.main(keys, go=args.go, post_test=args.post_test)
 	elif args.command == 'trial':
 		from dss import record
 

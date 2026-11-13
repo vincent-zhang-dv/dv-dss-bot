@@ -22,10 +22,11 @@ RUN_DIR = ROOT / 'out' / 'claude_run'  # empty working folder: no CLAUDE.md to d
 SYSTEM = Path(__file__).with_name('triage.md')
 
 
-def command(model: str = MODEL, system: str = '') -> list[str]:
+def command(model: str = MODEL, system: str = '', budget: float = 0) -> list[str]:
 	"""The `claude -p` command line: the triage prompt and the `dss` tools, nothing else.
 
-	*system* replaces the system prompt read from SYSTEM (the trial's record prompt).
+	*system* replaces the system prompt read from SYSTEM (the trial's record prompt). *budget*,
+	when given, stops the run at that many dollars (a replay's hard cap).
 	"""
 	server = ['run', '-q', '--directory', str(ROOT), 'python', '-m', 'dss', 'mcp']
 	mcp = {'mcpServers': {'dss': {'command': 'uv', 'args': server}}}
@@ -36,6 +37,8 @@ def command(model: str = MODEL, system: str = '') -> list[str]:
 	line += ['--tools', '', '--allowedTools', 'mcp__dss__*', '--permission-mode', 'dontAsk']
 	line += ['--system-prompt', system, '--disable-slash-commands']
 	line += ['--no-session-persistence']
+	if budget:
+		line += ['--max-budget-usd', f'{budget:.2f}']
 	return line
 
 
@@ -45,14 +48,16 @@ def run_reply(
 	timeout: float = TIMEOUT_S,
 	trace: Path | None = None,
 	system: str = '',
+	budget: float = 0,
 ) -> dict:
 	"""The whole `claude -p` JSON reply to *prompt*: `result`, `total_cost_usd`, `usage`, ...
 
 	The prompt goes on stdin. Raises RuntimeError when claude fails or ends without an answer
 	(turn limit, error), and FileNotFoundError when the `claude` CLI is not installed. With
 	*trace*, the `dss` server appends each tool call to that file (:func:`dss.server.trace`).
-	*system* replaces the triage system prompt (see :func:`command`). The server holds back code
-	and project file reads until past issues are searched (DSS_STEP_ORDER).
+	*system* replaces the triage system prompt and *budget* caps the cost (see :func:`command`).
+	The server holds back code and project file reads until past issues are searched
+	(DSS_STEP_ORDER).
 	"""
 	RUN_DIR.mkdir(parents=True, exist_ok=True)
 	env = {**os.environ, 'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1', 'DSS_STEP_ORDER': '1'}
@@ -60,7 +65,7 @@ def run_reply(
 	if trace:
 		env['DSS_TRACE_FILE'] = str(trace)  # the MCP server inherits claude's environment
 	done = subprocess.run(
-		command(model, system),
+		command(model, system, budget),
 		input=prompt,
 		capture_output=True,
 		encoding='utf-8',

@@ -181,23 +181,31 @@ class SlackDesk:
 			return f'https://slack.com/archives/{channel}/p{ts.replace(".", "")}'
 
 	def _post(self, text: str, thread_ts: str = '') -> str:
-		"""*text* (Markdown) to the destination, in the thread *thread_ts* when given; its ts.
-
-		Slack previews the link to the DSS post and no Jira or GitHub link. unfurl_links stays at
-		Slack's default: False hides the DSS post's preview too.
-		"""
+		"""*text* (Markdown) to the destination, in the thread *thread_ts* when given; its ts."""
 		if self.destination in (self.channel, CHANNEL):  # checked at start too; never post there
 			raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
-		first = MARKDOWN_LINK.sub(r'\1', text.splitlines()[0]).replace('**', '')
-		message = {
-			'channel': self.destination,
-			'text': first[:300],  # for notifications
-			'blocks': [{'type': 'markdown', 'text': text[:MARKDOWN_CHARS]}],
-			'unfurl_media': False,
-		}
-		if thread_ts:
-			message['thread_ts'] = thread_ts
-		return self.client.chat_postMessage(**message)['ts']
+		return post(self.client, self.destination, text, thread_ts)
+
+
+def post(client, to: str, text: str, thread_ts: str = '') -> str:
+	"""*text* (Markdown) to the channel or DM *to*, in the thread *thread_ts* when given; its ts.
+
+	Never to #data-dev-support or the watched channel. Slack previews the link to the DSS post and
+	no Jira or GitHub link. unfurl_links stays at Slack's default: False hides the DSS post's
+	preview too.
+	"""
+	if to in (watched_channel(), CHANNEL):
+		raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
+	first = MARKDOWN_LINK.sub(r'\1', text.splitlines()[0]).replace('**', '')
+	message = {
+		'channel': to,
+		'text': first[:300],  # for notifications
+		'blocks': [{'type': 'markdown', 'text': text[:MARKDOWN_CHARS]}],
+		'unfurl_media': False,
+	}
+	if thread_ts:
+		message['thread_ts'] = thread_ts
+	return client.chat_postMessage(**message)['ts']
 
 
 def watched_channel() -> str:
