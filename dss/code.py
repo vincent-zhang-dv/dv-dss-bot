@@ -593,7 +593,9 @@ def push_history(until: datetime | None = None) -> list[list[str]]:
 		rows.add(tuple(row))
 	merged = sorted(list(row) for row in rows)  # ISO times in UTC sort as text
 	ACTIVITY_FILE.parent.mkdir(parents=True, exist_ok=True)
-	ACTIVITY_FILE.write_text(json.dumps(merged), encoding='utf-8')
+	partial = ACTIVITY_FILE.with_suffix('.tmp')
+	partial.write_text(json.dumps(merged), encoding='utf-8')
+	os.replace(partial, ACTIVITY_FILE)  # a crash never leaves a half-written history
 	return merged
 
 

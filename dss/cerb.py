@@ -562,15 +562,15 @@ def log_problems(text: str, before: str = '') -> dict:
 	loguru prints. Each warning call site is listed once, at its first line, with how often it
 	fired.
 	"""
-	cutoff = ''
+	stop_at = ''
 	if before:
 		day, clock = before.split('_')
-		cutoff = f'{day} {clock.replace("-", ":")}'
+		stop_at = f'{day} {clock.replace("-", ":")}'
 	records: list[dict] = []
 	for number, line in enumerate(text.splitlines(), 1):
 		match = LOG_RECORD.match(line)
 		if match:
-			if cutoff and match[1] >= cutoff:
+			if stop_at and match[1] >= stop_at:
 				break  # the log is in time order
 			records.append(
 				{'line': number, 'level': match[2], 'where': match[3], 'message': match[4]}
