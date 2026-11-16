@@ -51,6 +51,7 @@ HISTORY_TOOLS = {'code_log_s', 'code_log', 'code_branches'}  # triage.md step 2'
 INVESTIGATION_TOOLS = {
 	'code_read',
 	'matlab_read',
+	'vizapp_read',
 	'cerb_read_text',
 	'cerb_read_sheet',
 	'cerb_client_info',

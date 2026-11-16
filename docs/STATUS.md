@@ -1,5 +1,26 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-16: VizApp code and release notes as a source (Vincent, with Claude)
+- **Why:** VizApp writes most of what Cerberus reads (dvcalipers, bookmarks), so a DSS issue can
+  start in VizApp; then the analyst should go to the VizApp support channels named in the
+  2025-05-26 reminder in #data-dev-support, not to the data developers.
+- **Done** (branch `vizapp-knowledge`): `reply-feedback` merged as PR #15 (`f3ec825`). New
+  `dss/vizapp.py`: `vizapp_search` (GitHub code search of DVCode master) and `vizapp_read` (one
+  file, or its lines containing a text, at master; in a replay at master's last commit before the
+  post), through the gh CLI, GET only. DVCode is over 4 GB, so there is no clone. `vizapp_read`
+  waits for the past-issue searches like `matlab_read`. `triage.md` Gate A: check how VizApp makes
+  the data and its release notes (`Hades/CHANGELOG.md`); if VizApp is the cause, send the analyst
+  to #dh-ask-support (Mon-Fri 9:00-17:00), otherwise to the after-hours channel in the reminder.
+- **Checked:** `uv run pytest` on `test_tools`, `test_runner`, `test_record`, `test_triage` and
+  `test_replay`: 184 passed. Both tools ran once against GitHub by hand (a search for dvcaliper
+  and the release notes' caliper lines). Record prompt: 21,661 characters. No live triage.
+- **Not done / open:**
+  - The after-hours VizApp channel is private and the bot can't name it: the reply links the
+    reminder instead.
+  - GitHub code search sees today's master only, so a replay's search can show later code; a read
+    of a match is at the cutoff.
+  - The live bot still runs `684b68d`: neither PR #15 nor this branch is pulled there.
+
 ### 2026-11-16: shorter, clearer replies and todos from Annika's ratings (Vincent, with Claude)
 - **Why:** Annika rated the six replays of 2026-11-12 on the DSS Post Review page: 46 of 54
   sections correct, 8 partial, none incorrect. All eight were in the analyst todos, the developer

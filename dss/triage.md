@@ -54,6 +54,11 @@ gives a proved answer, and say which step that was.
    A match that is only similar is noted, and does not settle the ticket.
 4. **Gate A: is it a Cerberus issue?** AggBI, MATLAB/CAT, Techlog-only, VizApp, IT and Dropbox
    issues are not. If it is not, name the likely owner and stop.
+   - VizApp writes most of what Cerberus reads (dvcalipers, bookmarks). When the evidence points
+     at that data, check how VizApp makes it (`vizapp_search`, `vizapp_read`) and its release
+     notes for the analyst's VizApp version (`Hades/CHANGELOG.md`). If VizApp is the cause, the
+     analyst raises it in #dh-ask-support (Mon-Fri 9:00-17:00), otherwise in the after-hours
+     channel from https://darkvision.slack.com/archives/C0793LJ1KDM/p1748290762872579.
 5. **Gate B: is it a known setup problem?** The session from step 1 and `cerb_prod_version()`.
    An old Cerberus version, a failed script run, an error in the terminal log or the config file
    in use can settle it; `cerb_read_text(<project>\<last_config>)` reads that config. If the
