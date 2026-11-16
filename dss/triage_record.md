@@ -46,25 +46,31 @@ The object has two blocks: {"triage": {...}, "class": {...}}.
   `slack_thread:reply 1 screenshot` or `terminal_log:line 1201`, or `computed`.
 - `not_proved`: strings, each the check a developer would make to settle what could not be
   proved, such as "Read DVT4932's Perf Info dvStage for client stages 69-71 to confirm they share
-  one DV stage". The post lists them as the developers' "Confirm" actions.
+  one DV stage". The post lists them as the developers' "Confirm" actions. Each settles part of
+  this ticket's cause; leave out code changes that would not resolve it.
 - `questions`: [{"ask", "settles"}], only questions whose answer settles something, each saying
   what it settles. The post lists them as the analyst's "Answer" actions.
 - `actions`: {"analyst": [...], "developers": [...]}, each a short instruction that starts with a
   verb; an empty list means there is nothing to do. Never repeat a question or a not-proved check
   here: code adds those.
   - Analyst: correct an input (name the file, sheet and row or cell, and the value to set), update
-    Cerberus and rerun, or wait for the release.
+    Cerberus and rerun, or wait for the release. When the cause is in their data, start with the
+    check that shows it in their tools, then the fix, then each step to rerun in order (such as
+    re-exporting calipers before CatCall). When Cerberus works as designed, still check the inputs
+    the evidence shows (calipers from different passes or folders).
   - Developers: raise a DTN ticket (say what for), set a fix version, regenerate the
     deliverable from a fixed branch or PR (name it), or review or merge an existing PR (name it).
-    Give a deadline when the analyst's review date makes one matter.
+    Give a deadline when the analyst's review date makes one matter. Only steps that confirm or
+    fix this ticket's cause.
 - `escalate`: {"kind", "dtn_ticket"} for the existing DTN ticket that covers this problem, with
   kind one of `bug`, `feature` or `docs`; null when there is none. Write no DTN draft.
 - `reply`: the reply to the analyst, as a data developer would write it: at most 3 short
-  sentences, the answer or solution first. Give exact facts they can check (the design, stage,
-  joint or file, the counts, the sheet and column where they see it), and only proved ones. Leave
-  out implementation details (Cerberus code paths, functions, line numbers, libraries) and what
-  they can already tell (their DVT or version, that there is no workaround, that their inputs are
-  fine). Name a release only from a DTN ticket's fix version, and promise no other work. When the
+  sentences, the answer or solution first ("works as intended" when it does). Leave out side
+  facts and numbers that don't change what they do next. Give exact facts they can check (the
+  design, stage, joint or file, the counts, the sheet and column where they see it), and only
+  proved ones. Leave out implementation details (Cerberus code paths, functions, line numbers,
+  libraries) and what they can already tell (their DVT or version, that there is no workaround,
+  that their inputs are fine). Name a release only from a DTN ticket's fix version, and promise no other work. When the
   status is `needs_info`, the reply asks the questions. Null when nothing should be sent yet.
 - `secondary`: a second, separate cause, [{"cause", "class"}], where `class` is a whole class
   object as described below, not a single value. Label suggestions go in `class.labels`, not here.

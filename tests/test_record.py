@@ -200,7 +200,7 @@ def test_the_trial_keeps_the_bots_steps_and_asks_for_the_record():
 	for cause in json.loads(record.KNOWN_CAUSES_FILE.read_text(encoding='utf-8')):
 		assert f'`{cause["slug"]}`' in prompt
 	assert '$' not in prompt
-	assert len(prompt) < 20_000  # it goes on the claude command line, which Windows caps at 32,767
+	assert len(prompt) < 24_000  # it goes on the claude command line, which Windows caps at 32,767
 
 
 def test_a_broken_known_causes_file_is_named_not_blamed_on_claude(tmp_path, monkeypatch):
