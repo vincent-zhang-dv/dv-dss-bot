@@ -22,6 +22,7 @@ Owners: Vincent Zhang and Annika. Status log: [docs/STATUS.md](docs/STATUS.md).
                                         client info (Cerberus venv)
        code_*        dss/code.py        Cerberus source at the prod release commit (git)
        matlab_*      dss/matlab.py      MATLAB CAT, which Cerberus was ported from (git)
+       vizapp_*      dss/vizapp.py      VizApp code and release notes, DVCode (GitHub API)
        confluence_*  dss/confluence.py  SOPs and how-tos
   -> #data-dev-support-assist: the decision, with the proof in its thread (never #data-dev-support);
      the record is saved in out/trial/, and out/answers/ notes which tickets are done
@@ -45,6 +46,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `code_grep`, `code_read`, `code_log_s` | Cerberus source through git at the prod release commit, never the working tree. |
 | `code_log`, `code_branches`, `code_contains` | Cerberus history: recent commits on a file or folder, branches named with a DTN key or word, and whether a build (prod, a release or the analyst's UAT build) includes a commit. Git reads only. |
 | `matlab_grep`, `matlab_read`, `matlab_log` | MATLAB CAT (DataAnalysis), which Cerberus was ported from, through git at origin/master: what a step did before the port, and when a behaviour came in. A second reference for intended behaviour beside the Confluence SOPs; the two can disagree, and the rules send the decision to the developers when they do. |
+| `vizapp_search`, `vizapp_read` | VizApp's code and release notes (DVCode), which writes the dvcalipers and bookmarks Cerberus reads: GitHub code search of master, and one file at master (in a replay, at master's last commit before the post), through the gh CLI, GET only. DVCode is over 4 GB, so the bot keeps no clone. When VizApp is the cause, `triage.md` sends the analyst to #dh-ask-support. |
 | `confluence_search`, `confluence_page` | Confluence pages. A page last edited over a year before the ticket says so (`may_be_out_of_date`), and `triage.md` has Claude check it against the code and not settle anything on it alone. |
 
 `cerb_client_info` and `cerb_read_sheet` run in the Cerberus venv through [dss/worker.py](dss/worker.py), so this repo needs none of its dependencies.

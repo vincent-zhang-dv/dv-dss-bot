@@ -98,6 +98,8 @@ def test_server_serves_the_triage_tools():
 		'matlab_grep',
 		'matlab_read',
 		'matlab_log',
+		'vizapp_search',
+		'vizapp_read',
 		'confluence_search',
 		'confluence_page',
 	}

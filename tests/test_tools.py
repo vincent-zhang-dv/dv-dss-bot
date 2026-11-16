@@ -24,7 +24,7 @@ from typing import ClassVar
 import pytest
 from mcp import Client
 
-from dss import cerb, code, jira, matlab
+from dss import cerb, code, jira, matlab, vizapp
 from dss.server import build
 
 
@@ -1217,6 +1217,34 @@ def test_matlab_tools_say_how_to_set_them_up(monkeypatch, mcp_call):
 	assert matlab.setup() == ['DSS_MATLAB_GIT is not set: the matlab tools are off']
 	failed, text = mcp_call('matlab_grep', {'pattern': 'interp1'})
 	assert failed and 'set DSS_MATLAB_GIT' in text
+
+
+def test_vizapp_tools_only_get_from_github_and_read_at_the_cutoff(monkeypatch):
+	asked = []
+	answers = {
+		'commits': '0123456789abcdef\n',
+		'contents': 'void ExportCalipers()\n{\n\twriteDvCaliper(path);\n}\n',
+	}
+
+	def fake_gh(command, **kwargs):
+		asked.append(command)
+		endpoint = command[4].split('/')[3].split('?')[0]
+		return SimpleNamespace(returncode=0, stdout=answers[endpoint], stderr='')
+
+	monkeypatch.setattr(vizapp.subprocess, 'run', fake_gh)
+	monkeypatch.setenv('DSS_REPLAY_AT', '1767225600')
+	found = vizapp.read('Hades/Src/Export.cpp', contains='writeDvCaliper')
+	assert found.endswith(
+		"at 0123456789, lines containing 'writeDvCaliper':\n3\t\twriteDvCaliper(path);"
+	)
+	assert all(command[2:4] == ['--method', 'GET'] for command in asked)
+	assert '&until=' in asked[0][4] and asked[1][4].endswith('?ref=0123456789')
+	assert '2-3 of 4' in vizapp.read('Hades/Src/Export.cpp', 2, 3)
+	with pytest.raises(ValueError):
+		vizapp.read('../secrets.cpp')
+	answers['commits'] = '\n'  # no commit before the cutoff
+	with pytest.raises(LookupError):
+		vizapp.read('Hades/CHANGELOG.md')
 
 
 def test_setup_says_what_each_tool_reads(released, bot_clone, tmp_path, monkeypatch):
