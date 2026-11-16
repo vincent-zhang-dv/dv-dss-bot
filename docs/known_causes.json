@@ -197,5 +197,27 @@
 		"prevent": "docs",
 		"dss_tickets": ["DSS-1249"],
 		"dtn_tickets": ["DTN-3747"]
+	},
+	{
+		"slug": "techlog-license-server-off",
+		"cause": "The Techlog license server PC (DV-3569) was off, as after a power outage: \"No core license found\", \"Unable to get feature list\" even on the DV network.",
+		"prove": "Other users can't get a Techlog license either, or the license server PC doesn't answer a ping.",
+		"fix": "A data developer restarts the license server PC; the licensing service starts by itself. The analyst then reopens Techlog.",
+		"cause_family": "environment",
+		"feature": "other",
+		"prevent": "none",
+		"dss_tickets": ["DSS-1081"],
+		"dtn_tickets": []
+	},
+	{
+		"slug": "combine-sheet-pass-name",
+		"cause": "A pass name in the Combine Calipers sheet differs from the project's, even only in case (Main_UP_Radial vs Main_Up_Radial).",
+		"prove": "Compare each name in the sheet's pass column, character by character, with the project's pass names.",
+		"fix": "Copy the pass names into the sheet exactly as the project names them, then load the sheet again.",
+		"cause_family": "input_data",
+		"feature": "wi_caliper_inputs",
+		"prevent": "input_check",
+		"dss_tickets": ["DSS-1186"],
+		"dtn_tickets": []
 	}
 ]

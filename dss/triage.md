@@ -100,6 +100,10 @@ Rules:
   against the code at the analyst's version before relying on it, give its edit date when you
   cite it, and don't settle anything on it alone. When a page and the code disagree, the code
   wins.
+- From a page's steps, give what a step is for (be on the DV network), not its local setup (VPN,
+  network settings), unless that setup is the cause.
+- Name Cerberus steps and checks as analysts see them, never by code function names. Say what
+  Cerberus needs from them, not how its screens behave, unless a screenshot or page shows it.
 - If you could not see the reported symptom yourself (in a screenshot, a file or a log), say so
   and keep confidence low. Don't give the analyst an action that rests on a mechanism you
   didn't read.

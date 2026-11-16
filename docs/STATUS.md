@@ -1,5 +1,36 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-16: shorter, clearer replies and todos from Annika's ratings (Vincent, with Claude)
+- **Why:** Annika rated the six replays of 2026-11-12 on the DSS Post Review page: 46 of 54
+  sections correct, 8 partial, none incorrect. All eight were in the analyst todos, the developer
+  todos or the draft reply; the diagnosis sections were all correct. Vincent: make the replies
+  more concise and clear.
+- **Done** (branch `reply-feedback`, prompt only):
+  - `triage.md`: from a page's steps, give what a step is for, not its local setup (DSS-1081: "be
+    on the DV network", not VPN and network settings). Name Cerberus steps as analysts see them,
+    not by function names, and say what Cerberus needs rather than how its screens behave
+    (DSS-1081, DSS-1186).
+  - `triage_record.md`: the reply says "works as intended" when it does and leaves out side
+    facts (DSS-1095). Analyst todos start with a check in their own tools, then the fix, then each
+    rerun step in order, and a works-as-designed answer still checks the inputs the evidence shows
+    (DSS-1095, DSS-1191). Developer todos and "Confirm" checks hold only steps that confirm or fix
+    this ticket's cause (DSS-1191).
+  - Two known causes: `techlog-license-server-off` (DSS-1081, from its thread) and
+    `combine-sheet-pass-name` (DSS-1186; Vincent confirmed the wrong pass name was the cause).
+  - The record prompt is now 21,194 characters, over the test's 20,000 guard (main was at
+    19,951). Vincent chose to raise the guard to 24,000; the whole command line is 21,586 of
+    Windows' 32,767.
+- **Checked:** `uv run pytest` on `test_triage_record`, `test_record`, `test_triage`,
+  `test_replay` and `test_runner`: 159 passed. No live triage or replay run yet.
+- **Not done / open:**
+  - CLAUDE.md asks for real triages before and after a prompt change: replaying the six (about $3)
+    and comparing with Annika's corrected text is the check, waiting for Vincent's go.
+  - The replays of DSS-1081 and DSS-1186 won't see their own new known causes (a replay leaves
+    out causes learned from the replayed ticket or later).
+  - The live bot was pulled to `684b68d` and restarted on 2026-11-13; the 2026-11-13 entry
+    below was written before that.
+  - Annika's note for DSS-1081 still doesn't match its thread; Vincent thinks the note is wrong.
+
 ### 2026-11-13: the replay work committed for the merge into main (Vincent, with Claude)
 - **Why:** Vincent read the six replays of 2026-11-12 and asked to merge the replay PR (#14).
 - **Done:** no code change. The branch's work since `4e4a3c0` (the four 2026-11-12 entries
