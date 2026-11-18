@@ -89,12 +89,6 @@ INVESTIGATION_TOOLS = {
 	'cerb_read_sheet',
 	'cerb_client_info',
 }
-# An evidence ref that names a tool call, such as code_read:cerberus/plots.py:120 (evidence_gaps)
-TOOL_REF = re.compile(r'((?:slack|jira|cerb|code|matlab|confluence)_[a-z_]+)(?::(.*))?', re.DOTALL)
-LINE_REF = re.compile(r'([^\s:;,]+):(\d+)(?:-(\d+))?')  # one path:line or path:first-last
-LINE_TOOLS = {'code_read', 'matlab_read'}  # each call reads at most code.MAX_LINES lines
-# A tool whose answer code put in the record without a traced call, and the fact that holds it
-RECORD_TOOLS = {'cerb_find_project': 'project', 'cerb_prod_version': 'prod_version'}
 CODE_SPAN = re.compile(r'(`[^`\n]*`)')
 MARKDOWN_MARK = re.compile(r'([\\*_~<>\[\]])')  # shown as typed once escaped: \cerberus, __init__
 MAX_PROBLEMS = 10  # schema problems listed in the DM
@@ -749,93 +743,6 @@ def traced_tools(trace: Path) -> list[str]:
 	return tools
 
 
-def traced_calls(trace: Path) -> list[dict]:
-	"""The calls of a run that got an answer, Claude's and code's (`by: code`), from its *trace*;
-	none when it has none. A call that failed or was held back read nothing, so it is left out."""
-	if not trace.exists():
-		return []
-	calls = []
-	for line in trace.read_text(encoding='utf-8').splitlines():
-		if line.strip():
-			call = json.loads(line)
-			if not call.get('blocked') and 'error' not in call:
-				calls.append(call)
-	return calls
-
-
-def evidence_gaps(record: dict, calls: list[dict]) -> dict[str, str]:
-	"""The evidence refs of *record* that the run's *calls* (:func:`traced_calls`) do not show,
-	each with why. Only what the trace settles is said:
-
-	- a ref that names a tool no call of which got an answer; code's reads count, and so does a
-	  fact code put in the record (RECORD_TOOLS);
-	- a `code_read` or `matlab_read` ref to one file and line (or line range) that no call of
-	  that file read; a ref that lists several is not taken apart;
-	- a `terminal_log` ref when the record has no terminal log and Claude read none.
-
-	`computed` and every other ref are left alone.
-	"""
-	ticket = record['dss_ticket']
-	ran = set()
-	log = ticket.get('terminal_log')
-	log_read = isinstance(log, dict) and bool(log.get('found'))
-	lines_read: dict[tuple[str, str], list[tuple[str, int, int]]] = {}
-	for call in calls:
-		tool = call['tool']
-		ran.add(tool)
-		if tool == 'cerb_read_text' or (tool == 'cerb_last_session' and call.get('by') != 'code'):
-			log_read = True
-		if tool in LINE_TOOLS:
-			arguments = call.get('arguments') or {}
-			path = _path_key(arguments.get('path'))
-			first = max(int(arguments.get('start') or 1), 1)
-			last = first + code.MAX_LINES - 1
-			if arguments.get('end'):
-				last = min(last, int(arguments['end']))
-			lines_read.setdefault((tool, ntpath.basename(path)), []).append((path, first, last))
-	for tool, fact in RECORD_TOOLS.items():
-		if ticket.get(fact):
-			ran.add(tool)
-	gaps = {}
-	for item in record['triage'].get('evidence') or []:
-		ref = item['ref']
-		if ref.startswith('terminal_log'):
-			if not log_read:
-				gaps[ref] = 'the record has no terminal log and this run read none'
-			continue
-		named = TOOL_REF.fullmatch(ref)
-		if not named:
-			continue
-		tool = named[1]
-		if tool not in ran:
-			gaps[ref] = f'no `{tool}` call of this run got an answer'
-			continue
-		cited = LINE_REF.fullmatch(named[2] or '')
-		if tool not in LINE_TOOLS or not cited:
-			continue
-		path = _path_key(cited[1])
-		ends = [int(cited[2])]
-		if cited[3]:
-			ends.append(int(cited[3]))
-		same_file = False
-		unread = set(ends)
-		for read_path, first, last in lines_read.get((tool, ntpath.basename(path)), []):
-			if not _same_file(path, read_path):
-				continue
-			same_file = True
-			for line in ends:
-				if first <= line <= last:
-					unread.discard(line)
-		if not same_file:
-			gaps[ref] = f'no `{tool}` call of this run read that file'
-		elif len(unread) == 1:
-			gaps[ref] = f'no `{tool}` call of this run read line {min(unread)} of that file'
-		elif unread:
-			lines = f'lines {min(unread)} and {max(unread)}'
-			gaps[ref] = f'no `{tool}` call of this run read {lines} of that file'
-	return gaps
-
-
 def order_problems(record: dict, tools: list[str]) -> list[str]:
 	"""Where the run's *tools* break triage.md's order: past DSS and DTN tickets (`jira_search`)
 	and git history are searched before the investigation reads code or project files. A ticket
@@ -1246,26 +1153,6 @@ def _numbers(release: str) -> list[int]:
 	while numbers and numbers[-1] == 0:
 		numbers.pop()
 	return numbers
-
-
-def _path_key(path) -> str:
-	"""A repo *path* as written in a call or an evidence ref, for comparing the two."""
-	return str(path or '').strip().replace('\\', '/').lower().strip('/')
-
-
-def _same_file(cited: str, read: str) -> bool:
-	"""Whether the *cited* path (:func:`_path_key`) is the file a call *read*: the same path, or
-	one given from a folder further down, such as modules/plots.py for cerberus/modules/plots.py."""
-	if cited == read:
-		return True
-	return read.endswith('/' + cited) or cited.endswith('/' + read)
-
-
-def _gap_count(gaps: dict[str, str]) -> str:
-	"""How many evidence refs the trace does not show, in words for the DM."""
-	if len(gaps) == 1:
-		return '1 evidence ref cites a read the trace does not show'
-	return f'{len(gaps)} evidence refs cite a read the trace does not show'
 
 
 def _keep(reads: list[dict] | None, tool: str, arguments: dict, started: float, result) -> None:
