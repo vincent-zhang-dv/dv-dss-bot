@@ -185,6 +185,7 @@ Each analysis is a checked record, as in trial mode, posted to `DSS_SLACK_POST_C
   | Confidence | High, medium or low; where it settled; anything the bot or code couldn't read | Always |
 
   The class, the labels, the existing DTN ticket and the facts code read are left out of the thread but kept in the saved record, for the planning summaries and for debugging. The bot writes no DTN drafts: the team writes DTN tickets with its own skill.
+- **Evidence check:** after the run, code compares each evidence item's source with the run's trace (`record.evidence_gaps`). A source no call of the run read, or a file line no read or search showed, is marked in the thread, and the post says how many; the answer still goes out. Code reads count whatever tool name the item gives, as Claude often cites a `matlab_read` or a grep hit as `code_read`.
 - **Links:** DSS and DTN keys link to Jira; Cerberus commits, branches, PRs and releases link to GitHub, a branch or release to its PR when there is one (`code.web_links`, from the bot's clone and GitHub's pull refs). The Draft Reply links only Jira tickets, since analysts can't open GitHub. Slack previews only the DSS post below the post.
 
 The bot waits 15 seconds after the post before it triages (`TRIAGE_DELAY_S`). The workflow posts the analyst's "Screenshot of error" within a second, and waiting longer would let the developers' own first answers into the thread the triage reads. `slack_thread` downloads the screenshots, which needs the `files:read` scope.

@@ -49,6 +49,16 @@ WORDS = {
 	'it': 'IT',
 }
 HISTORY_TOOLS = {'code_log_s', 'code_log', 'code_branches'}  # triage.md step 2's git searches
+# An evidence ref that names a tool call, such as code_read:cerberus/plots.py:120 (evidence_gaps)
+TOOL_REF = re.compile(
+	r'((?:slack|jira|cerb|code|matlab|vizapp|confluence)_[a-z_]+)(?::(.*))?', re.DOTALL
+)
+LINE_REF = re.compile(r'([^\s:;,]+):(\d+)(?:-(\d+))?')  # one path:line or path:first-last
+LINE_TOOLS = {'code_read', 'matlab_read'}  # each call reads at most code.MAX_LINES lines
+GREP_TOOLS = {'code_grep', 'matlab_grep'}  # each hit shows one line, path:line:text
+GREP_HIT = re.compile(r'^([^\s:]+):(\d+):', re.MULTILINE)
+# A tool whose answer code put in the record without a traced call, and the fact that holds it
+RECORD_TOOLS = {'cerb_find_project': 'project', 'cerb_prod_version': 'prod_version'}
 # Reading code or project files is investigation (steps 4 to 7); past issues are searched before
 INVESTIGATION_TOOLS = {
 	'code_read',
@@ -141,6 +151,7 @@ def trial(
 		trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
 	answer = triage.run(key, posted, asked, ask, trace=trace)
 	record, crash = None, ''
+	gaps: dict[str, str] = {}
 	facts = None
 	if replay is not None:
 		facts = {**replay, 'leaks_found': traced_leaks(trace)}
@@ -155,7 +166,14 @@ def trial(
 				dm = _joined([dm, *_leak_lines(said)])
 				thread = _joined([thread, *_code_leak_lines(said)])
 		else:
-			dm, thread = render(record, notes, links(record, notes), ticket_link, analyst)
+			try:
+				gaps = evidence_gaps(record, traced_calls(trace))
+			except Exception as error:  # noqa: BLE001 - this check never costs a checked answer
+				notes.append(f'evidence refs not checked against the trace: {error}')
+			dm, thread = render(record, notes, links(record, notes), ticket_link, analyst, gaps)
+			if gaps:
+				# the blank line keeps the line out of a quoted reply above it
+				dm += f'\n\n**Evidence to check:** {_gap_count(gaps)}, marked in the thread'
 	except Exception as error:  # noqa: BLE001 - a paid answer is never lost to a bug in this code
 		crash = traceback.format_exc()
 		problems = [f'the answer could not be checked or rendered: {type(error).__name__}: {error}']
@@ -176,6 +194,7 @@ def trial(
 		'notes': notes,
 		'record': record,
 		'problems': problems,
+		'evidence_gaps': gaps,
 		'dm': dm,
 		'thread': thread,
 		**answer,
@@ -439,6 +458,99 @@ def check(record: dict) -> list[str]:
 	return problems
 
 
+def traced_calls(trace: Path) -> list[dict]:
+	"""The calls of a run that got an answer, Claude's and code's (`by: code`), from its *trace*;
+	none when it has none. A call that failed or was held back read nothing, so it is left out."""
+	if not trace.exists():
+		return []
+	calls = []
+	for line in trace.read_text(encoding='utf-8').splitlines():
+		if line.strip():
+			call = json.loads(line)
+			if not call.get('blocked') and 'error' not in call:
+				calls.append(call)
+	return calls
+
+
+def evidence_gaps(record: dict, calls: list[dict]) -> dict[str, str]:
+	"""The evidence refs of *record* that the run's *calls* (:func:`traced_calls`) do not show,
+	each with why. Only what the trace settles is said:
+
+	- a ref that names a tool no call of which got an answer; code's reads count, and so does a
+	  fact code put in the record (RECORD_TOOLS);
+	- a `code_read` or `matlab_read` ref to one file and line (or line range) that no read of the
+	  run shows: a `code_read` or `matlab_read` of that file over the line, or a grep hit on it
+	  (Claude names the reading tool loosely); a ref that lists several is not taken apart;
+	- a `terminal_log` ref when the record has no terminal log and Claude read none.
+
+	`computed` and every other ref are left alone.
+	"""
+	ticket = record['dss_ticket']
+	ran = set()
+	log = ticket.get('terminal_log')
+	log_read = isinstance(log, dict) and bool(log.get('found'))
+	lines_read: dict[str, list[tuple[str, int, int]]] = {}  # file name: (path, first, last)
+	for call in calls:
+		tool = call['tool']
+		ran.add(tool)
+		if tool == 'cerb_read_text' or (tool == 'cerb_last_session' and call.get('by') != 'code'):
+			log_read = True
+		if tool in LINE_TOOLS:
+			arguments = call.get('arguments') or {}
+			path = _path_key(arguments.get('path'))
+			first = max(int(arguments.get('start') or 1), 1)
+			last = first + code.MAX_LINES - 1
+			if arguments.get('end'):
+				last = min(last, int(arguments['end']))
+			lines_read.setdefault(ntpath.basename(path), []).append((path, first, last))
+		if tool in GREP_TOOLS:
+			for hit in GREP_HIT.finditer(call.get('result') or ''):
+				found = _path_key(hit[1])
+				line = int(hit[2])
+				lines_read.setdefault(ntpath.basename(found), []).append((found, line, line))
+	for tool, fact in RECORD_TOOLS.items():
+		if ticket.get(fact):
+			ran.add(tool)
+	gaps = {}
+	for item in record['triage'].get('evidence') or []:
+		ref = item['ref']
+		if ref.startswith('terminal_log'):
+			if not log_read:
+				gaps[ref] = 'the record has no terminal log and this run read none'
+			continue
+		named = TOOL_REF.fullmatch(ref)
+		if not named:
+			continue
+		tool = named[1]
+		if tool not in ran and not (tool in LINE_TOOLS and ran & LINE_TOOLS):
+			gaps[ref] = f'no `{tool}` call of this run got an answer'
+			continue
+		cited = LINE_REF.fullmatch(named[2] or '')
+		if tool not in LINE_TOOLS or not cited:
+			continue
+		path = _path_key(cited[1])
+		ends = [int(cited[2])]
+		if cited[3]:
+			ends.append(int(cited[3]))
+		same_file = False
+		unread = set(ends)
+		for read_path, first, last in lines_read.get(ntpath.basename(path), []):
+			if not _same_file(path, read_path):
+				continue
+			same_file = True
+			for line in ends:
+				if first <= line <= last:
+					unread.discard(line)
+		if not same_file:
+			gaps[ref] = 'no read or search of this run shows that file'
+		elif len(unread) == 1:
+			gaps[ref] = f'no read or search of this run shows line {min(unread)} of that file'
+		elif unread:
+			lines = f'lines {min(unread)} and {max(unread)}'
+			gaps[ref] = f'no read or search of this run shows {lines} of that file'
+	return gaps
+
+
 def traced_leaks(trace: Path) -> list[str]:
 	"""What code found in a replay's tool answers that may come from after the ticket (the
 	`leaks` of its *trace*, :func:`dss.cutoff.leaks`), one line per tool call."""
@@ -505,16 +617,18 @@ def render(
 	links: dict[str, str] | None = None,
 	ticket_link: str = '',
 	analyst: str = '',
+	gaps: dict[str, str] | None = None,
 ) -> tuple[str, str]:
 	"""The DM (the decision) and its thread reply (the proof) of a checked *record*, in Markdown.
 
-	Each field is shown once, and empty fields are left out. *notes* are what code could not read.
+	Each field is shown once, and empty fields are left out. *notes* are what code could not read,
+	and *gaps* (:func:`evidence_gaps`) mark the evidence the run's trace does not show.
 	Claude's text is escaped (:func:`_text`), so paths and names show as written. Each name in
 	*links* (:func:`links`) is linked below the headline, whose key links to *ticket_link*. The
 	reply to the analyst links only Jira tickets: analysts cannot open Cerberus on GitHub.
 	*analyst* (a Slack name) heads the analyst's todos.
 	"""
-	decision, proof = _decision(record, ticket_link, analyst), _proof(record, notes)
+	decision, proof = _decision(record, ticket_link, analyst), _proof(record, notes, gaps)
 	if not links:
 		return decision, proof
 	tickets = {}
@@ -626,9 +740,10 @@ def _todos(lines: list[str], title: str, items: list[str]) -> None:
 		lines.append(f'{number}. {_text(item)}')
 
 
-def _proof(record: dict, notes: list[str]) -> str:
+def _proof(record: dict, notes: list[str], gaps: dict[str, str] | None = None) -> str:
 	"""The thread: why, past issues, evidence, what the questions settle, details, also found and
-	confidence. The class, labels, escalate and the facts code read stay in the saved record."""
+	confidence. The class, labels, escalate and the facts code read stay in the saved record. An
+	evidence item whose ref is in *gaps* (:func:`evidence_gaps`) says what the trace lacks."""
 	answer = record['triage']
 	lines = []
 	if answer.get('cause'):
@@ -649,7 +764,10 @@ def _proof(record: dict, notes: list[str]) -> str:
 	if evidence:
 		lines.append('**Evidence**')
 		for number, item in enumerate(evidence, 1):
-			lines.append(f'{number}. {_text(item["fact"])} (`{item["ref"]}`)')
+			line = f'{number}. {_text(item["fact"])} (`{item["ref"]}`)'
+			if gaps and item['ref'] in gaps:
+				line += f' · **not shown by the trace:** {gaps[item["ref"]]}'
+			lines.append(line)
 	settles = []
 	for question in answer.get('questions') or []:
 		settles.append(f'{question["ask"]}: settles {question["settles"]}')
@@ -890,3 +1008,23 @@ def _json_file(path: Path):
 @functools.cache
 def _validator():
 	return jsonschema.Draft202012Validator(_schema())
+
+
+def _path_key(path) -> str:
+	"""A repo *path* as written in a call or an evidence ref, for comparing the two."""
+	return str(path or '').strip().replace('\\', '/').lower().strip('/')
+
+
+def _same_file(cited: str, read: str) -> bool:
+	"""Whether the *cited* path (:func:`_path_key`) is the file a call *read*: the same path, or
+	one given from a folder further down, such as modules/plots.py for cerberus/modules/plots.py."""
+	if cited == read:
+		return True
+	return read.endswith('/' + cited) or cited.endswith('/' + read)
+
+
+def _gap_count(gaps: dict[str, str]) -> str:
+	"""How many evidence refs the trace does not show, in words for the DM."""
+	if len(gaps) == 1:
+		return '1 evidence ref cites a read the trace does not show'
+	return f'{len(gaps)} evidence refs cite a read the trace does not show'

@@ -548,3 +548,112 @@ def test_cli_prints_the_dm_and_thread_of_a_trial(sources, monkeypatch, capsys, t
 	with pytest.raises(SystemExit) as stopped:
 		cli.main()
 	assert stopped.value.code == 2
+
+
+def evidence(*refs) -> list[dict]:
+	"""Evidence items citing *refs*, one fact each."""
+	items = []
+	for number, ref in enumerate(refs, 1):
+		items.append({'fact': f'Fact {number}', 'ref': ref})
+	return items
+
+
+def test_evidence_is_checked_against_the_calls_that_got_an_answer(tmp_path):
+	trace = tmp_path / 'DSS-1234.jsonl'
+	plots = {'path': 'cerberus/modules/plots.py', 'start': 100, 'end': 150}
+	lines = [
+		{'tool': 'jira_get_issue', 'arguments': {'key': 'DSS-1234'}, 'by': 'code'},
+		{'tool': 'code_read', 'arguments': {}, 'blocked': True, 'error': 'Not yet'},
+		{'tool': 'code_read', 'arguments': plots},
+		{'tool': 'code_read', 'arguments': {'path': 'cerberus\\tally.py'}},  # lines 1 to 200
+		{'tool': 'matlab_read', 'arguments': {'path': 'CAT/gone.m'}, 'error': 'GitError: no file'},
+		{'tool': 'cerb_client_info', 'arguments': {'path': PROJECT + r'\DVT1234_client_info.xlsm'}},
+		{
+			'tool': 'code_grep',
+			'arguments': {'pattern': 'grid'},
+			'result': 'Cerberus at abc1234, matches:\ncerberus/modules/grid.py:42:\tx = 1\n',
+		},
+	]
+	trace.write_text(''.join(json.dumps(line) + '\n' for line in lines), encoding='utf-8')
+	calls = record.traced_calls(trace)
+	assert [call['tool'] for call in calls] == [
+		'jira_get_issue',
+		'code_read',
+		'code_read',
+		'cerb_client_info',
+		'code_grep',
+	]
+	shown = evidence(
+		'computed',
+		'ticket record',
+		'jira_get_issue:DSS-1234',  # code's read counts
+		'cerb_prod_version',  # the record holds its answer
+		'cerb_find_project:1234',
+		'cerb_client_info:1234',
+		'code_read:cerberus/modules/plots.py:120',
+		'code_read:modules/plots.py:100-150',  # the path from a folder further down
+		'code_read:cerberus/tally.py:200',
+		'code_read:cerberus/modules/plots.py:120; cerberus/tally.py:999',  # not taken apart
+		'matlab_read:cerberus/modules/plots.py:120',  # read with the other reading tool
+		'code_read:cerberus/modules/grid.py:42',  # a line a grep hit showed
+	)
+	not_shown = {
+		'cerb_read_sheet:Casing Record': 'no `cerb_read_sheet` call of this run got an answer',
+		'matlab_read:CAT/gone.m:5': 'no read or search of this run shows that file',
+		'code_read:cerberus/modules/plots.py:151': (
+			'no read or search of this run shows line 151 of that file'
+		),
+		'code_read:cerberus/modules/plots.py:90-160': (
+			'no read or search of this run shows lines 90 and 160 of that file'
+		),
+		'code_read:cerberus/tally.py:201': (
+			'no read or search of this run shows line 201 of that file'
+		),
+		'code_read:cerberus/modules/grid.py:43': (
+			'no read or search of this run shows line 43 of that file'
+		),
+		'code_read:cerberus/other/plots.py:120': 'no read or search of this run shows that file',
+		'terminal_log:line 17': 'the record has no terminal log and this run read none',
+	}
+	ticket = {'project': PROJECT, 'prod_version': '1.0.4', 'terminal_log': NO_TERMINAL_LOG}
+	full = {'dss_ticket': ticket, 'triage': {'evidence': shown + evidence(*not_shown)}}
+	assert record.evidence_gaps(full, calls) == not_shown
+	# a terminal log in the record, or one Claude read, bears out a terminal_log ref
+	logged = {'dss_ticket': {'terminal_log': {'found': True}}, 'triage': full['triage']}
+	assert 'terminal_log:line 17' not in record.evidence_gaps(logged, calls)
+	read = {'tool': 'cerb_read_text', 'arguments': {'path': PROJECT + r'\cerberus\x.log'}}
+	assert 'terminal_log:line 17' not in record.evidence_gaps(full, [*calls, read])
+	assert record.evidence_gaps({'dss_ticket': {}, 'triage': {}}, []) == {}
+	assert record.traced_calls(tmp_path / 'none.jsonl') == []
+
+
+def test_evidence_the_trace_does_not_show_is_marked_and_the_answer_still_goes_out(sources):
+	text = answer_text(evidence=evidence('cerb_client_info:1234', 'cerb_read_sheet:Casing Record'))
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
+	why = 'no `cerb_read_sheet` call of this run got an answer'
+	assert result['problems'] == []  # a mark for the reviewer, never a refusal
+	assert result['evidence_gaps'] == {'cerb_read_sheet:Casing Record': why}
+	assert (
+		'**Evidence**\n1. Fact 1 (`cerb_client_info:1234`)\n'
+		f'2. Fact 2 (`cerb_read_sheet:Casing Record`) · **not shown by the trace:** {why}\n'
+	) in result['thread']
+	answer = EXAMPLE['triage']
+	assert (
+		f'**Draft Reply:**\n> {answer["reply"]}\n\n'
+		'**Evidence to check:** 1 evidence ref cites a read the trace does not show, marked in '
+		'the thread\n\n_Trial'
+	) in result['dm']
+	shown = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), []))
+	assert shown['evidence_gaps'] == {} and 'Evidence to check' not in shown['dm']
+	assert 'not shown by the trace' not in shown['thread']
+
+
+def test_a_bug_in_the_evidence_check_never_costs_the_answer(sources, monkeypatch):
+	def broken(*args):
+		raise KeyError('tool')
+
+	monkeypatch.setattr(record, 'evidence_gaps', broken)
+	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), []))
+	assert result['problems'] == [] and 'crash' not in result
+	assert result['dm'].startswith('**DSS-1234 · Input problem')
+	assert "- evidence refs not checked against the trace: 'tool'" in result['thread']
