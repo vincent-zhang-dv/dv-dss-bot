@@ -1,0 +1,2737 @@
+
+
+<title>DSS Bot Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;1,400&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500;700&display=swap">
+<style>
+/* Layout: every developer reviews each ticket. For a ticket, each row pairs one section of the bot's
+   Slack post (left, drawn as Slack draws it) with its rating (right); the ticket bookmarks and the
+   real DSS thread sit in a sticky panel on the far right. Tool chrome follows the DVD System:
+   Roboto, square corners, flat 1px borders, orange for the selected state and the main action. */
+:root {
+	--bg: #f3f3f5;
+	--surface: #ffffff;
+	--surface-2: #ebeaef;
+	--line: #d6d4dc;
+	--line-strong: #9e9ba8;
+	--fg: #1a171f;
+	--fg-muted: #575463;
+	--accent: #fa6600;
+	--accent-hover: #ff7d24;
+	--accent-ink: #b84a00;
+	--on-accent: #1a171f;
+	--ok: #1ab21a;
+	--on-ok: #0f0d12;
+	--ok-ink: #0d7a0d;
+	--ok-tint: #e3f3e3;
+	--partial: #f9d000;
+	--on-partial: #0f0d12;
+	--partial-ink: #7d6100;
+	--partial-tint: #fbf2cc;
+	--bad: #d21e14;
+	--on-bad: #ffffff;
+	--bad-ink: #b8160d;
+	--bad-tint: #fbe2df;
+	--slack-bg: #ffffff;
+	--slack-hover: #f8f8f8;
+	--slack-fg: #1d1c1d;
+	--slack-muted: #616061;
+	--slack-link: #1264a3;
+	--slack-code-bg: #f6f6f6;
+	--slack-code-fg: #c01343;
+	--slack-code-line: #dddddd;
+	--slack-quote: #dddddd;
+	--slack-avatar: #2b2a33;
+	--av-analyst: #1f6aa5;
+	--av-dev: #7a4bb0;
+	--av-flow: #5c5a66;
+	--av-other: #1f7a6b;
+	--av-fg: #ffffff;
+	--font-ui: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-mono: 'Roboto Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+	--font-slack: 'Lato', 'Helvetica Neue', Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #0f0d12;
+		--surface: #1a171f;
+		--surface-2: #26232c;
+		--line: #3d3b4a;
+		--line-strong: #66666e;
+		--fg: #f2f2f2;
+		--fg-muted: #a6a6ad;
+		--accent-ink: #ff8f45;
+		--on-accent: #0f0d12;
+		--ok-ink: #5fd65f;
+		--ok-tint: #13291a;
+		--partial-ink: #f9d000;
+		--partial-tint: #332b0c;
+		--bad-ink: #ff6b62;
+		--bad-tint: #3a1614;
+		--slack-bg: #1a1d21;
+		--slack-hover: #222529;
+		--slack-fg: #d1d2d3;
+		--slack-muted: #ababad;
+		--slack-link: #1d9bd1;
+		--slack-code-bg: #222529;
+		--slack-code-fg: #e8912d;
+		--slack-code-line: #3a3b3e;
+		--slack-quote: #545454;
+		--slack-avatar: #3d3b4a;
+		color-scheme: dark;
+	}
+}
+:root[data-theme="dark"] {
+	--bg: #0f0d12;
+	--surface: #1a171f;
+	--surface-2: #26232c;
+	--line: #3d3b4a;
+	--line-strong: #66666e;
+	--fg: #f2f2f2;
+	--fg-muted: #a6a6ad;
+	--accent-ink: #ff8f45;
+	--on-accent: #0f0d12;
+	--ok-ink: #5fd65f;
+	--ok-tint: #13291a;
+	--partial-ink: #f9d000;
+	--partial-tint: #332b0c;
+	--bad-ink: #ff6b62;
+	--bad-tint: #3a1614;
+	--slack-bg: #1a1d21;
+	--slack-hover: #222529;
+	--slack-fg: #d1d2d3;
+	--slack-muted: #ababad;
+	--slack-link: #1d9bd1;
+	--slack-code-bg: #222529;
+	--slack-code-fg: #e8912d;
+	--slack-code-line: #3a3b3e;
+	--slack-quote: #545454;
+	--slack-avatar: #3d3b4a;
+	color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 400 14px/1.5 var(--font-ui); }
+body.sheet-open { overflow: hidden; }
+button, input, textarea { font: inherit; color: inherit; }
+h1, h2, h3 { text-wrap: balance; }
+code, .mono { font-family: var(--font-mono); }
+.wrap {
+	max-width: 1380px;
+	margin: 0 auto;
+	padding-left: max(16px, env(safe-area-inset-left, 0px));
+	padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); }
+.ic { width: 14px; height: 14px; flex: none; }
+.f-ok { fill: var(--ok); }
+.s-on-ok { stroke: var(--on-ok); }
+.f-accent { fill: var(--accent); }
+.s-accent { stroke: var(--accent); }
+.s-muted { stroke: var(--line-strong); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* header */
+.top { background: var(--surface); border-bottom: 1px solid var(--line); }
+.top-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; padding-block: 14px 6px; }
+.brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+.brand h1 { margin: 0; font-size: 20px; font-weight: 700; }
+.tag-draft { font: 500 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: .08em; padding: 4px 6px; border: 1px solid var(--accent); color: var(--accent-ink); }
+.who { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+.who img, .avatar-fallback { width: 24px; height: 24px; border-radius: 50%; flex: none; }
+.avatar-fallback { display: inline-grid; place-items: center; background: var(--surface-2); color: var(--fg-muted); font-size: 12px; font-weight: 500; }
+.save { color: var(--fg-muted); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.save.err { color: var(--bad-ink); }
+.nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 16px; }
+.sess-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.sess-tabs .lbl { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--fg-muted); margin-right: 6px; }
+.tab { display: inline-flex; align-items: center; gap: 6px; padding: 10px 12px; font-weight: 500; color: var(--fg-muted); text-decoration: none; }
+.tab:hover { color: var(--fg); }
+.tab[aria-current="page"] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.tab .cnt { font: 500 11px/1.4 var(--font-mono); padding: 0 5px; border: 1px solid var(--line-strong); color: var(--fg-muted); }
+.tab .cnt.all { border-color: var(--ok); color: var(--ok-ink); }
+.tab .you { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-ink); }
+.notice { padding-block: 10px; color: var(--fg-muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.notice b { color: var(--fg); font-weight: 500; }
+.notice .warn { color: var(--bad-ink); }
+
+main { padding-block: 4px 48px; }
+.card { background: var(--surface); border: 1px solid var(--line); }
+.eyebrow { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--fg-muted); margin: 0 0 4px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; padding: 9px 16px; font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: none; color: inherit; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-ghost { background: transparent; border-color: var(--line-strong); }
+.btn-ghost:hover { background: var(--surface-2); }
+
+/* no session in the link and none known for this viewer */
+.pick { margin-top: 12px; }
+
+/* a session's progress: one segment per ticket */
+.pbar { display: flex; gap: 2px; height: 8px; }
+.pbar span { flex: 1; background: var(--surface-2); border: 1px solid var(--line); }
+.pbar .s-done { background: var(--ok); border-color: var(--ok); }
+.pbar .s-progress { background: var(--accent); border-color: var(--accent); }
+
+/* session layout: the ticket on the left, bookmarks and the real thread on the right */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+.content { display: grid; gap: 16px; min-width: 0; }
+.side { position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); max-height: calc(100vh - 24px); overflow: auto; min-width: 0; background: var(--surface); border: 1px solid var(--line); }
+.side-tabs { display: flex; position: sticky; top: 0; z-index: 1; background: var(--surface); border-bottom: 1px solid var(--line); }
+.side-tabs button[role="tab"] { flex: 1; display: inline-flex; justify-content: center; align-items: center; gap: 6px; background: none; border: 0; padding: 11px 8px; font-weight: 500; color: var(--fg-muted); cursor: pointer; }
+.side-tabs button[aria-selected="true"] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.side-close { display: none; background: none; border: 0; padding: 0 14px; cursor: pointer; color: var(--fg-muted); }
+.side-close .ic { width: 18px; height: 18px; }
+.rail-head { padding: 12px 14px 10px; display: grid; gap: 8px; }
+.rail-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.rail-title .eyebrow { margin: 0; }
+.rail-count { font-size: 12px; color: var(--fg-muted); }
+.rail-list { list-style: none; margin: 0; padding: 0 0 8px; }
+.rail-list button { width: 100%; text-align: left; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 1px 10px; padding: 10px 14px 10px 11px; background: none; border: 0; border-left: 3px solid transparent; cursor: pointer; }
+.rail-list button:hover { background: var(--surface-2); }
+.rail-list button[aria-current="true"] { border-left-color: var(--accent); background: var(--surface-2); }
+.rail-list .si { grid-row: span 3; padding-top: 1px; }
+.rail-list .si .ic { width: 18px; height: 18px; }
+.rk { font: 500 12px var(--font-mono); color: var(--fg-muted); }
+.rs { font-weight: 500; font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.rp { font-size: 12px; color: var(--fg-muted); }
+.rp.done { color: var(--ok-ink); font-weight: 500; }
+.rp.progress { color: var(--accent-ink); }
+.pane-thread { background: var(--slack-bg); padding: 12px 14px 16px; }
+.pane-note { margin: 0 0 8px; font-size: 12px; color: var(--fg-muted); }
+.pane-note b { color: var(--fg); font-weight: 500; }
+
+/* how to rate */
+.howto summary { cursor: pointer; padding: 12px 16px; font-weight: 500; font-size: 15px; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; list-style: none; }
+.howto summary::-webkit-details-marker { display: none; }
+.howto summary::before { content: '+'; font-family: var(--font-mono); color: var(--fg-muted); width: 10px; }
+.howto[open] summary::before { content: '\2212'; }
+.howto summary span { color: var(--fg-muted); font-weight: 400; font-size: 13px; }
+.howto-body { padding: 0 16px 16px; display: grid; gap: 16px; }
+.defs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.defs div { display: grid; gap: 6px; align-content: start; font-size: 13px; }
+.howto h3 { font-size: 13px; margin: 0 0 6px; font-weight: 500; }
+.steps { margin: 0; padding-left: 20px; font-size: 13px; display: grid; gap: 2px; max-width: 80ch; }
+.reasons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 16px; margin: 0; font-size: 13px; }
+.reasons div { min-width: 0; }
+.reasons dt { font-weight: 500; }
+.reasons dd { margin: 0; color: var(--fg-muted); }
+
+/* identity banner */
+.banner { padding: 12px 16px; background: var(--surface); border: 1px solid var(--accent); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.banner p { margin: 0; max-width: 80ch; }
+.banner b { font-weight: 500; }
+.banner.soft { border-color: var(--line); color: var(--fg-muted); font-size: 13px; padding-block: 8px; }
+.banner-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ticket */
+.ticket { display: grid; gap: 16px; }
+.t-head { padding: 16px 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px 16px; }
+.t-main { min-width: 0; flex: 1 1 320px; }
+.t-head h2 { font-size: 19px; font-weight: 500; margin: 0 0 4px; }
+.t-head h2 .mono { font-size: 15px; color: var(--fg-muted); margin-right: 8px; }
+.meta { font-size: 13px; color: var(--fg-muted); margin: 0; }
+.st-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 4px 8px; border: 1px solid var(--line-strong); color: var(--fg-muted); white-space: nowrap; }
+.st-pill .ic { width: 16px; height: 16px; }
+.st-pill.st-done { border-color: var(--ok); color: var(--ok-ink); }
+.st-pill.st-progress { border-color: var(--accent); color: var(--accent-ink); }
+.group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 4px 0 -8px; }
+.group h3 { margin: 0; font-size: 15px; font-weight: 500; }
+.group span { color: var(--fg-muted); font-size: 13px; }
+
+/* the real DSS thread, drawn as Slack draws a thread */
+.rt { list-style: none; margin: 0; padding: 0; font: 400 15px/1.46667 var(--font-slack); color: var(--slack-fg); }
+.rt-msg { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 8px 0; overflow-wrap: anywhere; }
+.rt-av { width: 36px; height: 36px; border-radius: 6px; display: grid; place-items: center; font: 700 13px var(--font-slack); color: var(--av-fg); background: var(--av-flow); }
+.rt-av.rt-analyst { background: var(--av-analyst); }
+.rt-av.rt-developer { background: var(--av-dev); }
+.rt-av.rt-other { background: var(--av-other); }
+.rt-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.rt-head b { font-weight: 700; }
+.rt-role { font: 500 10px/1.5 var(--font-ui); text-transform: uppercase; letter-spacing: .06em; padding: 0 4px; border: 1px solid var(--slack-code-line); color: var(--slack-muted); }
+.rt-time { font-size: 12px; color: var(--slack-muted); }
+.rt-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.rt-file { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 10px; border: 1px solid var(--slack-code-line); border-radius: 6px; color: var(--slack-muted); }
+.rt-marker { display: flex; align-items: center; gap: 10px; padding: 8px 0; font: 500 12px/1.4 var(--font-ui); color: var(--accent-ink); }
+.rt-marker::before, .rt-marker::after { content: ''; flex: 1 1 16px; border-top: 1px dashed var(--accent); }
+.rt-marker span { flex: 0 1 auto; text-align: center; }
+.rt-out { margin-top: 6px; padding: 10px 12px; border: 1px solid var(--line); background: var(--surface); display: grid; gap: 2px; font-size: 13px; color: var(--fg); }
+.rt-out p { margin: 0; }
+.rt-out b { font-weight: 500; }
+.rt-caveat { display: flex; gap: 6px; align-items: flex-start; color: var(--bad-ink); }
+.rt-caveat .ic { flex: none; margin-top: 2px; }
+
+/* how long the bot and the developers took */
+.times { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 8px 0 0; font-size: 12px; color: var(--fg-muted); }
+.tm { padding: 3px 8px; border: 1px solid var(--line); background: var(--surface-2); }
+.tm b { color: var(--fg); font-weight: 500; }
+td.dur, th.dur { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+th.dur { white-space: normal; max-width: 140px; }
+
+/* the bot's post */
+.msg { border: 1px solid var(--line); background: var(--surface); }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
+.row + .row { border-top: 1px solid var(--line); }
+.cs { background: var(--slack-bg); color: var(--slack-fg); font: 400 15px/1.46667 var(--font-slack); padding: 12px 20px 12px 72px; min-width: 0; overflow-wrap: anywhere; transition: background-color .12s; }
+.cr { border-left: 1px solid var(--line); padding: 12px 16px 14px; min-width: 0; }
+.row:hover .cs, .row:focus-within .cs { background: var(--slack-hover); }
+.row-head .cs { padding: 14px 20px 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.row-head .cr { display: flex; align-items: end; font-size: 12px; font-weight: 500; color: var(--fg-muted); text-transform: uppercase; letter-spacing: .08em; padding-bottom: 6px; }
+.bot-av { width: 36px; height: 36px; border-radius: 6px; background: var(--slack-avatar); color: var(--accent); display: grid; place-items: center; font: 700 12px var(--font-slack); flex: none; }
+.bot-name { font-weight: 700; }
+.app { font-size: 10px; font-weight: 700; padding: 1px 3px; border-radius: 3px; background: var(--slack-code-bg); color: var(--slack-muted); border: 1px solid var(--slack-code-line); }
+.bot-time { font-size: 12px; color: var(--slack-muted); }
+.thread-tag { font-size: 13px; color: var(--slack-muted); }
+.row-ctx .cr { font-size: 12px; color: var(--fg-muted); }
+
+/* Slack text, as dss.record writes it */
+.sl p { margin: 0 0 4px; }
+.sl p:last-child { margin-bottom: 0; }
+.sl ol, .sl ul { margin: 2px 0 6px; padding-left: 26px; }
+.sl ol:last-child, .sl ul:last-child { margin-bottom: 0; }
+.sl li { margin: 2px 0; }
+.sl blockquote { margin: 4px 0; padding-left: 12px; border-left: 4px solid var(--slack-quote); }
+.sl code { font-size: 12px; background: var(--slack-code-bg); border: 1px solid var(--slack-code-line); color: var(--slack-code-fg); padding: 1px 3px; border-radius: 3px; }
+.sl strong { font-weight: 700; }
+.sl em { color: var(--slack-muted); }
+.sl-link { color: var(--slack-link); }
+a.sl-link { text-decoration: none; overflow-wrap: anywhere; }
+a.sl-link:hover { text-decoration: underline; }
+.pane-note a { color: var(--accent-ink); }
+.absent { color: var(--slack-muted); font-style: italic; border: 1px dashed var(--slack-code-line); padding: 6px 10px; display: grid; gap: 2px; }
+.absent span { font-style: normal; font-family: var(--font-ui); font-size: 12px; }
+
+/* rating form */
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.rate legend, .ov legend { padding: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin-bottom: 2px; }
+.sec-title { font-weight: 500; font-size: 14px; }
+.field { font-size: 11px; color: var(--fg-muted); }
+.means { font-size: 12px; color: var(--fg-muted); margin: 0 0 8px; }
+.means b { color: var(--fg); font-weight: 500; }
+.seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line-strong); }
+.seg label { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px; font-size: 13px; font-weight: 500; cursor: pointer; background: var(--surface); text-align: center; }
+.seg label + input + label { border-left: 1px solid var(--line-strong); }
+.seg label:hover { background: var(--surface-2); }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -3px; }
+.seg input:checked + .l-correct { background: var(--ok); color: var(--on-ok); }
+.seg input:checked + .l-partial { background: var(--partial); color: var(--on-partial); }
+.seg input:checked + .l-incorrect { background: var(--bad); color: var(--on-bad); }
+.reason { margin-top: 8px; padding: 10px; display: grid; gap: 6px; border: 1px solid var(--line); }
+.reason.tone-partial { background: var(--partial-tint); }
+.reason.tone-incorrect { background: var(--bad-tint); }
+.reason-h { font-size: 12px; font-weight: 500; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 4px 8px; border: 1px solid var(--line-strong); background: var(--surface); cursor: pointer; line-height: 1.3; }
+.chip:hover { border-color: var(--fg-muted); }
+.chip-own { border-style: dashed; }
+input:checked + .chip { background: var(--accent); border-color: var(--accent); border-style: solid; color: var(--on-accent); }
+input:focus-visible + .chip { outline: 2px solid var(--accent); outline-offset: 1px; }
+input.own { width: 100%; padding: 6px 8px; border: 1px solid var(--line-strong); background: var(--surface); font-size: 13px; border-radius: 0; }
+input.own:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.should-l { font-size: 12px; font-weight: 500; margin-top: 2px; }
+.should-l .opt { font-weight: 400; color: var(--fg-muted); }
+textarea { width: 100%; min-height: 54px; resize: vertical; padding: 6px 8px; border: 1px solid var(--line-strong); background: var(--surface); font-size: 13px; line-height: 1.45; border-radius: 0; }
+textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.need { display: none; margin: 6px 0 0; font-size: 12px; color: var(--partial-ink); align-items: center; gap: 4px; }
+.rate.incomplete .need, .ov.incomplete .need { display: flex; }
+.show-missing .rate.unrated .need, .show-missing .ov.unrated .need { display: flex; }
+.show-missing .need { color: var(--bad-ink); font-weight: 500; }
+.show-missing .rate.unrated .seg, .show-missing .ov.unrated .seg { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.show-missing .rate.incomplete .reason, .show-missing .ov.incomplete textarea { border-color: var(--bad); }
+.c-why { color: var(--fg-muted); }
+
+/* ratings after submit */
+.sec-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; margin-bottom: 8px; }
+.agree { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; padding: 2px 6px; border: 1px solid var(--line-strong); color: var(--fg-muted); }
+.agree.no { border-color: var(--accent); color: var(--accent-ink); }
+.votes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.vote { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 2px 8px; align-items: start; font-size: 13px; }
+.vote .who-n { color: var(--fg-muted); font-size: 12px; padding-top: 2px; overflow-wrap: anywhere; display: flex; gap: 6px; align-items: flex-start; min-width: 0; }
+.vote .who-n em { display: block; font-style: normal; font-size: 11px; color: var(--accent-ink); }
+.vote-more { grid-column: 2; font-size: 12px; color: var(--fg-muted); }
+.vote-should { margin: 2px 0 0; color: var(--fg); font-size: 13px; }
+.vote-should span { color: var(--fg-muted); font-size: 12px; }
+.others { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.others .eyebrow { margin-bottom: 6px; }
+.others:empty { display: none; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; padding: 2px 8px; justify-self: start; white-space: nowrap; }
+.pill-correct { background: var(--ok); color: var(--on-ok); }
+.pill-partial { background: var(--partial); color: var(--on-partial); }
+.pill-incorrect { background: var(--bad); color: var(--on-bad); }
+.pill-none { border: 1px dashed var(--line-strong); color: var(--fg-muted); }
+
+/* overall */
+.overall { padding: 16px 20px; display: grid; gap: 12px; }
+.ov { display: grid; gap: 8px; max-width: 640px; }
+.ov legend .sec-title { font-size: 15px; }
+.ov .seg { max-width: 480px; }
+.harm { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.harm input { margin: 3px 0 0; accent-color: var(--bad); width: 16px; height: 16px; flex: none; }
+.harm span { color: var(--fg-muted); }
+.harm b { color: var(--fg); font-weight: 500; display: block; }
+
+/* submit bar */
+.bar { position: sticky; bottom: 0; z-index: 5; background: var(--surface); border: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.bar-left { flex: 1 1 280px; display: grid; gap: 6px; min-width: 0; }
+.progress { margin: 0; font-size: 13px; color: var(--fg-muted); }
+.progress b { color: var(--fg); font-weight: 500; }
+.progress.err { color: var(--bad-ink); }
+.progress.done { color: var(--ok-ink); display: flex; gap: 6px; align-items: center; font-weight: 500; }
+.progress.done .ic { width: 18px; height: 18px; }
+.meter { display: flex; flex-wrap: wrap; gap: 3px; }
+.meter button { width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-strong); background: var(--surface); cursor: pointer; display: grid; place-items: center; }
+.meter button .ic { width: 12px; height: 12px; }
+.meter .m-correct { background: var(--ok); border-color: var(--ok); color: var(--on-ok); }
+.meter .m-partial { background: var(--partial); border-color: var(--partial); color: var(--on-partial); }
+.meter .m-incorrect { background: var(--bad); border-color: var(--bad); color: var(--on-bad); }
+.meter .m-need { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--accent); }
+.meter .m-gap { width: 8px; border: 0; background: none; cursor: default; }
+.bar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* comparing with the previous run: a word diff under each section, the old ratings beside */
+.cmp-bar { padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; border-left: 3px solid var(--accent); }
+.cmp-text { margin: 0; font-size: 13px; color: var(--fg-muted); max-width: 80ch; }
+.cmp-text b { color: var(--fg); font-weight: 500; }
+.prev { margin-top: 10px; font: 400 13px/1.5 var(--font-ui); color: var(--fg-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+details.prev { display: block; border: 1px solid var(--line); background: var(--surface); }
+details.prev summary { cursor: pointer; padding: 6px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; list-style: none; }
+details.prev summary::-webkit-details-marker { display: none; }
+details.prev summary::before { content: '+'; font-family: var(--font-mono); width: 10px; }
+details.prev[open] summary::before { content: '\2212'; }
+.chg { font: 500 11px/1.4 var(--font-ui); text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border: 1px solid var(--line-strong); }
+.chg-diff { border-color: var(--accent); color: var(--accent-ink); }
+.chg-same { color: var(--fg-muted); }
+.diff { padding: 8px 10px 10px; border-top: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font: 400 13px/1.55 var(--font-mono); color: var(--fg); }
+.diff del { background: var(--bad-tint); color: var(--bad-ink); text-decoration: line-through; }
+.diff ins { background: var(--ok-tint); color: var(--ok-ink); text-decoration: none; }
+.was { margin-top: 6px; opacity: .75; }
+.prev-votes { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.prev-votes .eyebrow { margin-bottom: 6px; }
+.run-seg { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 220px; }
+.run-seg input:checked + label { background: var(--accent); color: var(--on-accent); }
+.runs-tbl td { min-width: 160px; }
+.runs-tbl .na { display: block; margin-top: 2px; }
+
+/* results */
+.results { display: grid; gap: 16px; padding-top: 8px; }
+.res-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
+.res-head h2 { margin: 0; font-size: 18px; font-weight: 500; }
+.inc { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--fg-muted); cursor: pointer; }
+.inc input { accent-color: var(--accent); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat { background: var(--surface); border: 1px solid var(--line); padding: 10px 14px; min-width: 140px; }
+.stat .n { font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.stat .l { font-size: 12px; color: var(--fg-muted); }
+.panel { padding: 16px 20px; display: grid; gap: 12px; min-width: 0; }
+.panel h3 { margin: 0; font-size: 15px; font-weight: 500; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 620px; }
+th, td { text-align: left; padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
+th { font-size: 12px; font-weight: 500; color: var(--fg-muted); border-top: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; width: 64px; }
+.mx { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
+.mx .ic { width: 16px; height: 16px; }
+.mx-done { color: var(--ok-ink); font-weight: 500; }
+.mx-progress { color: var(--accent-ink); }
+.na { font-size: 12px; color: var(--fg-muted); }
+.sbar { display: flex; gap: 2px; height: 14px; width: 100%; min-width: 160px; }
+.sbar span { min-width: 4px; }
+.sbar span:first-child { border-radius: 4px 0 0 4px; }
+.sbar span:last-child { border-radius: 0 4px 4px 0; }
+.sbar span:only-child { border-radius: 4px; }
+.sb-correct { background: var(--ok); }
+.sb-partial { background: var(--partial); }
+.sb-incorrect { background: var(--bad); }
+.tags-list { display: grid; gap: 6px; }
+.tag-row { display: grid; grid-template-columns: 200px minmax(0, 1fr) 32px; gap: 10px; align-items: center; font-size: 13px; }
+.tag-bar { height: 10px; background: var(--fg-muted); border-radius: 0 4px 4px 0; }
+.tag-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+.corr-t { margin: 8px 0 4px; font-size: 14px; font-weight: 500; }
+.corr-t .mono { color: var(--fg-muted); font-size: 12px; margin-right: 6px; }
+.corr { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.corr li { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); }
+.corr .c-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 12px; color: var(--fg-muted); }
+.corr .c-head b { color: var(--fg); font-weight: 500; font-size: 13px; }
+.corr p { margin: 0; }
+.empty { padding: 24px 20px; color: var(--fg-muted); }
+.empty b { color: var(--fg); font-weight: 500; display: block; margin-bottom: 4px; }
+.empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; color: var(--fg); }
+
+@media (max-width: 1179px) {
+	.layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+	.side { order: -1; position: static; max-height: none; overflow: visible; background: none; border: 0; }
+	.side-tabs { display: none; }
+	.rail-head { padding: 0 0 8px; }
+	.rail-list { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+	.rail-list li { flex: 0 0 250px; }
+	.rail-list button { height: 100%; background: var(--surface); border: 1px solid var(--line); border-left-width: 3px; }
+	.rail-list button[aria-current="true"] { border-color: var(--accent); }
+	.side.sheet { position: fixed; inset: 0; z-index: 30; overflow: auto; background: var(--surface); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+	.side.sheet .side-tabs { display: flex; }
+	.side.sheet .side-close { display: block; }
+	.side.sheet .rail-head { padding: 12px 16px 8px; }
+	.side.sheet .rail-list { display: block; }
+	.side.sheet .rail-list button { border-width: 0 0 0 3px; background: none; }
+	.side.sheet .rail-list button[aria-current="true"] { background: var(--surface-2); }
+	.side.sheet .pane-thread { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+@media (max-width: 900px) {
+	.row { grid-template-columns: minmax(0, 1fr); }
+	.cr { border-left: 0; border-top: 1px dashed var(--line); }
+	.row-ctx .cr, .row-head .cr { display: none; }
+	.cs { padding-left: 16px; padding-right: 16px; }
+	.row-head .cs { padding-left: 16px; }
+	.defs, .reasons { grid-template-columns: minmax(0, 1fr); }
+	.tag-row { grid-template-columns: 140px minmax(0, 1fr) 28px; }
+}
+/* reviewers: their avatar from their claude.ai account, and who has rated a ticket */
+.av { width: 20px; height: 20px; border-radius: 50%; flex: none; display: inline-grid; place-items: center; overflow: hidden; background: var(--surface-2); color: var(--fg); font: 500 9px/1 var(--font-ui); box-shadow: 0 0 0 1.5px var(--surface); }
+.av img { width: 100%; height: 100%; object-fit: cover; }
+.revs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 12px; color: var(--fg-muted); }
+.rev { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--fg); }
+.rev.done { border-color: var(--ok); }
+.rev .ic { width: 12px; height: 12px; }
+.rav { display: flex; padding-left: 4px; margin-top: 3px; }
+.rav .av { width: 16px; height: 16px; font-size: 8px; margin-left: -4px; }
+.rav .av.done { box-shadow: 0 0 0 1.5px var(--ok); }
+/* the Slack refresh: an orange icon button in the side panel's tab bar, spinning while it reads */
+.side-tabs .refresh { flex: none; align-self: center; display: inline-grid; place-items: center; width: 30px; height: 30px; margin: 0 8px; padding: 0; border: 0; background: var(--accent); color: var(--on-accent); cursor: pointer; transition: background .15s, box-shadow .2s; }
+.side-tabs .refresh:hover { background: var(--accent-hover); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent); }
+.side-tabs .refresh:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.side-tabs .refresh[disabled] { background: var(--surface-2); color: var(--fg-muted); cursor: default; box-shadow: none; }
+.side-tabs .refresh.busy { background: var(--accent); color: var(--on-accent); }
+.side-tabs .refresh .ic { width: 16px; height: 16px; }
+.side-tabs .refresh.busy .ic { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.sync-line { margin: 0; padding: 6px 14px; font-size: 11px; color: var(--fg-muted); border-bottom: 1px solid var(--line); }
+.sync-line.err { color: var(--bad-ink); }
+/* who rated a section, beside its title: small faces ringed in their rating's colour */
+.rate legend { width: 100%; }
+.sec-rav { display: inline-flex; margin-left: auto; padding-left: 6px; align-self: center; }
+.sec-rav .av { width: 15px; height: 15px; font-size: 7px; margin-left: -3px; }
+.sec-rav .av.r-correct { box-shadow: 0 0 0 1.5px var(--ok); }
+.sec-rav .av.r-partial { box-shadow: 0 0 0 1.5px var(--partial); }
+.sec-rav .av.r-incorrect { box-shadow: 0 0 0 1.5px var(--bad); }
+@media (prefers-reduced-motion: reduce) {
+	.side-tabs .refresh.busy .ic { animation: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+	* { transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+
+<header class="top">
+	<div class="wrap">
+		<div class="top-row">
+			<div class="brand"><h1>DSS Bot Review</h1></div>
+			<div class="who" id="who"><span class="avatar-fallback">?</span><span>Connecting…</span></div>
+		</div>
+		<nav class="nav" aria-label="Reviews and results">
+			<div class="sess-tabs" id="sess-tabs"></div>
+			<a class="tab" id="tab-results" href="#results">Results</a>
+		</nav>
+	</div>
+</header>
+<div class="wrap notice" id="notice">
+	<span><b>Live DSS tickets.</b> Each DSS ticket the bot has posted in the assist channels since DSS-1256, beside its real DSS thread. Refresh from Slack reads new posts and replies with your Slack connector, for everyone. The page holds client and project details: keep it within the team.</span>
+	<span id="mode-note"></span>
+</div>
+<main class="wrap">
+	<section id="view-pick" hidden>
+		<div class="card empty pick"><b>Pick your session to start.</b>Choose your name under Sessions at the top. The page opens your session from then on.</div>
+	</section>
+	<section id="view-session" hidden>
+		<div class="layout">
+			<div class="content">
+				<div class="banner" id="banner" hidden></div>
+				<details class="card howto" id="howto">
+					<summary>How to rate <span>about 5 minutes a ticket</span></summary>
+					<div class="howto-body" id="howto-body"></div>
+				</details>
+				<article class="ticket" id="ticket"></article>
+			</div>
+			<aside class="side" id="side" aria-label="Tickets and the real DSS thread">
+				<div class="side-tabs" role="tablist">
+					<button type="button" role="tab" data-pane="tickets" aria-selected="true" aria-controls="pane-tickets">DSS tickets</button>
+					<button type="button" role="tab" data-pane="thread" aria-selected="false" aria-controls="pane-thread">Real thread</button>
+						<button type="button" class="refresh" data-act="refresh" id="refresh-btn" aria-label="Refresh from Slack" title="Refresh from Slack"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.47-3.54" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13.3 1.9v3.3H10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+					<button type="button" class="side-close" data-act="close-side" aria-label="Close"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+				</div>
+				<p class="sync-line" id="sync-msg" role="status" hidden></p>
+				<div id="pane-tickets" role="tabpanel"></div>
+				<div id="pane-thread" class="pane-thread" role="tabpanel" hidden></div>
+			</aside>
+		</div>
+	</section>
+	<section id="view-results" hidden></section>
+</main>
+
+<script>
+const DATA = { tickets: [] };
+const TICKETS = DATA.tickets;
+const SESSIONS = [];  // the viewer, then everyone else who has rated: see rebuildSessions
+const TICKET_BY_KEY = {};
+const LOCAL = 'local';  // the viewer's session before their account is known
+
+const SECTIONS = {
+	headline: {
+		title: 'Headline and status', field: 'headline, status',
+		correct: 'The verdict matches the real thread, and the status is no stronger than the evidence.',
+		placeholder: 'The verdict you would want, in a few words',
+	},
+	summary: {
+		title: 'Bot Summary', field: 'what',
+		correct: 'Says what the analyst asked, with nothing missing or added.',
+		placeholder: 'What the analyst actually asked',
+	},
+	analyst_todos: {
+		title: 'Analyst Todos', field: 'actions.analyst, questions',
+		correct: 'Doing them fixes it: exact file, row and value. Each question would change the answer.',
+		placeholder: 'The steps the analyst should take',
+	},
+	dev_todos: {
+		title: 'Data Dev Todos', field: 'actions.developers, not_proved',
+		correct: 'The right next steps for developers, and nothing they would skip.',
+		placeholder: 'The steps developers should take',
+	},
+	reply: {
+		title: 'Draft Reply', field: 'reply',
+		correct: 'You would send it to the analyst as is.',
+		placeholder: 'The reply you would send',
+	},
+	why: {
+		title: 'Why', field: 'cause, where',
+		correct: 'The real mechanism, in the right file, folder or setting.',
+		placeholder: 'The real cause',
+	},
+	past: {
+		title: 'Past issues', field: 'prior_art',
+		correct: 'Finds the matching DSS and DTN tickets, and "applies" is right for each.',
+		placeholder: 'The ticket or fix it should have found',
+	},
+	evidence: {
+		title: 'Evidence', field: 'evidence',
+		correct: 'Each fact is true and its source supports the cause.',
+		placeholder: 'Which fact is wrong or unsupported, and why',
+	},
+	confidence: {
+		title: 'Confidence', field: 'confidence, settled_at, flags',
+		correct: 'As sure as the evidence allows, and it lists what it could not read.',
+		placeholder: 'The confidence it should have, and why',
+	},
+};
+const SECTION_ORDER = Object.keys(SECTIONS);
+const CONTEXT = {
+	footer: 'Footer', settles: 'What the questions settle', details: 'Details', also: 'Also found',
+	replay: 'Replay notes', leaks: 'Possible leaks found by code',
+};
+const ABSENT = {
+	headline: 'No headline.', summary: 'No summary.',
+	analyst_todos: 'No analyst todos in this post.', dev_todos: 'No developer todos in this post.',
+	reply: 'No draft reply in this post.', why: 'No cause given.', past: 'No past issues listed.',
+	evidence: 'No evidence listed.', confidence: 'No confidence given.',
+};
+const RATINGS = [
+	['correct', 'Correct', 'You would use it as is.'],
+	['partial', 'Partial', 'Right direction, but you would edit it before using it.'],
+	['incorrect', 'Incorrect', 'Wrong or misleading: acting on it wastes time or does harm.'],
+];
+const ACTS = [['as_is', 'Yes, as is', 'correct'], ['edits', 'Yes, after edits', 'partial'], ['no', 'No', 'incorrect']];
+const TAGS = [
+	['wrong_fact', 'Wrong fact', 'States something the sources do not say.'],
+	['wrong_cause', 'Wrong cause', 'Blames the wrong thing.'],
+	['missed_known', 'Missed a known issue', 'A past DSS or DTN ticket, or a fix, it should have found.'],
+	['overclaimed', 'Overclaimed', 'Sounds surer than the evidence allows.'],
+	['vague', 'Vague', 'No exact file, row, value or step.'],
+	['missing', 'Missing item', 'Leaves out something that is needed.'],
+	['unneeded', 'Repeated or unneeded', 'Says a thing twice, or asks for work nobody needs.'],
+	['internals', 'Code details for the analyst', 'Code paths or functions an analyst cannot use.'],
+	['source_gap', "Bot couldn't read a source", 'The answer needed data the bot had no way to read.'],
+];
+const TAG_LABEL = Object.fromEntries(TAGS.map(([value, label]) => [value, label]));
+TAG_LABEL.other = 'Other reason';  // the reviewer's own words, kept in a rating's `why`
+const ROLE = { workflow: 'Workflow', analyst: 'Analyst', developer: 'Data dev' };
+const JIRA = 'https://darkvisiontech.atlassian.net/browse/';
+const ICON = {
+	correct: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+	partial: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/></svg>',
+	incorrect: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+	alert: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4.2M8 10.6v1.2" stroke="currentColor" stroke-width="1.6"/></svg>',
+	done: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle class="f-ok" cx="8" cy="8" r="7.5"/><path class="s-on-ok" d="M4.5 8.2l2.4 2.4 4.6-4.9" fill="none" stroke-width="1.8"/></svg>',
+	progress: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle class="s-accent" cx="8" cy="8" r="6.6" fill="none" stroke-width="1.6"/><path class="f-accent" d="M8 3.6a4.4 4.4 0 0 1 0 8.8z"/></svg>',
+	todo: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle class="s-muted" cx="8" cy="8" r="6.6" fill="none" stroke-width="1.6"/></svg>',
+	thread: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3h11v7.5h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+	file: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3 3v10H4zM9 1.5v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+	arrow: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5L12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+};
+const LS_REVIEWS = 'dss-bot-review:shared';
+const LS_UI = 'dss-bot-review:ui';
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const narrow = window.matchMedia('(max-width: 1179px)');
+
+const state = {
+	view: 'pick',
+	session: null,
+	current: {},
+	pane: 'thread',
+	sheet: false,
+	reviews: {},
+	ui: {},
+	me: { id: null, name: '', avatar: '' },
+	mySession: LOCAL,
+	unlocked: {},
+	mode: 'starting',
+	canWrite: true,
+	showMissing: false,
+	includeSample: true,
+	remoteLoaded: false,
+	db: null,
+	user: null,
+	saveStatus: '',
+	names: {},
+	remoteIds: new Set(),
+	avatars: {},
+	pendingKey: null,
+	ticketsLoaded: false,
+	loadFailed: false,
+	sync: { busy: false, error: false, text: '', at: null, by: null },
+};
+
+function esc(value) {
+	return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+function lsGet(key) {
+	try {
+		const raw = localStorage.getItem(key);
+		return raw ? JSON.parse(raw) : null;
+	} catch {
+		return null;
+	}
+}
+function lsSet(key, value) {
+	try {
+		localStorage.setItem(key, JSON.stringify(value));
+	} catch {
+		/* storage blocked: the page still works for this visit */
+	}
+}
+
+/* Slack Markdown, as dss.record writes it: bold, links, code spans, escapes, lists, quotes */
+function inline(text) {
+	const parts = text.split(/(`[^`\n]*`)/);
+	let html = '';
+	for (let index = 0; index < parts.length; index++) {
+		const part = parts[index];
+		if (index % 2) {
+			html += `<code>${esc(part.slice(1, -1))}</code>`;
+		} else {
+			html += plain(part);
+		}
+	}
+	return html;
+}
+function plain(text) {
+	const kept = [];
+	const links = [];
+	// set aside as it is made, so the later passes cannot match inside its address
+	const link = (url, label) => {
+		links.push(`<a class="sl-link" href="${url}" target="_blank" rel="noopener">${label}</a>`);
+		return `\u0001${links.length - 1}\u0001`;
+	};
+	let html = text.replace(/\\([\\*_~<>\[\]])/g, (match, ch) => {
+		kept.push(ch);
+		return `\u0000${kept.length - 1}\u0000`;
+	});
+	html = esc(html);
+	html = html.replace(/\[([^\]\n]*)\]\(([^)\s]*)\)/g, (match, label, url) => {
+		if (/^https?:\/\//.test(url)) return link(url, label);
+		return `<span class="sl-link">${label}</span>`;
+	});
+	html = html.replace(/\bhttps?:\/\/(?:(?!&(?:quot|#39|lt|gt);)[^\s<\u0001])*(?:(?!&(?:quot|#39|lt|gt);)[^\s<\u0001.,;:!?)])/g, (url) => link(url, url));
+	html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+	html = html.replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1<em>$2</em>');
+	html = html.replace(/(?<![\w-])\b((?:DSS|DTN)-\d+)\b/g, (match, key) => link(JIRA + key, key));
+	html = html.replace(/\u0001(\d+)\u0001/g, (match, index) => links[Number(index)]);
+	return html.replace(/\u0000(\d+)\u0000/g, (match, index) => esc(kept[Number(index)]));
+}
+function md(source) {
+	let html = '';
+	let list = null;
+	let quote = [];
+	const flushList = () => {
+		if (list) {
+			html += `<${list.tag}>${list.items.map((item) => `<li>${inline(item)}</li>`).join('')}</${list.tag}>`;
+			list = null;
+		}
+	};
+	const flushQuote = () => {
+		if (quote.length) {
+			html += `<blockquote>${quote.map(inline).join('<br>')}</blockquote>`;
+			quote = [];
+		}
+	};
+	for (const line of source.split('\n')) {
+		let match;
+		if (!line.trim()) {
+			flushList();
+			flushQuote();
+		} else if ((match = line.match(/^> ?(.*)$/))) {
+			flushList();
+			quote.push(match[1]);
+		} else if ((match = line.match(/^\d+\. (.*)$/))) {
+			flushQuote();
+			if (!list || list.tag !== 'ol') {
+				flushList();
+				list = { tag: 'ol', items: [] };
+			}
+			list.items.push(match[1]);
+		} else if ((match = line.match(/^- (.*)$/))) {
+			flushQuote();
+			if (!list || list.tag !== 'ul') {
+				flushList();
+				list = { tag: 'ul', items: [] };
+			}
+			list.items.push(match[1]);
+		} else {
+			flushList();
+			flushQuote();
+			html += `<p>${inline(line)}</p>`;
+		}
+	}
+	flushList();
+	flushQuote();
+	return html;
+}
+
+/* Slack: the bot's posts in the assist channels and the real DSS threads, read with the viewer's
+   Slack connector. The connector answers in text: a "=== Message from ..." block per channel
+   message, and a parent block then "--- Reply i of n ---" blocks per thread. */
+/* parse:start */
+const SLACK_SERVER = 'Slack';
+const DSS_CHANNEL = 'C0793LJ1KDM';
+// production first: a ticket posted in both keeps its production post
+const BOT_CHANNELS = [
+	{ id: 'C0CBE88LX0S', name: 'data-dev-support-assist' },
+	{ id: 'C0CF1J345EY', name: 'data-dev-support-assist-test' },
+];
+const BOT_USER = 'U0CCHQUDX5E';
+const FIRST_DSS = 1256;
+const OLDEST_TS = '1795015000';  // shortly before DSS-1256 was posted
+const SLACK_ZONE = 'America/Edmonton';
+const MAX_PAGES = 5;
+const REVIEW_LINK = "Please review the bot's report";
+const BOT_HEAD = /^\*<https:\/\/darkvision\.slack\.com\/archives\/C0793LJ1KDM\/p(\d{10})(\d{6})[^|>]*\|(DSS-(\d+))>/;
+const POST_HEADS = [['**Bot Summary:**', 'summary'], ['**Data Dev Todos:**', 'dev_todos'], ['**Draft Reply:**', 'reply']];
+const THREAD_HEADS = [
+	['**Why:**', 'why'], ['**Past issues', 'past'], ['**Evidence**', 'evidence'],
+	['**What the questions settle**', 'settles'], ['**Details**', 'details'], ['**Also found**', 'also'],
+	['**Confidence:**', 'confidence'], ['**Possible leaks found by code**', 'leaks'],
+];
+const POST_ORDER = ['headline', 'summary', 'analyst_todos', 'dev_todos', 'reply', 'footer'];
+const THREAD_ORDER = ['why', 'past', 'evidence', 'settles', 'details', 'also', 'confidence', 'leaks'];
+
+/* Slack's mrkdwn as the page's Markdown: <url|label> links, <@U1|name> mentions, *bold* */
+function fromSlack(text) {
+	let out = String(text || '').replace(/<([^<>\n]+)>/g, (match, inner) => {
+		const bar = inner.indexOf('|');
+		const target = bar < 0 ? inner : inner.slice(0, bar);
+		const label = bar < 0 ? '' : inner.slice(bar + 1);
+		if (target.startsWith('@')) return `@${label || 'someone'}`;
+		if (target.startsWith('#')) return `#${label || 'channel'}`;
+		if (target.startsWith('!')) return `@${label || target.slice(1)}`;
+		if (!/^(https?|mailto):/.test(target)) return match;
+		if (!label || label === target) return target;
+		return `[${label.replace(/[[\]]/g, '')}](${target})`;
+	});
+	out = out.replace(/(^|[\s(>"'])\*(?!\s)([^*\n]+?)\*(?=$|[\s).,:;!?'"])/gm, '$1**$2**');
+	return out.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+function slackTime(ts) {
+	return new Date(Number(ts) * 1000).toLocaleString('en-US', {
+		timeZone: SLACK_ZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+	});
+}
+/* One message block: From, Time and Message TS lines, then its text, files and reactions */
+function slackMessage(block) {
+	const head = /^From: ?(.*)\nTime: .*\nMessage TS: (\d+\.\d+)\n?/.exec(block);
+	if (!head) return null;
+	const from = head[1].trim();
+	const id = /\(([A-Z0-9]+)\)$/.exec(from)?.[1] || '';
+	const name = from.replace(/\s*\([A-Z0-9]+\)$/, '').replace(/\s*<[^>]*>$/, '').trim();
+	const files = [];
+	const lines = [];
+	for (const line of block.slice(head[0].length).split('\n')) {
+		if (line.startsWith('Files: ')) {
+			for (const file of line.slice(7).matchAll(/\s*([^,]+?) \(ID: [^)]*\)/g)) files.push(file[1]);
+		} else if (!line.startsWith('Reactions: ')) {
+			lines.push(line);
+		}
+	}
+	const bot = !from || /botuser-/.test(from) || id.startsWith('B');
+	return { id, name, bot, ts: head[2], text: lines.join('\n').trim(), files };
+}
+/* A thread read in pages: each page repeats the parent, so messages are kept once by ts */
+function threadMessages(pages) {
+	const seen = {};
+	for (const page of pages) {
+		for (const part of page.split('=== THREAD PARENT MESSAGE ===\n')) {
+			const blocks = part.split(/\n(?:=== THREAD REPLIES \(\d+ total\) ===\n+)?--- Reply \d+ of \d+ ---\n/);
+			for (const block of blocks) {
+				const message = slackMessage(block.replace(/\n=== THREAD REPLIES \(\d+ total\) ===\s*$/, ''));
+				if (message) seen[message.ts] = message;
+			}
+		}
+	}
+	return Object.values(seen).sort((left, right) => Number(left.ts) - Number(right.ts));
+}
+/* A channel read: one entry per message, with its sender id, ts, text and newest reply time */
+function channelMessages(pages) {
+	const found = [];
+	const head = /^=== Message from (.*) at .+? ===[ \t]*\nMessage TS: (\d+\.\d+)\n/gm;
+	for (const page of pages) {
+		const starts = [...page.matchAll(head)];
+		for (let index = 0; index < starts.length; index++) {
+			const start = starts[index];
+			const end = index + 1 < starts.length ? starts[index + 1].index : page.length;
+			const text = page.slice(start.index + start[0].length, end);
+			const id = /\(([A-Z0-9]+)\)$/.exec(start[1].trim())?.[1] || '';
+			const latest = /^Thread: \d+ repl(?:y|ies) \(latest: (.+)\)$/m.exec(text)?.[1] || '';
+			found.push({ id, ts: start[2], text, latest });
+		}
+	}
+	return found;
+}
+/* The bot's live post of a DSS ticket from DSS-1256 on; replays and other messages are skipped */
+function botPost(message, channel) {
+	if (message.id !== BOT_USER) return null;
+	const head = BOT_HEAD.exec(message.text);
+	if (!head || Number(head[4]) < FIRST_DSS || /\n_Replay of /.test(message.text)) return null;
+	return { key: head[3], ts: message.ts, dssTs: `${head[1]}.${head[2]}`, latest: message.latest, channel };
+}
+/* *text* split at the lines that start a section, keyed by section id (as review_compare.py) */
+function splitSections(text, heads, first) {
+	const found = {};
+	let current = first || '';
+	for (const line of text.split('\n')) {
+		if (line.includes(REVIEW_LINK)) continue;
+		let started = '';
+		for (const [head, name] of heads) {
+			if (line.startsWith(head)) started = name;
+		}
+		if (started) current = started;
+		else if (/^\*\*.* Todos:\*\*$/.test(line)) current = 'analyst_todos';
+		else if (/^_(Draft by|Replay of) .*_$/.test(line)) current = 'footer';
+		if (current) (found[current] ||= []).push(line);
+	}
+	const joined = {};
+	for (const [name, lines] of Object.entries(found)) joined[name] = lines.join('\n').trim();
+	return joined;
+}
+/* The page's parts in *order*: a rated section the post left out stays, with no text */
+function orderedParts(found, order) {
+	const listed = [];
+	for (const name of order) {
+		if (found[name]) listed.push({ id: name, md: found[name] });
+		else if (SECTIONS[name]) listed.push({ id: name, md: null });
+	}
+	return listed;
+}
+function person(message, role) {
+	const item = { who: message.name || 'Data Support Request', role, time: slackTime(message.ts), text: fromSlack(message.text) };
+	if (message.files.length) item.files = message.files;
+	return item;
+}
+/* One ticket from its bot post (*post*), the bot's thread and the real DSS thread */
+function buildTicket(post, botThread, dssThread) {
+	const parent = botThread.find((message) => message.ts === post.ts);
+	if (!parent) throw new Error(`the bot's post of ${post.key} was not in its thread`);
+	const postText = fromSlack(parent.text.split('\nForwarded message from ')[0]);
+	const replies = botThread.filter((message) => message.ts !== post.ts);
+	const proof = replies.filter((message) => message.id === BOT_USER).map((message) => fromSlack(message.text));
+	const head = dssThread.find((message) => message.ts === post.dssTs);
+	const headText = head ? fromSlack(head.text) : '';
+	const field = (label) => new RegExp(`^\\*\\*${label}:?\\*\\*:? *(.*)$`, 'm').exec(headText)?.[1]?.trim() || '';
+	const reporterId = /<@(U[A-Z0-9]+)/.exec(head?.text || '')?.[1] || '';
+	const real = [];
+	let marked = false;
+	for (const message of dssThread) {
+		if (!marked && Number(message.ts) > Number(post.ts)) {
+			real.push({ marker: 'bot', time: slackTime(post.ts) });
+			marked = true;
+		}
+		let role = 'other';
+		if (message === head || message.bot) role = 'workflow';
+		else if (message.id === reporterId) role = 'analyst';
+		real.push(person(message, role));
+	}
+	if (!marked) real.push({ marker: 'bot', time: slackTime(post.ts) });
+	const asked = Number(post.dssTs);
+	const helpers = dssThread.filter((message) => message !== head && !message.bot && message.id !== reporterId && Number(message.ts) > asked);
+	const developers = { replies: helpers.length };
+	if (helpers.length) {
+		const first = Number(helpers[0].ts);
+		const last = Number(helpers[helpers.length - 1].ts);
+		Object.assign(developers, {
+			first_reply: slackTime(first), last_reply: slackTime(last),
+			response_minutes: (first - asked) / 60, solving_minutes: (last - first) / 60,
+		});
+	}
+	const run = /([\d,]+) tokens · ≈ \$([\d.]+) · (\d+) s/.exec(postText);
+	const time = { developers };
+	if (run) time.bot = { tokens: Number(run[1].replace(/,/g, '')), cost_usd: Number(run[2]), seconds: Number(run[3]) };
+	return {
+		key: post.key,
+		run: post.ts,
+		link: `https://darkvision.slack.com/archives/${DSS_CHANNEL}/p${post.dssTs.replace('.', '')}`,
+		botLink: `https://darkvision.slack.com/archives/${post.channel.id}/p${post.ts.replace('.', '')}`,
+		channel: post.channel,
+		filed: {
+			summary: field('Summary'), client: field('Client(?: Name)?'), dvt: field('DVT'),
+			due: field('Internal review due date'), reporter: /@(\S+) created/.exec(headText)?.[1] || '',
+			created: new Date(asked * 1000).toISOString(),
+		},
+		post: orderedParts(splitSections(postText, POST_HEADS, 'headline'), POST_ORDER),
+		thread: orderedParts(splitSections(proof.join('\n'), THREAD_HEADS, ''), THREAD_ORDER),
+		real,
+		time,
+	};
+}
+/* parse:end */
+
+/* refreshing from Slack: each changed ticket is read again and written to the shared store */
+function mcpProblem(error) {
+	const code = error?.code;
+	if (code === 'server_not_connected' || code === 'server_not_found') return 'Add the Slack connector in claude.ai Settings → Connectors, then refresh.';
+	if (code === 'needs_reauth') return 'Reconnect Slack in claude.ai Settings → Connectors, then refresh.';
+	if (code === 'selection_required') return 'Choose which Slack connector this page uses when claude.ai asks, then refresh.';
+	if (code === 'not_in_manifest' || code === 'approval_required') return 'Allow Slack for this page when claude.ai asks, then refresh.';
+	if (code === 'blocked_by_policy') return 'Your organization blocks Slack reads from this page.';
+	if (code === 'not_granted' || code === 'capability_disabled' || code === 'capability_removed') return 'This view cannot reach Slack: open the page on claude.ai.';
+	if (code === 'tool_error') return `Slack refused a read: ${error.message || 'no detail given'}`;
+	if (code === 'server_unavailable') return 'Slack did not answer. Try again in a minute.';
+	return `Could not read Slack (${code || 'unknown error'}).`;
+}
+async function slackRead(mcp, tool, input) {
+	try {
+		return (await mcp.callTool(SLACK_SERVER, tool, input, { cache: false })).payload;
+	} catch (error) {
+		if (!error?.retryable) throw error;
+		await new Promise((resolve) => setTimeout(resolve, error.retryAfterMs || 800 + Math.random() * 1200));
+		return (await mcp.callTool(SLACK_SERVER, tool, input, { cache: false })).payload;
+	}
+}
+async function readPages(mcp, tool, input) {
+	const pages = [];
+	let cursor = '';
+	for (let page = 0; page < MAX_PAGES; page++) {
+		let payload = await slackRead(mcp, tool, cursor ? { ...input, cursor } : input);
+		if (typeof payload === 'string') {
+			try {
+				payload = JSON.parse(payload);
+			} catch {
+				payload = { messages: payload };
+			}
+		}
+		pages.push(String(payload?.messages || ''));
+		cursor = /cursor: `([^`]+)`/.exec(payload?.pagination_info || '')?.[1] || '';
+		if (!cursor) break;
+	}
+	return pages;
+}
+async function refresh() {
+	if (state.sync.busy || state.mode !== 'db' || !state.canWrite) return;
+	let mcp = null;
+	try {
+		mcp = await window.claude.use('mcp');
+	} catch {
+		mcp = null;
+	}
+	if (!mcp) {
+		state.sync = { ...state.sync, error: true, text: 'This view cannot reach Slack: open the page on claude.ai.' };
+		renderSync();
+		return;
+	}
+	state.sync = { ...state.sync, busy: true, error: false, text: 'Reading the bot posts…' };
+	renderSync();
+	let updated = 0;
+	try {
+		const posts = {};
+		for (const channel of BOT_CHANNELS) {
+			const pages = await readPages(mcp, 'slack_read_channel', { channel_id: channel.id, oldest: OLDEST_TS, limit: 100, response_format: 'detailed' });
+			for (const message of channelMessages(pages)) {
+				const post = botPost(message, channel);
+				if (post && !posts[post.key]) posts[post.key] = post;
+			}
+		}
+		const dssPages = await readPages(mcp, 'slack_read_channel', { channel_id: DSS_CHANNEL, oldest: OLDEST_TS, limit: 100, response_format: 'detailed' });
+		const dssLatest = {};
+		for (const message of channelMessages(dssPages)) dssLatest[message.ts] = message.latest;
+		const keys = Object.keys(posts);
+		for (let index = 0; index < keys.length; index++) {
+			const post = posts[keys[index]];
+			const known = TICKET_BY_KEY[post.key];
+			const realLatest = dssLatest[post.dssTs] || '';
+			if (known && known.run === post.ts && known.sync?.bot === post.latest && known.sync?.real === realLatest) continue;
+			state.sync.text = `Reading ${post.key} (${index + 1} of ${keys.length})…`;
+			renderSync();
+			const botPages = await readPages(mcp, 'slack_read_thread', { channel_id: post.channel.id, message_ts: post.ts, limit: 1000, response_format: 'detailed' });
+			const realPages = await readPages(mcp, 'slack_read_thread', { channel_id: DSS_CHANNEL, message_ts: post.dssTs, limit: 1000, response_format: 'detailed' });
+			const ticket = buildTicket(post, threadMessages(botPages), threadMessages(realPages));
+			ticket.sync = { bot: post.latest, real: realLatest };
+			ticket.refreshedAt = new Date().toISOString();
+			await state.db.doc(`tickets/${post.key}`).set(ticket);
+			updated++;
+		}
+		const at = new Date().toISOString();
+		await state.db.doc('meta/refresh').set({ at, by: state.me.id || null });
+		const text = updated ? '' : 'No new posts or replies';
+		state.sync = { busy: false, error: false, text, at, by: state.me.id || null };
+	} catch (error) {
+		let text = `Refresh stopped: ${error?.message || error}`;
+		if (error?.code) text = mcpProblem(error);
+		if (updated) text += ` (${updated} ticket${updated === 1 ? '' : 's'} updated first)`;
+		state.sync = { ...state.sync, busy: false, error: true, text };
+	}
+	renderSync();
+}
+function renderSync() {
+	const button = document.getElementById('refresh-btn');
+	const message = document.getElementById('sync-msg');
+	const sync = state.sync;
+	button.disabled = sync.busy || state.mode !== 'db' || !state.canWrite;
+	button.classList.toggle('busy', sync.busy);
+	let label = 'Refresh from Slack: read new bot posts and thread replies';
+	if (sync.busy) label = 'Refreshing from Slack';
+	else if (state.mode === 'db' && !state.canWrite) label = 'Refreshing from Slack needs Contributor access to this page';
+	button.title = label;
+	button.setAttribute('aria-label', label);
+	let text = sync.text;
+	if (!text && sync.at) text = `Updated ${fmtTime(sync.at)}${sync.by ? ` by ${nameOf(sync.by)}` : ''}`;
+	message.className = `sync-line${sync.error ? ' err' : ''}`;
+	message.textContent = text || '';
+	message.hidden = !text;
+}
+
+/* sessions, tickets and reviews */
+function sessionById(id) {
+	return SESSIONS.find((session) => session.id === id) || null;
+}
+function sessionTickets(id) {
+	const list = [];
+	for (const key of sessionById(id)?.tickets || []) {
+		if (TICKET_BY_KEY[key]) list.push(TICKET_BY_KEY[key]);
+	}
+	return list;
+}
+function nameOf(id) {
+	if (!id) return '';
+	if (id === LOCAL) return 'You';
+	return state.names[id] || 'Someone';
+}
+/* the one session: the viewer, over every ticket; the review itself is shared */
+function rebuildSessions() {
+	SESSIONS.length = 0;
+	SESSIONS.push({ id: state.mySession, name: nameOf(state.mySession), tickets: TICKETS.map((ticket) => ticket.key) });
+}
+/* everyone the reviews name: who gave each rating, the overall answer and the submit */
+function namedPeople() {
+	const ids = new Set();
+	for (const review of Object.values(state.reviews)) {
+		for (const id of [review?.by, review?.submittedBy, review?.overall?.by]) ids.add(id);
+		for (const rating of Object.values(review?.sections || {})) ids.add(rating?.by);
+	}
+	if (state.sync.by) ids.add(state.sync.by);
+	if (state.mySession !== LOCAL) ids.add(state.mySession);
+	ids.delete(undefined);
+	ids.delete(null);
+	ids.delete(LOCAL);
+	return ids;
+}
+async function resolveNames() {
+	if (!state.user) return;
+	const ids = namedPeople();
+	if (!ids.size) return;
+	const profiles = await state.user.profiles([...ids]);
+	let changed = false;
+	for (const id of ids) {
+		const name = profiles[id]?.name || '';
+		if (name && state.names[id] !== name) {
+			state.names[id] = name;
+			changed = true;
+		}
+		const url = profiles[id]?.avatarUrl || '';
+		if (url && state.avatars[id] !== url) {
+			state.avatars[id] = url;
+			changed = true;
+		}
+	}
+	if (!changed) return;
+	rebuildSessions();
+	renderAll();
+	renderSync();
+}
+function avatar(id, name) {
+	const url = state.avatars[id];
+	const face = url ? `<img src="${esc(url)}" alt="">` : esc(initials(name));
+	return `<span class="av" aria-hidden="true">${face}</span>`;
+}
+/* everyone who gave a rating on *ticket*'s review, in order, and who submitted it */
+function raters(ticket) {
+	const review = reviewOf(state.session, ticket.key);
+	if (!review) return [];
+	const ids = [];
+	const seen = new Set();
+	function add(id) {
+		if (!id || seen.has(id)) return;
+		seen.add(id);
+		ids.push(id);
+	}
+	for (const rating of Object.values(review.sections || {})) {
+		if (rating?.rating) add(rating.by);
+	}
+	if (review.overall?.act) add(review.overall.by);
+	if (review.submittedAt) add(review.submittedBy);
+	return ids.map((id) => ({ id, name: nameOf(id), done: Boolean(review.submittedAt) && id === review.submittedBy }));
+}
+function ratersRow(ticket) {
+	const list = raters(ticket);
+	if (!list.length) return '<p class="revs" id="revs">No reviews yet</p>';
+	let chips = '';
+	for (const person of list) {
+		const you = person.id === state.mySession ? ' (you)' : '';
+		const mark = person.done ? ICON.correct : '';
+		const title = person.done ? 'submitted the review' : 'gave ratings';
+		chips += `<span class="rev${person.done ? ' done' : ''}" title="${esc(title)}">${avatar(person.id, person.name)}${esc(person.name + you)}${mark}</span>`;
+	}
+	return `<div class="revs" id="revs"><span>Reviewed by</span>${chips}</div>`;
+}
+/* who gave section *id*'s rating, as a small face ringed in that rating's colour */
+function sectionFaces(ticket, id) {
+	const rating = reviewOf(state.session, ticket.key)?.sections?.[id];
+	if (!rating?.rating || !rating.by) return `<span class="sec-rav" data-sec="${id}"></span>`;
+	const name = nameOf(rating.by);
+	const said = esc(`${RATINGS.find((item) => item[0] === rating.rating)[1]}, rated by ${name}`);
+	const face = avatar(rating.by, name).replace('class="av"', `class="av r-${rating.rating}"`);
+	return `<span class="sec-rav" data-sec="${id}" role="img" aria-label="${said}" title="${said}">${face}</span>`;
+}
+function refreshRaters() {
+	const ticket = currentTicket();
+	if (!ticket) return;
+	const row = document.getElementById('revs');
+	if (row) row.outerHTML = ratersRow(ticket);
+	for (const span of document.querySelectorAll('#ticket .sec-rav[data-sec]')) span.outerHTML = sectionFaces(ticket, span.dataset.sec);
+}
+function canRate(sessionId) {
+	return sessionId === state.mySession;
+}
+function safeId(id) {
+	return String(id).replace(/[^A-Za-z0-9_-]/g, '_');
+}
+/* One shared review per ticket, reviews/<key>: the developers settle one answer together, and
+   each rating keeps who gave it (by) */
+function reviewId(sessionId, key) {
+	return key;
+}
+function reviewOf(sessionId, key) {
+	return state.reviews[key] || null;
+}
+function ensureReview(sessionId, key) {
+	const id = reviewId(sessionId, key);
+	if (!state.reviews[id]) {
+		state.reviews[id] = { key, run: TICKET_BY_KEY[key].run, sections: {}, overall: {} };
+	}
+	return state.reviews[id];
+}
+
+/* comparing a ticket's run with its previous run */
+function comparing(ticket) {
+	return Boolean(ticket.previous) && state.ui.compare !== false;
+}
+function runLabel(run) {
+	const day = /(\d{4})-(\d{2})-(\d{2})$/.exec(run || '');
+	if (!day) return run || 'earlier run';
+	const date = new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]));
+	return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} run`;
+}
+function previousPart(ticket, id) {
+	for (const part of [...ticket.previous.post, ...ticket.previous.thread]) {
+		if (part.id === id) return part;
+	}
+	return null;
+}
+function changedCount(ticket) {
+	let changed = 0;
+	for (const part of ratedParts(ticket)) {
+		if ((previousPart(ticket, part.id)?.md || '') !== (part.md || '')) changed++;
+	}
+	return changed;
+}
+/* Word diff of two texts (longest common subsequence of words and the spaces between them) */
+function diffHtml(before, after) {
+	const words = before.split(/(\s+)/);
+	const newWords = after.split(/(\s+)/);
+	let head = 0;
+	while (head < words.length && head < newWords.length && words[head] === newWords[head]) head++;
+	let tail = 0;
+	while (tail < words.length - head && tail < newWords.length - head && words[words.length - 1 - tail] === newWords[newWords.length - 1 - tail]) tail++;
+	const lead = esc(words.slice(0, head).join(''));
+	const end = esc(words.slice(words.length - tail).join(''));
+	const left = words.slice(head, words.length - tail);
+	const right = newWords.slice(head, newWords.length - tail);
+	if (left.length * right.length > 4e6) return `${lead}<del>${esc(left.join(''))}</del><ins>${esc(right.join(''))}</ins>${end}`;
+	const table = [];
+	for (let row = 0; row <= left.length; row++) table.push(new Int32Array(right.length + 1));
+	for (let row = left.length - 1; row >= 0; row--) {
+		for (let col = right.length - 1; col >= 0; col--) {
+			if (left[row] === right[col]) table[row][col] = table[row + 1][col + 1] + 1;
+			else table[row][col] = Math.max(table[row + 1][col], table[row][col + 1]);
+		}
+	}
+	const spans = [];
+	function add(kind, text) {
+		if (!text) return;
+		const last = spans[spans.length - 1];
+		if (last && last.kind === kind) last.text += text;
+		else spans.push({ kind, text });
+	}
+	let row = 0;
+	let col = 0;
+	while (row < left.length && col < right.length) {
+		if (left[row] === right[col]) {
+			add('same', left[row]);
+			row++;
+			col++;
+		} else if (table[row + 1][col] >= table[row][col + 1]) {
+			add('del', left[row++]);
+		} else {
+			add('ins', right[col++]);
+		}
+	}
+	while (row < left.length) add('del', left[row++]);
+	while (col < right.length) add('ins', right[col++]);
+	let html = lead;
+	for (const span of spans) {
+		if (span.kind === 'same') html += esc(span.text);
+		else html += `<${span.kind}>${esc(span.text)}</${span.kind}>`;
+	}
+	return html + end;
+}
+function compareBox(ticket, id, current) {
+	if (!comparing(ticket)) return '';
+	const was = previousPart(ticket, id)?.md || '';
+	const now = current || '';
+	let badge = '<span class="chg chg-same">Same as before</span>';
+	if (!was && now) badge = '<span class="chg chg-diff">New in this run</span>';
+	else if (was && !now) badge = '<span class="chg chg-diff">Left out in this run</span>';
+	else if (was !== now) badge = '<span class="chg chg-diff">Changed</span>';
+	if (was === now) return `<div class="prev prev-same">${badge}<span>${esc(runLabel(ticket.previous.run))} said the same</span></div>`;
+	return `<details class="prev" open><summary>${badge}<span>What changed since the ${esc(runLabel(ticket.previous.run))}</span></summary><div class="diff">${diffHtml(was, now)}</div></details>`;
+}
+function previousVotes(ticket, id) {
+	if (!comparing(ticket)) return '';
+	let list = '';
+	for (const session of SESSIONS) {
+		const review = reviewOf(session.id, ticket.key, ticket.previous.run);
+		const rating = review?.sections?.[id];
+		if (rating?.rating) list += vote(session.name, rating, review.submittedAt ? '' : 'not submitted');
+	}
+	if (!list) return '';
+	return `<div class="prev-votes"><p class="eyebrow">Rated on the ${esc(runLabel(ticket.previous.run))}</p><ul class="votes">${list}</ul></div>`;
+}
+function previousOverall(ticket) {
+	if (!comparing(ticket)) return '';
+	let list = '';
+	for (const session of SESSIONS) {
+		const review = reviewOf(session.id, ticket.key, ticket.previous.run);
+		if (review?.overall?.act) list += overallVote(session.name, review.overall, review.submittedAt ? '' : 'not submitted');
+	}
+	if (!list) return '';
+	return `<div class="prev-votes"><p class="eyebrow">Overall, on the ${esc(runLabel(ticket.previous.run))}</p><ul class="votes">${list}</ul></div>`;
+}
+function compareBar(ticket) {
+	if (!ticket.previous) return '';
+	const toggle = `<label class="inc"><input type="checkbox" id="cmp-toggle"${state.ui.compare !== false ? ' checked' : ''}>Compare with the ${esc(runLabel(ticket.previous.run))}</label>`;
+	const bot = ticket.previous.time?.bot;
+	let cost = '';
+	if (bot) cost = ` · ${esc(duration(bot.seconds / 60))} · ≈ $${esc(bot.cost_usd.toFixed(2))}`;
+	const total = ratedParts(ticket).length;
+	return `<section class="card cmp-bar">
+		<p class="cmp-text"><b>${changedCount(ticket)} of ${total}</b> rated sections changed since the ${esc(runLabel(ticket.previous.run))}${cost}. This is the ${esc(runLabel(ticket.run))}: rate it afresh; your ratings of the earlier run stay as they were.</p>
+		${toggle}
+	</section>`;
+}
+function firstOpen(sessionId) {
+	const tickets = sessionTickets(sessionId);
+	const open = tickets.find((ticket) => !reviewOf(sessionId, ticket.key)?.submittedAt);
+	return open || tickets[0] || null;
+}
+function currentTicket() {
+	if (state.pendingKey && TICKET_BY_KEY[state.pendingKey]) {
+		state.current[state.session] = state.pendingKey;
+		state.pendingKey = null;
+	}
+	const key = state.current[state.session];
+	let ticket = sessionTickets(state.session).find((item) => item.key === key);
+	if (!ticket) {
+		ticket = firstOpen(state.session);
+		// kept as the current ticket, so submitting it keeps it, and its thread, on screen
+		if (ticket) state.current[state.session] = ticket.key;
+	}
+	return ticket || null;
+}
+function ratedParts(ticket) {
+	return [...ticket.post, ...ticket.thread].filter((part) => SECTIONS[part.id]);
+}
+function sectionGap(rating) {
+	if (!rating || !rating.rating || rating.rating === 'correct') {
+		return '';
+	}
+	const noTag = !(rating.tags || []).length && !(rating.why || '').trim();
+	const noText = !(rating.should || '').trim();
+	if (noTag && noText) return 'Needed: a reason and what it should say';
+	if (noTag) return 'Needed: a reason';
+	if (noText) return 'Needed: what it should say';
+	return '';
+}
+function overallGap(overall) {
+	if (!overall || !overall.act) return 'Answer the overall question';
+	if (overall.harmful && !(overall.note || '').trim()) return 'Say what harm it would do';
+	return '';
+}
+function missingFor(ticket, review) {
+	const missing = [];
+	for (const part of ratedParts(ticket)) {
+		const rating = review?.sections?.[part.id];
+		if (!rating?.rating) missing.push(part.id);
+		else if (sectionGap(rating)) missing.push(part.id);
+	}
+	if (overallGap(review?.overall)) missing.push('overall');
+	return missing;
+}
+function statusOf(sessionId, ticket) {
+	const review = reviewOf(sessionId, ticket.key);
+	if (review?.submittedAt) return { kind: 'done', text: 'Done' };
+	if (review?.firstSubmittedAt) return { kind: 'progress', text: 'Reopened, not resubmitted' };
+	const parts = ratedParts(ticket);
+	let rated = 0;
+	for (const part of parts) {
+		if (review?.sections?.[part.id]?.rating) rated++;
+	}
+	if (!rated && !review?.overall?.act) return { kind: 'new', text: 'Not started' };
+	return { kind: 'progress', text: `${rated} of ${parts.length} sections rated` };
+}
+function statusIcon(kind) {
+	if (kind === 'done') return ICON.done;
+	if (kind === 'progress') return ICON.progress;
+	return ICON.todo;
+}
+function doneCount(sessionId) {
+	let done = 0;
+	for (const ticket of sessionTickets(sessionId)) {
+		if (reviewOf(sessionId, ticket.key)?.submittedAt) done++;
+	}
+	return done;
+}
+function hasRatings(review) {
+	if (!review) return false;
+	if (review.overall?.act) return true;
+	return Object.values(review.sections || {}).some((rating) => rating.rating);
+}
+function draftTag(review) {
+	return hasRatings(review) && !review.submittedAt ? 'not submitted' : '';
+}
+function othersFor(sessionId, key) {
+	const list = [];
+	for (const session of SESSIONS) {
+		if (session.id === sessionId) continue;
+		const review = reviewOf(session.id, key);
+		if (hasRatings(review)) list.push({ name: session.name, tag: draftTag(review), entry: review });
+	}
+	const ticket = TICKET_BY_KEY[key];
+	if (ticket.sample) list.push({ name: 'Example reviewer', tag: 'made up', sample: true, entry: ticket.sample });
+	return list;
+}
+function selfName() {
+	const name = sessionById(state.session).name;
+	if (state.mySession === state.session) return `${name} (you)`;
+	return name;
+}
+/* stamp a change to *review*, and to its *part* (a section id or 'overall'), with who and when */
+function touch(review, part) {
+	const now = new Date().toISOString();
+	review.updatedAt = now;
+	review.by = state.me.id || null;
+	if (part === 'overall') Object.assign(review.overall, { by: review.by, at: now });
+	else if (part && review.sections[part]) Object.assign(review.sections[part], { by: review.by, at: now });
+}
+function fmtTime(iso) {
+	try {
+		return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+	} catch {
+		return iso;
+	}
+}
+function fmtDate(iso) {
+	try {
+		return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+	} catch {
+		return iso;
+	}
+}
+function initials(name) {
+	const words = String(name || '?').split(/\s+/).filter(Boolean);
+	let text = '';
+	for (const word of words.slice(0, 2)) text += word[0].toUpperCase();
+	return text || '?';
+}
+function pill(rating, label) {
+	const name = label || RATINGS.find((item) => item[0] === rating)?.[1] || rating;
+	return `<span class="pill pill-${rating}">${ICON[rating] || ''}${esc(name)}</span>`;
+}
+function saveUi() {
+	lsSet(LS_UI, { ...state.ui, current: state.current });
+}
+
+/* header and notices */
+function renderWho() {
+	const who = document.getElementById('who');
+	let name = state.me.name || 'Not signed in';
+	if (state.mode === 'starting') name = 'Connecting…';
+	let avatar = `<span class="avatar-fallback">${esc(name.slice(0, 1).toUpperCase())}</span>`;
+	if (state.me.avatar) avatar = `<img src="${esc(state.me.avatar)}" alt="">`;
+	who.innerHTML = `${avatar}<span>${esc(name)}</span><span class="save" id="save-status"></span>`;
+	setSave(state.saveStatus);
+}
+function setSave(status, detail) {
+	state.saveStatus = status;
+	const el = document.getElementById('save-status');
+	if (!el) return;
+	el.className = 'save';
+	if (status === 'saving') el.textContent = '· Saving…';
+	else if (status === 'saved') el.innerHTML = `· ${ICON.correct} Saved`;
+	else if (status === 'local') el.textContent = '· Saved in this browser';
+	else if (status === 'error') {
+		el.className = 'save err';
+		el.textContent = `· Not saved: ${detail || 'try again'}`;
+	} else el.textContent = '';
+}
+function renderModeNote() {
+	const note = document.getElementById('mode-note');
+	if (state.mode === 'db' && state.canWrite) {
+		note.textContent = 'One shared review per ticket: anyone can change a rating, and each shows who gave it.';
+	} else if (state.mode === 'db') {
+		note.innerHTML = '<span class="warn">You can see the ratings but not save yours to the shared store. Ask Vincent for Contributor access.</span> Yours stay in this browser.';
+	} else if (state.mode === 'local') {
+		note.innerHTML = '<span class="warn">Not connected to the shared ratings:</span> yours stay in this browser.';
+	} else {
+		note.textContent = '';
+	}
+}
+function renderNav() {
+	const total = TICKETS.length;
+	const done = doneCount(state.mySession);
+	const all = total > 0 && done === total;
+	const selected = state.view === 'session';
+	document.getElementById('sess-tabs').innerHTML = `<a class="tab" href="#review" aria-current="${selected ? 'page' : 'false'}" aria-label="Reviews, ${done} of ${total} tickets done">${all ? ICON.done : ''}Reviews<span class="cnt${all ? ' all' : ''}">${done}/${total}</span></a>`;
+	document.getElementById('tab-results').setAttribute('aria-current', state.view === 'results' ? 'page' : 'false');
+}
+
+/* how to rate */
+function renderHowto() {
+	const defs = RATINGS.map(([value, label, text]) => `<div>${pill(value, label)}<span>${esc(text)}</span></div>`).join('');
+	const reasons = TAGS.map(([, label, text]) => `<div><dt>${esc(label)}</dt><dd>${esc(text)}</dd></div>`).join('');
+	document.getElementById('howto-body').innerHTML = `
+		<div class="defs">${defs}</div>
+		<div>
+			<h3>Steps</h3>
+			<ol class="steps">
+				<li>Pick a ticket under Tickets on the right (at the top on a narrow screen). A green check marks each ticket you have submitted.</li>
+				<li>Read its real DSS thread first, under Real thread on the right (the Real thread button at the bottom on a narrow screen): what the analyst asked, what developers found, and how it ended. The orange line marks where the bot drafted its post: it did not see the replies below it.</li>
+				<li>Rate each section of the bot's post and thread reply against that thread. A section the post left out is still rated: was leaving it out right?</li>
+				<li>For Partial or Incorrect, pick at least one reason, or add your own with + Other reason, and write what it should say.</li>
+				<li>Answer the overall question and submit. The ticket gets its check. Each ticket has one shared review: anyone can change a rating, and each rating shows who gave it.</li>
+			</ol>
+		</div>
+		<div>
+			<h3>Reasons</h3>
+			<dl class="reasons">${reasons}</dl>
+		</div>`;
+	document.getElementById('howto').open = state.ui.howtoOpen === true;
+}
+
+/* session view */
+function renderSession() {
+	renderBanner();
+	renderSide();
+	renderTicket();
+}
+function renderBanner() {
+	const el = document.getElementById('banner');
+	el.hidden = true;
+	el.innerHTML = '';
+}
+function showingThread() {
+	return state.pane === 'thread' && (!narrow.matches || state.sheet);
+}
+function renderSide() {
+	const side = document.getElementById('side');
+	const thread = showingThread();
+	side.classList.toggle('sheet', state.sheet && narrow.matches);
+	document.body.classList.toggle('sheet-open', state.sheet && narrow.matches);
+	for (const button of side.querySelectorAll('[data-pane]')) {
+		button.setAttribute('aria-selected', String((button.dataset.pane === 'thread') === thread));
+	}
+	document.getElementById('pane-tickets').hidden = thread;
+	document.getElementById('pane-thread').hidden = !thread;
+	renderRail();
+	renderThreadPane();
+}
+function raterFaces(ticket) {
+	let faces = '';
+	for (const person of raters(ticket)) {
+		const face = avatar(person.id, person.name).replace('class="av"', `class="av${person.done ? ' done' : ''}" title="${esc(person.name)}"`);
+		faces += face;
+	}
+	return faces ? `<span class="rav">${faces}</span>` : '';
+}
+function renderRail() {
+	refreshRealButton();
+	const tickets = sessionTickets(state.session);
+	const ticket = currentTicket();
+	let items = '';
+	let bar = '';
+	for (let index = 0; index < tickets.length; index++) {
+		const item = tickets[index];
+		const status = statusOf(state.session, item);
+		bar += `<span class="s-${status.kind}"></span>`;
+		items += `<li><button type="button" data-key="${esc(item.key)}" aria-current="${item.key === ticket?.key}">
+			<span class="si">${statusIcon(status.kind)}</span>
+			<span class="rk">${index + 1}. ${esc(item.key)}</span>
+			<span class="rs">${esc(item.filed.summary)}</span>
+			<span class="rp ${status.kind}">${esc(status.text)}</span>
+			${raterFaces(item)}
+		</button></li>`;
+	}
+	document.getElementById('pane-tickets').innerHTML = `<div class="rail-head">
+		<div class="rail-title"><span class="eyebrow">DSS tickets, newest first</span><span class="rail-count">${doneCount(state.session)} of ${tickets.length} done</span></div>
+		<span class="pbar" aria-hidden="true">${bar}</span>
+	</div>
+	<ol class="rail-list">${items}</ol>`;
+}
+function renderThreadPane() {
+	const ticket = currentTicket();
+	const pane = document.getElementById('pane-thread');
+	if (!ticket) {
+		pane.innerHTML = '<p class="pane-note">No ticket open.</p>';
+		return;
+	}
+	let slack = '';
+	if (ticket.link) slack = ` · <a href="${esc(ticket.link)}" target="_blank" rel="noopener">Open in Slack</a>`;
+	pane.innerHTML = `<p class="pane-note"><b>${esc(ticket.key)}</b> · the real DSS thread, to check against while you rate${slack}</p>${realThread(ticket)}`;
+}
+function realThread(ticket) {
+	let html = '<ol class="rt sl">';
+	for (const message of ticket.real || []) {
+		if (message.marker) {
+			html += `<li class="rt-marker" title="The bot drafted its post here and did not see the replies below"><span>The bot's view ends here · ${esc(message.time)}</span></li>`;
+			continue;
+		}
+		let files = '';
+		for (const name of message.files || []) files += `<span class="rt-file">${ICON.file}${esc(name)}</span>`;
+		const role = message.label ?? ROLE[message.role] ?? '';
+		html += `<li class="rt-msg"><span class="rt-av rt-${esc(message.role)}" aria-hidden="true">${esc(initials(message.who))}</span><div>
+			<div class="rt-head"><b>${esc(message.who)}</b>${role ? `<span class="rt-role">${esc(role)}</span>` : ''}<span class="rt-time">${esc(message.time)}</span></div>
+			<div class="rt-text">${md(message.text)}</div>${files ? `<div class="rt-files">${files}</div>` : ''}
+		</div></li>`;
+	}
+	html += '</ol>';
+	const outcome = ticket.outcome;
+	if (outcome) {
+		const people = ticket.time?.developers;
+		let worked = '';
+		if (people?.first_reply) {
+			worked = `<p><b>Replies from others than the raiser:</b> ${people.replies}, the first at ${esc(people.first_reply)}, the last at ${esc(people.last_reply)} (${esc(duration(people.solving_minutes))})</p>`;
+		}
+		const jira = [`<b>Jira:</b> ${esc(outcome.resolution)}`];
+		if (outcome.resolved) jira.push(`resolved ${esc(outcome.resolved)}`);
+		jira.push(esc(outcome.labels));
+		let caveat = '';
+		if (outcome.caveat) caveat = `<p class="rt-caveat">${ICON.alert}<span>${esc(outcome.caveat)}</span></p>`;
+		html += `<div class="rt-out"><p class="eyebrow">Outcome</p><p>${jira.join(' · ')}</p><p><b>${esc(outcome.by || 'Summary')}:</b> ${esc(outcome.summary)}</p>${caveat}${worked}</div>`;
+	}
+	return html;
+}
+
+/* the ticket */
+function renderTicket() {
+	const el = document.getElementById('ticket');
+	const ticket = currentTicket();
+	if (!ticket) {
+		el.classList.remove('show-missing');
+		el.innerHTML = emptySession();
+		return;
+	}
+	const review = reviewOf(state.session, ticket.key);
+	let mode = 'edit';
+	if (!canRate(state.session)) mode = 'view';
+	else if (review?.submittedAt) mode = 'done';
+	let posted = `as the bot posted it in #${esc(ticket.channel?.name || 'data-dev-support-assist')}`;
+	if (ticket.botLink) posted += ` · <a href="${esc(ticket.botLink)}" target="_blank" rel="noopener">open in Slack</a>`;
+	el.classList.toggle('show-missing', state.showMissing && mode === 'edit');
+	el.innerHTML = ticketHead(ticket)
+		+ compareBar(ticket)
+		+ `<div class="group"><h3>The bot's post</h3><span>${posted}</span></div>`
+		+ messageBlock(ticket, ticket.post, 'post', mode)
+		+ '<div class="group"><h3>The bot\'s thread reply</h3><span>the proof, posted under the post</span></div>'
+		+ messageBlock(ticket, ticket.thread, 'thread', mode)
+		+ overallCard(ticket, review, mode)
+		+ submitBar(ticket, review, mode);
+	updateProgress();
+}
+function emptySession() {
+	if (state.mode === 'db' && !state.ticketsLoaded) {
+		if (state.loadFailed) return '<div class="card empty"><b>The tickets did not load.</b>Reload the page to try again.</div>';
+		return '<div class="card empty"><b>Loading the tickets…</b></div>';
+	}
+	return `<div class="card empty"><b>No DSS tickets here yet.</b>Refresh from Slack reads the bot's posts in the assist channels from DSS-${FIRST_DSS} on, with their real DSS threads.<div class="empty-actions"><button type="button" class="btn btn-primary" data-act="refresh">Refresh from Slack</button></div></div>`;
+}
+function ticketHead(ticket) {
+	const tickets = sessionTickets(state.session);
+	const filed = ticket.filed || {};
+	const status = statusOf(state.session, ticket);
+	const meta = [];
+	if (filed.reporter) meta.push(esc(filed.reporter));
+	if (filed.dvt) meta.push(`<span class="mono">DVT${esc(filed.dvt)}</span>`);
+	if (filed.client) meta.push(esc(filed.client));
+	if (filed.due) meta.push(`review due ${esc(filed.due)}`);
+	if (filed.created) meta.push(`filed ${esc(slackTime(Date.parse(filed.created) / 1000))}`);
+	return `<section class="card t-head">
+		<div class="t-main">
+			<p class="eyebrow">Ticket ${tickets.indexOf(ticket) + 1} of ${tickets.length}</p>
+			<h2><span class="mono">${esc(ticket.key)}</span>${esc(filed.summary || '')}</h2>
+			<p class="meta">${meta.join(' · ')}</p>
+			${timeLine(ticket)}
+			${ratersRow(ticket)}
+		</div>
+		<span class="st-pill st-${status.kind}" id="st-pill">${statusIcon(status.kind)}${esc(status.text)}</span>
+	</section>`;
+}
+/* How long the bot and the developers took: the bot from its run, the developers from their
+   first reply in the real thread to their last (elapsed time, waits included, not hours worked) */
+function timeLine(ticket) {
+	const time = ticket.time;
+	if (!time) return '';
+	const parts = [];
+	if (time.bot) {
+		parts.push(`<span class="tm"><b>Bot</b> ${esc(duration(time.bot.seconds / 60))} · ${esc(time.bot.tokens.toLocaleString())} tokens · ≈ $${esc(time.bot.cost_usd.toFixed(2))}</span>`);
+	}
+	const people = time.developers;
+	if (people?.solving_minutes != null) {
+		parts.push(`<span class="tm"><b>Developers</b> ${esc(duration(people.solving_minutes))} from first reply to last · first reply ${esc(duration(people.response_minutes))} after the post</span>`);
+	} else if (people) {
+		parts.push('<span class="tm"><b>Developers</b> no reply in the thread</span>');
+	}
+	return `<p class="times">${parts.join('')}</p>`;
+}
+function duration(minutes) {
+	if (minutes == null) return 'not recorded';
+	if (minutes < 1) return `${Math.round(minutes * 60)} s`;
+	if (minutes < 60) return `${Math.round(minutes)} min`;
+	const whole = Math.round(minutes);
+	if (whole < 24 * 60) return `${Math.floor(whole / 60)} h ${whole % 60} min`;
+	const hours = Math.round(minutes / 60);
+	return `${Math.floor(hours / 24)} d ${hours % 24} h`;
+}
+function botTime(ticket) {
+	const marker = (ticket.real || []).find((message) => message.marker);
+	return marker ? marker.time : '';
+}
+function slackHeader(ticket, kind) {
+	const lead = kind === 'thread' ? '<span class="thread-tag">Reply in thread ·</span>' : '';
+	return `<span class="bot-av" aria-hidden="true">DSS</span>${lead}<span class="bot-name">DDEV Support Bot</span><span class="app">APP</span><span class="bot-time">${esc(botTime(ticket))}</span>`;
+}
+function messageBlock(ticket, parts, kind, mode) {
+	let heading = 'Your rating';
+	if (mode !== 'edit') heading = 'Ratings';
+	let html = `<div class="msg"><div class="row row-head"><div class="cs">${slackHeader(ticket, kind)}</div><div class="cr">${esc(heading)}</div></div>`;
+	for (const part of parts) {
+		if (SECTIONS[part.id]) {
+			html += ratedRow(ticket, part, mode);
+		} else {
+			html += `<div class="row row-ctx"><div class="cs sl">${md(part.md)}${compareBox(ticket, part.id, part.md)}</div><div class="cr">${esc(CONTEXT[part.id] || 'Context')} · shown for context, not rated</div></div>`;
+		}
+	}
+	if (comparing(ticket)) {
+		const shown = new Set(parts.map((part) => part.id));
+		for (const part of ticket.previous[kind]) {
+			if (shown.has(part.id) || !part.md) continue;
+			html += `<div class="row row-ctx"><div class="cs sl"><div class="prev"><span class="chg chg-diff">Only in the ${esc(runLabel(ticket.previous.run))}</span></div><div class="was">${md(part.md)}</div></div><div class="cr">${esc(SECTIONS[part.id]?.title || CONTEXT[part.id] || 'Context')} · left out of this run</div></div>`;
+		}
+	}
+	return html + '</div>';
+}
+function ratedRow(ticket, part, mode) {
+	let content = `<div class="absent">${esc(ABSENT[part.id])}<span>Rate whether leaving it out was right.</span></div>`;
+	if (part.md) content = md(part.md);
+	let right = rateForm(ticket, part.id);
+	if (mode !== 'edit') right = resultView(ticket, part.id);
+	return `<div class="row" id="row-${esc(ticket.key)}-${part.id}" data-sec="${part.id}"><div class="cs sl">${content}${compareBox(ticket, part.id, part.md)}</div><div class="cr">${right}${previousVotes(ticket, part.id)}</div></div>`;
+}
+function rateForm(ticket, id) {
+	const section = SECTIONS[id];
+	const rating = reviewOf(state.session, ticket.key)?.sections?.[id] || {};
+	const base = `${ticket.key}-${id}`;
+	let radios = '';
+	for (const [value, label] of RATINGS) {
+		const checked = rating.rating === value ? ' checked' : '';
+		radios += `<input class="vh" type="radio" id="r-${base}-${value}" name="r-${base}" value="${value}" data-kind="rating" data-sec="${id}"${checked}><label for="r-${base}-${value}" class="l-${value}">${ICON[value]}${label}</label>`;
+	}
+	let chips = '';
+	for (const [value, label, hint] of TAGS) {
+		const checked = (rating.tags || []).includes(value) ? ' checked' : '';
+		chips += `<input class="vh" type="checkbox" id="t-${base}-${value}" value="${value}" data-kind="tag" data-sec="${id}"${checked}><label for="t-${base}-${value}" class="chip" title="${esc(hint)}">${esc(label)}</label>`;
+	}
+	const own = typeof rating.why === 'string';
+	chips += `<input class="vh" type="checkbox" id="o-${base}" data-kind="own" data-sec="${id}"${own ? ' checked' : ''}><label for="o-${base}" class="chip chip-own" title="Give the reason in your own words">+ Other reason</label>`;
+	const needsReason = rating.rating && rating.rating !== 'correct';
+	const others = `<div class="others" data-sec="${id}">${othersBlock(ticket, id)}</div>`;
+	return `<fieldset class="rate ${fieldClasses(rating)}" data-sec="${id}">
+		<legend><span class="sec-title">${esc(section.title)}</span>${sectionFaces(ticket, id)}</legend>
+		<p class="means"><b>Correct:</b> ${esc(section.correct)}</p>
+		<div class="seg">${radios}</div>
+		<div class="reason tone-${esc(rating.rating || '')}"${needsReason ? '' : ' hidden'}>
+			<div class="reason-h" id="rh-${base}">Why? Pick at least one, or add your own</div>
+			<div class="chips" role="group" aria-labelledby="rh-${base}">${chips}</div>
+			<input type="text" class="own" id="w-${base}" data-kind="why" data-sec="${id}" value="${esc(rating.why || '')}" placeholder="The reason, in your own words" aria-label="Other reason"${own ? '' : ' hidden'}>
+			<label class="should-l" for="s-${base}">What it should say</label>
+			<textarea id="s-${base}" rows="2" data-kind="should" data-sec="${id}" placeholder="${esc(section.placeholder)}">${esc(rating.should || '')}</textarea>
+		</div>
+		<p class="need">${ICON.alert}<span>${esc(sectionGap(rating) || 'Rate this section')}</span></p>
+	</fieldset>${others}`;
+}
+function fieldClasses(rating) {
+	if (!rating.rating) return 'unrated';
+	if (sectionGap(rating)) return 'incomplete';
+	return 'complete';
+}
+function vote(name, rating, tag, id) {
+	let badge = '<span class="pill pill-none">Not rated</span>';
+	if (rating.rating) badge = pill(rating.rating);
+	let more = '';
+	if (rating.rating && rating.rating !== 'correct') {
+		const reasons = (rating.tags || []).map((tag) => esc(TAG_LABEL[tag] || tag));
+		if (rating.why) reasons.push(`${TAG_LABEL.other}: ${esc(rating.why)}`);
+		const should = rating.should ? `<p class="vote-should"><span>Should say:</span> ${esc(rating.should)}</p>` : '';
+		more = `<div class="vote-more">${reasons.join(' · ')}${should}</div>`;
+	}
+	return `<li class="vote"><span class="who-n">${avatar(id, name)}<span>${esc(name)}${tag ? `<em>${esc(tag)}</em>` : ''}</span></span>${badge}${more}</li>`;
+}
+function othersBlock(ticket, id) {
+	const others = othersFor(state.session, ticket.key);
+	if (!others.length) return '';
+	return `<p class="eyebrow">Others</p><ul class="votes">${others.map((item) => vote(item.name, item.entry.sections?.[id] || {}, item.tag, item.entry.session)).join('')}</ul>`;
+}
+function overallOthers(ticket) {
+	const others = othersFor(state.session, ticket.key);
+	if (!others.length) return '';
+	return `<p class="eyebrow">Others</p><ul class="votes">${others.map((item) => overallVote(item.name, item.entry.overall || {}, item.tag, item.entry.session)).join('')}</ul>`;
+}
+function resultView(ticket, id) {
+	const section = SECTIONS[id];
+	const review = reviewOf(state.session, ticket.key);
+	const mine = review?.sections?.[id] || {};
+	const others = othersFor(state.session, ticket.key);
+	const given = [];
+	if (mine.rating) given.push(mine.rating);
+	for (const item of others) {
+		const rating = item.entry.sections?.[id]?.rating;
+		if (rating) given.push(rating);
+	}
+	let agree = '';
+	if (others.length && given.length > 1) {
+		agree = '<span class="agree no">Ratings differ</span>';
+		if (given.every((rating) => rating === given[0])) agree = '<span class="agree">All agree</span>';
+	}
+	let list = vote(nameOf(mine.by), mine, draftTag(review), mine.by);
+	for (const item of others) list += vote(item.name, item.entry.sections?.[id] || {}, item.tag, item.entry.session);
+	return `<div class="sec-head"><span class="sec-title">${esc(section.title)}</span>${agree}</div><ul class="votes">${list}</ul>`;
+}
+function overallCard(ticket, review, mode) {
+	const overall = review?.overall || {};
+	const key = ticket.key;
+	const title = 'Overall: would you act on this post?';
+	if (mode !== 'edit') {
+		let list = overallVote(nameOf(overall.by), overall, draftTag(review), overall.by);
+		for (const item of othersFor(state.session, key)) list += overallVote(item.name, item.entry.overall || {}, item.tag, item.entry.session);
+		return `<section class="card overall" id="overall"><div class="sec-head"><span class="sec-title">${title}</span></div><ul class="votes">${list}</ul>${previousOverall(ticket)}</section>`;
+	}
+	let radios = '';
+	for (const [value, label, tone] of ACTS) {
+		const checked = overall.act === value ? ' checked' : '';
+		radios += `<input class="vh" type="radio" id="a-${key}-${value}" name="a-${key}" value="${value}" data-kind="act"${checked}><label for="a-${key}-${value}" class="l-${tone}">${ICON[tone]}${label}</label>`;
+	}
+	const others = `<div class="others" data-sec="overall">${overallOthers(ticket)}</div>`;
+	const gap = overallGap(overall);
+	let classes = 'complete';
+	if (!overall.act) classes = 'unrated';
+	else if (gap) classes = 'incomplete';
+	return `<section class="card overall" id="overall">
+		<fieldset class="ov ${classes}">
+			<legend><span class="sec-title">${title}</span></legend>
+			<div class="seg">${radios}</div>
+			<label class="harm"><input type="checkbox" id="h-${key}" data-kind="harmful"${overall.harmful ? ' checked' : ''}><span><b>Harmful if followed</b>Acting on it would cost the analyst real time or put a wrong number in a deliverable.</span></label>
+			<label class="should-l" for="n-${key}">Anything else? <span class="opt">Optional, unless you marked it harmful</span></label>
+			<textarea id="n-${key}" rows="2" data-kind="note" placeholder="What a reader should know about this post">${esc(overall.note || '')}</textarea>
+			<p class="need">${ICON.alert}<span>${esc(gap || 'Answer the overall question')}</span></p>
+		</fieldset>${others}${previousOverall(ticket)}
+	</section>`;
+}
+function overallVote(name, overall, tag, id) {
+	const act = ACTS.find((item) => item[0] === overall.act);
+	let badge = '<span class="pill pill-none">Not answered</span>';
+	if (act) badge = pill(act[2], act[1]);
+	const harm = overall.harmful ? `<span class="pill pill-incorrect">${ICON.alert}Harmful</span>` : '';
+	const note = overall.note ? `<div class="vote-more"><p class="vote-should">${esc(overall.note)}</p></div>` : '';
+	return `<li class="vote"><span class="who-n">${avatar(id, name)}<span>${esc(name)}${tag ? `<em>${esc(tag)}</em>` : ''}</span></span><span style="display:flex;flex-wrap:wrap;gap:6px">${badge}${harm}</span>${note}</li>`;
+}
+const LIST_ICON = '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1" fill="currentColor"/><circle cx="2.6" cy="8" r="1" fill="currentColor"/><circle cx="2.6" cy="12" r="1" fill="currentColor"/></svg>';
+/* the button beside Submit names the side pane it opens; a dot marks DSS tickets not reviewed yet */
+function realLabel() {
+	if (!showingThread()) return `${ICON.thread}Real thread`;
+	const open = TICKETS.some((ticket) => !reviewOf(state.session, ticket.key)?.submittedAt);
+	const dot = open ? '<span class="dot" role="img" aria-label="some are not reviewed yet" title="Some DSS tickets are not reviewed yet"></span>' : '';
+	return `${LIST_ICON}DSS tickets${dot}`;
+}
+function refreshRealButton() {
+	for (const button of document.querySelectorAll('#bar [data-act="real"]')) button.innerHTML = realLabel();
+}
+function toggleReal() {
+	if (!showingThread()) openReal();
+	else if (state.sheet) closeSheet();
+	else setPane('tickets');
+}
+function submitBar(ticket, review, mode) {
+	const thread = `<button type="button" class="btn btn-ghost" data-act="real">${realLabel()}</button>`;
+	if (mode === 'edit') {
+		return `<div class="bar" id="bar">
+			<div class="bar-left"><p class="progress" id="progress"></p><div class="meter" id="meter" aria-label="Sections"></div></div>
+			<div class="bar-actions">${thread}<button type="button" class="btn btn-primary" data-act="submit">Submit ratings</button></div>
+		</div>`;
+	}
+	if (mode === 'view') {
+		const status = statusOf(state.session, ticket);
+		return `<div class="bar" id="bar">
+			<div class="bar-left"><p class="progress">${esc(sessionById(state.session).name)}: ${esc(status.text)}</p></div>
+			<div class="bar-actions">${thread}</div>
+		</div>`;
+	}
+	let next = '<button type="button" class="btn btn-primary" data-act="results">See results</button>';
+	const open = sessionTickets(state.session).find((item) => !reviewOf(state.session, item.key)?.submittedAt);
+	if (open) next = `<button type="button" class="btn btn-primary" data-act="go" data-key="${esc(open.key)}">Next ticket: ${esc(open.key)}${ICON.arrow}</button>`;
+	return `<div class="bar" id="bar">
+		<div class="bar-left"><p class="progress done">${ICON.done}Done · submitted ${esc(fmtTime(review.submittedAt))}</p></div>
+		<div class="bar-actions">${thread}<button type="button" class="btn btn-ghost" data-act="edit">Change my ratings</button>${next}</div>
+	</div>`;
+}
+function updateProgress() {
+	const ticket = currentTicket();
+	const pillEl = document.getElementById('st-pill');
+	if (ticket && pillEl) {
+		const status = statusOf(state.session, ticket);
+		pillEl.className = `st-pill st-${status.kind}`;
+		pillEl.innerHTML = `${statusIcon(status.kind)}${esc(status.text)}`;
+	}
+	const progress = document.getElementById('progress');
+	const meter = document.getElementById('meter');
+	if (!progress || !meter) return;
+	const review = reviewOf(state.session, ticket.key);
+	const parts = ratedParts(ticket);
+	let rated = 0;
+	let needs = 0;
+	let cells = '';
+	let previousGroup = 'post';
+	for (const part of parts) {
+		const group = ticket.post.includes(part) ? 'post' : 'thread';
+		if (group !== previousGroup) {
+			cells += '<span class="m-gap" aria-hidden="true"></span>';
+			previousGroup = group;
+		}
+		const rating = review?.sections?.[part.id] || {};
+		if (rating.rating) rated++;
+		const gap = sectionGap(rating);
+		if (gap) needs++;
+		let classes = '';
+		let icon = '';
+		if (rating.rating) {
+			classes = `m-${rating.rating}`;
+			icon = ICON[rating.rating];
+		}
+		if (gap) classes += ' m-need';
+		const label = `${SECTIONS[part.id].title}: ${rating.rating || 'not rated'}${gap ? ', needs a reason' : ''}`;
+		cells += `<button type="button" class="${classes}" data-jump="${part.id}" title="${esc(label)}" aria-label="${esc(label)}">${icon}</button>`;
+	}
+	meter.innerHTML = cells;
+	const bits = [`<b>${rated} of ${parts.length}</b> sections rated`];
+	if (needs) bits.push(`${needs} need${needs === 1 ? 's' : ''} a reason`);
+	const gap = overallGap(review?.overall);
+	if (gap === 'Answer the overall question') bits.push('overall question not answered');
+	else if (gap) bits.push('say what harm it would do');
+	const ready = rated === parts.length && !needs && !gap;
+	progress.className = 'progress';
+	progress.innerHTML = ready ? '<b>Ready to submit.</b> The ticket gets its check.' : bits.join(' · ');
+	if (state.showMissing && !ready) {
+		progress.className = 'progress err';
+		progress.innerHTML = `Finish the highlighted parts first: ${bits.join(' · ')}`;
+	}
+}
+function refreshSection(id) {
+	const rating = reviewOf(state.session, currentTicket().key)?.sections?.[id] || {};
+	const fieldset = document.querySelector(`#ticket fieldset.rate[data-sec="${id}"]`);
+	if (!fieldset) return;
+	fieldset.classList.remove('unrated', 'incomplete', 'complete');
+	fieldset.classList.add(fieldClasses(rating));
+	const reason = fieldset.querySelector('.reason');
+	reason.hidden = !(rating.rating && rating.rating !== 'correct');
+	reason.className = `reason tone-${rating.rating || ''}`;
+	fieldset.querySelector('input.own').hidden = typeof rating.why !== 'string';
+	fieldset.querySelector('.need span').textContent = sectionGap(rating) || 'Rate this section';
+}
+function refreshOverall() {
+	const overall = reviewOf(state.session, currentTicket().key)?.overall || {};
+	const fieldset = document.querySelector('#ticket fieldset.ov');
+	if (!fieldset) return;
+	const gap = overallGap(overall);
+	fieldset.classList.remove('unrated', 'incomplete', 'complete');
+	let classes = 'complete';
+	if (!overall.act) classes = 'unrated';
+	else if (gap) classes = 'incomplete';
+	fieldset.classList.add(classes);
+	fieldset.querySelector('.need span').textContent = gap || 'Answer the overall question';
+}
+
+/* actions */
+function jumpTo(id) {
+	const ticket = currentTicket();
+	const target = id === 'overall' ? document.getElementById('overall') : document.getElementById(`row-${ticket.key}-${id}`);
+	if (!target) return;
+	target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+	const focusable = target.querySelector('input:checked, input, textarea');
+	if (focusable) focusable.focus({ preventScroll: true });
+}
+function submit() {
+	const ticket = currentTicket();
+	const review = ensureReview(state.session, ticket.key);
+	const missing = missingFor(ticket, review);
+	if (missing.length) {
+		state.showMissing = true;
+		document.getElementById('ticket').classList.add('show-missing');
+		updateProgress();
+		jumpTo(missing[0]);
+		return;
+	}
+	for (const rating of Object.values(review.sections)) {
+		if (rating.rating === 'correct') {
+			delete rating.tags;
+			delete rating.should;
+			delete rating.why;
+		} else if (!(rating.why || '').trim()) {
+			delete rating.why;
+		}
+	}
+	const now = new Date().toISOString();
+	review.submittedAt = now;
+	if (!review.firstSubmittedAt) review.firstSubmittedAt = now;
+	review.run = ticket.run;
+	review.submittedBy = state.me.id || null;
+	touch(review);
+	state.showMissing = false;
+	scheduleSave(reviewId(state.session, ticket.key), true, 'all');
+	renderNav();
+	renderRail();
+	renderTicket();
+	document.getElementById('ticket').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+}
+function reopen() {
+	const ticket = currentTicket();
+	const review = reviewOf(state.session, ticket.key);
+	review.submittedAt = null;
+	review.submittedBy = null;
+	touch(review);
+	scheduleSave(reviewId(state.session, ticket.key), false, 'status');
+	renderNav();
+	renderRail();
+	renderTicket();
+}
+function selectTicket(key) {
+	state.current[state.session] = key;
+	state.showMissing = false;
+	state.sheet = false;
+	state.pane = 'thread';  // a new ticket starts with its thread
+	saveUi();
+	renderSide();
+	renderTicket();
+	document.getElementById('view-session').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+}
+function setPane(pane) {
+	state.pane = pane;
+	saveUi();
+	renderSide();
+	document.getElementById('side').scrollTop = 0;
+}
+function openReal() {
+	state.pane = 'thread';
+	if (narrow.matches) state.sheet = true;
+	saveUi();
+	renderSide();
+	const side = document.getElementById('side');
+	side.scrollTop = 0;
+	if (state.sheet) side.querySelector('.side-close').focus();
+}
+function closeSheet() {
+	state.sheet = false;
+	renderSide();
+	const button = document.querySelector('#bar [data-act="real"]');
+	if (button) button.focus({ preventScroll: true });
+}
+
+/* results */
+/* *which* is 'current' (each ticket's newest run) or 'previous' (the run before it, where a
+   ticket has one) */
+function collectRows(which = resultsRun()) {
+	const rows = [];
+	for (const ticket of TICKETS) {
+		let run = ticket.run;
+		if (which === 'previous') {
+			if (!ticket.previous) continue;
+			run = ticket.previous.run;
+		}
+		for (const session of SESSIONS) {
+			const review = reviewOf(session.id, ticket.key, run);
+			if (review?.submittedAt) rows.push({ key: ticket.key, who: nameOf(review.submittedBy) || 'Someone', entry: review });
+		}
+		if (state.includeSample && ticket.sample && which === 'current') rows.push({ key: ticket.key, who: 'Example reviewer', sample: true, entry: ticket.sample });
+	}
+	return rows;
+}
+function resultsRun() {
+	return state.ui.resultsRun === 'previous' ? 'previous' : 'current';
+}
+function runSwitch() {
+	if (!TICKETS.some((ticket) => ticket.previous)) return '';
+	let buttons = '';
+	for (const [value, label] of [['current', 'This run'], ['previous', 'Previous run']]) {
+		buttons += `<input class="vh" type="radio" id="rr-${value}" name="results-run" value="${value}"${resultsRun() === value ? ' checked' : ''}><label for="rr-${value}">${label}</label>`;
+	}
+	return `<div class="seg run-seg" role="radiogroup" aria-label="Which run's ratings">${buttons}</div>`;
+}
+/* Each section's ratings on the previous run beside this run's: did the change help? */
+function runsPanel() {
+	if (!TICKETS.some((ticket) => ticket.previous)) return '';
+	const before = collectRows('previous');
+	const after = collectRows('current');
+	function bar(rows, id) {
+		const counts = { correct: 0, partial: 0, incorrect: 0 };
+		for (const row of rows) {
+			const rating = row.entry.sections?.[id]?.rating;
+			if (rating) counts[rating]++;
+		}
+		const total = counts.correct + counts.partial + counts.incorrect;
+		if (!total) return '<span class="na">not rated yet</span>';
+		let spans = '';
+		for (const [value, label] of RATINGS) {
+			if (counts[value]) spans += `<span class="sb-${value}" style="flex-grow:${counts[value]}" title="${label}: ${counts[value]} of ${total}"></span>`;
+		}
+		const aria = RATINGS.map(([value, label]) => `${label} ${counts[value]}`).join(', ');
+		return `<div class="sbar" role="img" aria-label="${aria}">${spans}</div><span class="na">${counts.correct} of ${total} correct</span>`;
+	}
+	let body = '';
+	for (const id of SECTION_ORDER) {
+		body += `<tr><td>${esc(SECTIONS[id].title)}</td><td>${bar(before, id)}</td><td>${bar(after, id)}</td></tr>`;
+	}
+	let changed = 0;
+	let total = 0;
+	for (const ticket of TICKETS) {
+		if (!ticket.previous) continue;
+		changed += changedCount(ticket);
+		total += ratedParts(ticket).length;
+	}
+	return `<section class="card panel">
+		<h3>Previous run against this run</h3>
+		<p class="means">Submitted ratings of each run, by section. ${changed} of ${total} rated sections changed between the runs.</p>
+		<div class="tbl-wrap"><table class="runs-tbl">
+			<thead><tr><th>Section</th><th>Previous run</th><th>This run</th></tr></thead>
+			<tbody>${body}</tbody>
+		</table></div>
+	</section>`;
+}
+function shortStatus(kind) {
+	if (kind === 'done') return 'Done';
+	if (kind === 'progress') return 'In progress';
+	return 'Not started';
+}
+function progressPanel() {
+	let head = '<th>Ticket</th>';
+	head += '<th>Review</th>';
+	let body = '';
+	for (const ticket of TICKETS) {
+		let cells = '';
+		for (const session of SESSIONS) {
+			if (!session.tickets.includes(ticket.key)) {
+				cells += '<td class="na">Not assigned</td>';
+				continue;
+			}
+			const kind = statusOf(session.id, ticket).kind;
+			cells += `<td><span class="mx mx-${kind}">${statusIcon(kind)}${shortStatus(kind)}</span></td>`;
+		}
+		body += `<tr><td><span class="mono">${esc(ticket.key)}</span> ${esc(ticket.filed.summary)}</td>${cells}</tr>`;
+	}
+	return `<section class="card panel"><h3>Progress</h3><div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></section>`;
+}
+/* how long the bot and the developers took on each ticket */
+function timePanel() {
+	let body = '';
+	const bot = [];
+	const people = [];
+	for (const ticket of TICKETS) {
+		const time = ticket.time;
+		if (!time) continue;
+		const developers = time.developers || {};
+		let botTime = null;
+		if (time.bot) {
+			botTime = time.bot.seconds / 60;
+			bot.push(botTime);
+		}
+		if (developers.solving_minutes != null) people.push(developers.solving_minutes);
+		body += `<tr><td><span class="mono">${esc(ticket.key)}</span> ${esc(ticket.filed.summary)}</td>
+			<td class="dur">${esc(duration(botTime))}</td>
+			<td class="dur">${esc(duration(developers.response_minutes))}</td>
+			<td class="dur">${esc(duration(developers.solving_minutes))}</td>
+			<td class="dur">${esc(developers.replies ?? '–')}</td></tr>`;
+	}
+	if (!body) return '';
+	const tiles = `<div class="stats">
+		<div class="stat"><div class="n">${esc(duration(median(bot)))}</div><div class="l">bot, median per ticket</div></div>
+		<div class="stat"><div class="n">${esc(duration(median(people)))}</div><div class="l">developers, median from first reply to last</div></div>
+	</div>`;
+	return `<section class="card panel"><h3>Time on each ticket</h3>
+		<p class="means">The bot's time is its run. The developers' time runs from their first reply in the real thread to their last: elapsed time, waits for the analyst included, not hours of work. Everyone who replied, other than the person who raised the ticket, counts as a developer here, so a manager's or a reviewer's reply counts too.</p>
+		${tiles}<div class="tbl-wrap"><table><thead><tr><th>Ticket</th><th class="dur">Bot</th><th class="dur">First developer reply, after the post</th><th class="dur">Developers, first reply to last</th><th class="dur">Developer replies</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
+}
+function median(values) {
+	if (!values.length) return null;
+	const sorted = [...values].sort((left, right) => left - right);
+	const middle = Math.floor(sorted.length / 2);
+	if (sorted.length % 2) return sorted[middle];
+	return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+function renderResults() {
+	const el = document.getElementById('view-results');
+	const rows = collectRows();
+	let sample = '';
+	if (TICKETS.some((ticket) => ticket.sample)) sample = `<label class="inc"><input type="checkbox" id="inc-sample"${state.includeSample ? ' checked' : ''}>Include the made-up example reviewer</label>`;
+	let which = 'Every submitted rating.';
+	if (TICKETS.some((ticket) => ticket.previous)) which = `Every submitted rating of the ${resultsRun() === 'previous' ? 'previous run' : 'newest run'} of each ticket.`;
+	const head = `<div class="res-head"><div><h2>Results</h2><p class="means">${which} Ratings not yet submitted show beside each section.</p></div>${runSwitch()}${sample}</div>`;
+	if (!rows.length) {
+		el.innerHTML = `<div class="results">${head}${runsPanel()}${progressPanel()}${timePanel()}<div class="card empty"><b>No submitted ratings yet.</b>Submit a ticket in your session and its ratings show here, with everyone else's.</div></div>`;
+		return;
+	}
+	let usable = 0;
+	let harmful = 0;
+	const reviewers = new Set();
+	for (const row of rows) {
+		reviewers.add(row.who);
+		if (row.entry.overall?.act === 'as_is' || row.entry.overall?.act === 'edits') usable++;
+		if (row.entry.overall?.harmful) harmful++;
+	}
+	const stats = `<div class="stats">
+		<div class="stat"><div class="n">${rows.length}</div><div class="l">posts rated, by ${reviewers.size} reviewer${reviewers.size === 1 ? '' : 's'}</div></div>
+		<div class="stat"><div class="n">${usable}</div><div class="l">usable, as is or after edits</div></div>
+		<div class="stat"><div class="n">${rows.length - usable}</div><div class="l">not usable</div></div>
+		<div class="stat"><div class="n">${harmful}</div><div class="l">marked harmful</div></div>
+	</div>`;
+
+	let table = '';
+	for (const id of SECTION_ORDER) {
+		const counts = { correct: 0, partial: 0, incorrect: 0 };
+		const byTicket = {};
+		for (const row of rows) {
+			const rating = row.entry.sections?.[id]?.rating;
+			if (!rating) continue;
+			counts[rating]++;
+			(byTicket[row.key] ||= []).push(rating);
+		}
+		const total = counts.correct + counts.partial + counts.incorrect;
+		let compared = 0;
+		let agreed = 0;
+		for (const ratings of Object.values(byTicket)) {
+			if (ratings.length < 2) continue;
+			compared++;
+			if (ratings.every((rating) => rating === ratings[0])) agreed++;
+		}
+		let bar = '';
+		for (const [value, label] of RATINGS) {
+			if (counts[value]) bar += `<span class="sb-${value}" style="flex-grow:${counts[value]}" title="${label}: ${counts[value]} of ${total}"></span>`;
+		}
+		const aria = RATINGS.map(([value, label]) => `${label} ${counts[value]}`).join(', ');
+		table += `<tr><td>${esc(SECTIONS[id].title)}</td><td><div class="sbar" role="img" aria-label="${aria}">${bar}</div></td>
+			<td class="num">${counts.correct}</td><td class="num">${counts.partial}</td><td class="num">${counts.incorrect}</td>
+			<td class="num">${compared ? `${agreed} of ${compared}` : '–'}</td></tr>`;
+	}
+	const legend = RATINGS.map(([value, label]) => pill(value, label)).join('');
+	const sections = `<section class="card panel">
+		<h3>Ratings by section</h3>
+		<div class="legend">${legend}</div>
+		<div class="tbl-wrap"><table>
+			<thead><tr><th>Section</th><th>Share of ratings</th><th class="num">Correct</th><th class="num">Partial</th><th class="num">Incorrect</th><th class="num" title="Tickets where every reviewer gave the same rating, of tickets with two or more reviewers">Agree</th></tr></thead>
+			<tbody>${table}</tbody>
+		</table></div>
+	</section>`;
+
+	const tagCounts = {};
+	const corrections = {};
+	for (const row of rows) {
+		for (const id of SECTION_ORDER) {
+			const rating = row.entry.sections?.[id];
+			if (!rating?.rating || rating.rating === 'correct') continue;
+			for (const tag of rating.tags || []) tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+			if (rating.why) tagCounts.other = (tagCounts.other || 0) + 1;
+			(corrections[row.key] ||= []).push({ id, who: row.who, sample: row.sample, rating });
+		}
+	}
+	const tagEntries = Object.entries(tagCounts).sort((left, right) => right[1] - left[1]);
+	const most = tagEntries.length ? tagEntries[0][1] : 1;
+	let tagRows = '';
+	for (const [tag, count] of tagEntries) {
+		tagRows += `<div class="tag-row"><span>${esc(TAG_LABEL[tag] || tag)}</span><div class="tag-bar" style="width:${(count / most) * 100}%" title="${count}"></div><span class="num">${count}</span></div>`;
+	}
+	const tags = `<section class="card panel"><h3>Reasons given</h3>${tagRows ? `<div class="tags-list">${tagRows}</div>` : '<p class="means">No Partial or Incorrect ratings yet.</p>'}</section>`;
+
+	let list = '';
+	for (const ticket of TICKETS) {
+		const items = corrections[ticket.key];
+		if (!items) continue;
+		list += `<p class="corr-t"><span class="mono">${esc(ticket.key)}</span>${esc(ticket.filed.summary)}</p><ul class="corr">`;
+		for (const item of items) {
+			const tagText = (item.rating.tags || []).map((tag) => esc(TAG_LABEL[tag] || tag)).join(' · ');
+			const who = `${esc(item.who)}${item.sample ? ' (made up)' : ''}`;
+			const why = item.rating.why ? `<p class="c-why">${TAG_LABEL.other}: ${esc(item.rating.why)}</p>` : '';
+			list += `<li><div class="c-head"><b>${esc(SECTIONS[item.id].title)}</b>${pill(item.rating.rating)}<span>${tagText}</span><span>${who}</span></div>${why}<p>${esc(item.rating.should || '')}</p></li>`;
+		}
+		list += '</ul>';
+	}
+	const fixes = `<section class="card panel"><h3>Corrections</h3><p class="means">What each section should have said. Each one can become a golden case for <code>dss eval</code>.</p>${list || '<p class="means">None yet.</p>'}</section>`;
+
+	el.innerHTML = `<div class="results">${head}${runsPanel()}${progressPanel()}${timePanel()}${stats}${sections}${tags}${fixes}</div>`;
+}
+
+/* views and routes: #results, #DSS-<n> (that ticket, from the link under its Slack post), else the viewer's reviews */
+function showView(view) {
+	state.view = view;
+	document.getElementById('view-pick').hidden = view !== 'pick';
+	document.getElementById('view-session').hidden = view !== 'session';
+	document.getElementById('view-results').hidden = view !== 'results';
+	if (view !== 'session') state.sheet = false;
+	document.body.classList.toggle('sheet-open', state.sheet && narrow.matches);
+	renderNav();
+	if (view === 'session') renderSession();
+	else if (view === 'results') renderResults();
+}
+function openSession(id) {
+	state.session = id;
+	state.showMissing = false;
+	state.ui.lastSession = id;
+	saveUi();
+	showView('session');
+}
+function route() {
+	const hash = decodeURIComponent(location.hash.slice(1));
+	if (hash === 'results') {
+		showView('results');
+	} else {
+		if (/^DSS-\d+$/i.test(hash)) state.pendingKey = hash.toUpperCase();
+		openSession(state.mySession);
+	}
+	window.scrollTo(0, 0);
+}
+function renderAll() {
+	renderNav();
+	if (state.view === 'results') renderResults();
+	else if (state.view === 'session') renderSession();
+}
+function refreshShared() {
+	renderNav();
+	if (state.view === 'results') {
+		renderResults();
+		return;
+	}
+	if (state.view !== 'session') return;
+	renderRail();
+	const ticket = currentTicket();
+	if (!ticket) return;
+	const review = reviewOf(state.session, ticket.key);
+	if (!canRate(state.session) || review?.submittedAt) {
+		const y = window.scrollY;
+		renderTicket();
+		window.scrollTo(0, y);
+		return;
+	}
+	refreshRaters();
+	for (const block of document.querySelectorAll('#ticket .others[data-sec]')) {
+		const id = block.dataset.sec;
+		block.innerHTML = id === 'overall' ? overallOthers(ticket) : othersBlock(ticket, id);
+	}
+}
+
+/* saving: reviews/<key>, one per ticket. A change writes only the parts it touched (a section,
+   the overall answer or the submitted state), so developers rating different sections at once each
+   keep theirs; a new review and a submit write the whole document. */
+const dirtyParts = new Map();  // review id -> the parts changed since the last save
+const writing = new Set();
+let saveTimer = null;
+let saveChain = Promise.resolve();
+function scheduleSave(id, now, part = 'all') {
+	if (!dirtyParts.has(id)) dirtyParts.set(id, new Set());
+	dirtyParts.get(id).add(part);
+	lsSet(LS_REVIEWS, state.reviews);
+	if (state.mode !== 'db' || !state.canWrite) {
+		setSave('local');
+		return;
+	}
+	setSave('saving');
+	clearTimeout(saveTimer);
+	saveTimer = setTimeout(flushSave, now ? 0 : 700);
+}
+/* the fields of *parts*, each written in full (null where empty) so a cleared value clears */
+function patchOf(body, parts) {
+	const patch = { key: body.key, run: body.run, updatedAt: body.updatedAt, by: body.by };
+	for (const part of parts) {
+		if (part === 'overall') {
+			patch.overall = { act: null, harmful: null, note: null, by: null, at: null, ...body.overall };
+		} else if (part === 'status') {
+			patch.submittedAt = body.submittedAt ?? null;
+			patch.submittedBy = body.submittedBy ?? null;
+			patch.firstSubmittedAt = body.firstSubmittedAt ?? null;
+		} else {
+			patch.sections ||= {};
+			patch.sections[part] = { rating: null, tags: [], should: null, why: null, by: null, at: null, ...body.sections[part] };
+		}
+	}
+	return patch;
+}
+async function writeReview(id, body, parts) {
+	const ref = state.db.doc(`reviews/${id}`);
+	const whole = parts.has('all') || !state.remoteIds.has(id);
+	const write = () => (whole ? ref.set(body) : ref.update(patchOf(body, parts)));
+	try {
+		await write();
+	} catch (error) {
+		if (error?.code !== 'unavailable') throw error;
+		await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 800));
+		await write();
+	}
+	state.remoteIds.add(id);
+}
+function flushSave() {
+	saveChain = saveChain.then(async () => {
+		const pending = [...dirtyParts.entries()];
+		dirtyParts.clear();
+		let failed = null;
+		for (const [id, parts] of pending) {
+			const body = state.reviews[id];
+			if (!body) continue;
+			writing.add(id);
+			try {
+				await writeReview(id, body, parts);
+			} catch (error) {
+				writing.delete(id);
+				if (error?.code === 'invalid_argument') {
+					state.canWrite = false;
+					renderModeNote();
+					renderSync();
+					setSave('local');
+					return;
+				}
+				const again = dirtyParts.get(id) || new Set();
+				for (const part of parts) again.add(part);
+				dirtyParts.set(id, again);
+				failed = error;
+			}
+			writing.delete(id);
+		}
+		if (failed) setSave('error', failed.message || 'the shared store did not answer');
+		else if (pending.length) setSave('saved');
+	});
+}
+function onReviews(snapshot) {
+	const remote = {};
+	for (const doc of snapshot.docs) {
+		const body = doc.data();
+		if (!body || typeof body !== 'object' || body.key !== doc.id) continue;  // one review per ticket
+		const review = structuredClone(body);  // snapshots are frozen; the page edits its copy
+		review.sections ||= {};
+		review.overall ||= {};
+		remote[doc.id] = review;
+	}
+	state.remoteIds = new Set(Object.keys(remote));
+	for (const id of [...dirtyParts.keys(), ...writing]) {
+		if (state.reviews[id]) remote[id] = state.reviews[id];  // this page's edit wins until it is saved
+	}
+	state.reviews = remote;
+	lsSet(LS_REVIEWS, state.reviews);
+	rebuildSessions();
+	resolveNames();
+	const first = !state.remoteLoaded;
+	state.remoteLoaded = true;
+	if (first) renderAll();
+	else refreshShared();
+}
+async function connect() {
+	if (!window.claude || typeof window.claude.use !== 'function') {
+		state.mode = 'local';
+		renderModeNote();
+		renderWho();
+		return;
+	}
+	let db = null;
+	let user = null;
+	try {
+		[db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+	} catch {
+		db = null;
+	}
+	state.user = user;
+	if (user) {
+		const viewer = await user.me();
+		state.me = { id: viewer.id, name: viewer.name, avatar: viewer.avatarUrl };
+		if (viewer.id) {
+			state.mySession = viewer.id;
+			state.names[viewer.id] = viewer.name;
+			if (viewer.avatarUrl) state.avatars[viewer.id] = viewer.avatarUrl;
+		}
+		rebuildSessions();
+		if (state.view !== 'results') openSession(state.mySession);
+	}
+	if (!db) {
+		state.mode = 'local';
+		renderModeNote();
+		renderWho();
+		renderAll();
+		return;
+	}
+	let canWrite = null;
+	if (user) canWrite = await user.can('data.write');
+	state.canWrite = canWrite !== false;
+	state.db = db;
+	state.mode = 'db';
+	renderModeNote();
+	renderWho();
+	renderAll();
+	renderSync();
+	db.collection('reviews').onSnapshot(onReviews, () => {
+		setSave('error', 'lost the shared ratings; reload the page');
+	});
+	db.collection('tickets').onSnapshot(onTickets, () => {
+		state.sync = { ...state.sync, error: true, text: 'Lost the shared tickets: reload the page.' };
+		renderSync();
+	});
+	db.collection('meta').onSnapshot(onMeta, () => {});
+	setTimeout(() => {
+		if (state.ticketsLoaded) return;
+		state.loadFailed = true;
+		if (state.view === 'session') renderTicket();
+	}, 10000);
+}
+/* the tickets, as the last refresh from Slack wrote them */
+function onTickets(snapshot) {
+	const shownKey = state.current[state.session];
+	const shown = TICKET_BY_KEY[shownKey]?.refreshedAt;
+	TICKETS.length = 0;
+	for (const key of Object.keys(TICKET_BY_KEY)) delete TICKET_BY_KEY[key];
+	for (const doc of snapshot.docs) {
+		const body = doc.data();
+		if (!body || typeof body !== 'object' || !/^DSS-\d+$/.test(body.key || '') || !Array.isArray(body.post)) continue;
+		const ticket = structuredClone(body);  // snapshots are frozen
+		TICKETS.push(ticket);
+		TICKET_BY_KEY[ticket.key] = ticket;
+	}
+	TICKETS.sort((left, right) => Number(right.key.slice(4)) - Number(left.key.slice(4)));
+	rebuildSessions();
+	const first = !state.ticketsLoaded;
+	state.ticketsLoaded = true;
+	renderNav();
+	if (state.view === 'results') {
+		renderResults();
+		return;
+	}
+	if (state.view !== 'session') return;
+	renderSide();
+	const now = currentTicket();
+	if (first || !now || now.key !== shownKey || now.refreshedAt !== shown) {
+		const y = window.scrollY;
+		renderTicket();
+		window.scrollTo(0, y);
+	}
+}
+function onMeta(snapshot) {
+	const body = snapshot.docs.find((doc) => doc.id === 'refresh')?.data();
+	if (!body?.at || state.sync.busy) return;
+	state.sync = { ...state.sync, at: body.at, by: body.by || null };
+	renderSync();
+	resolveNames();
+}
+
+/* events */
+const ticketEl = document.getElementById('ticket');
+ticketEl.addEventListener('change', (event) => {
+	const input = event.target;
+	if (input.id === 'cmp-toggle') {
+		state.ui.compare = input.checked;
+		saveUi();
+		renderTicket();
+		return;
+	}
+	const kind = input.dataset.kind;
+	if (!kind) return;
+	const ticket = currentTicket();
+	const review = ensureReview(state.session, ticket.key);
+	review.overall ||= {};
+	if (kind === 'rating' || kind === 'tag' || kind === 'own') {
+		const id = input.dataset.sec;
+		const rating = review.sections[id] || (review.sections[id] = {});
+		if (kind === 'rating') {
+			rating.rating = input.value;
+		} else if (kind === 'tag') {
+			const chosen = new Set(rating.tags || []);
+			if (input.checked) chosen.add(input.value);
+			else chosen.delete(input.value);
+			rating.tags = TAGS.map((tag) => tag[0]).filter((tag) => chosen.has(tag));
+		} else if (input.checked) {
+			rating.why = rating.why || '';
+		} else {
+			delete rating.why;
+		}
+		refreshSection(id);
+		if (kind === 'own' && input.checked) document.getElementById(`w-${ticket.key}-${id}`).focus();
+	} else if (kind === 'act') {
+		review.overall.act = input.value;
+		refreshOverall();
+	} else if (kind === 'harmful') {
+		review.overall.harmful = input.checked;
+		refreshOverall();
+	} else {
+		return;
+	}
+	touch(review, input.dataset.sec || 'overall');
+	scheduleSave(reviewId(state.session, ticket.key), false, input.dataset.sec || 'overall');
+	updateProgress();
+	renderRail();
+	refreshRaters();
+});
+/* a second click on the chosen rating takes it back */
+ticketEl.addEventListener('click', (event) => {
+	const input = event.target;
+	if (input.dataset?.kind !== 'rating') return;
+	const ticket = currentTicket();
+	const rating = reviewOf(state.session, ticket.key)?.sections?.[input.dataset.sec];
+	if (rating?.rating !== input.value) return;
+	input.checked = false;
+	delete rating.rating;
+	refreshSection(input.dataset.sec);
+	const review = reviewOf(state.session, ticket.key);
+	touch(review, input.dataset.sec || 'overall');
+	scheduleSave(reviewId(state.session, ticket.key), false, input.dataset.sec || 'overall');
+	updateProgress();
+	renderRail();
+	refreshRaters();
+});
+ticketEl.addEventListener('input', (event) => {
+	const input = event.target;
+	const kind = input.dataset.kind;
+	if (kind !== 'should' && kind !== 'why' && kind !== 'note') return;
+	const ticket = currentTicket();
+	const review = ensureReview(state.session, ticket.key);
+	if (kind === 'should' || kind === 'why') {
+		const id = input.dataset.sec;
+		const rating = review.sections[id] || (review.sections[id] = {});
+		rating[kind] = input.value;
+		refreshSection(id);
+	} else {
+		review.overall ||= {};
+		review.overall.note = input.value;
+		refreshOverall();
+	}
+	touch(review, input.dataset.sec || 'overall');
+	scheduleSave(reviewId(state.session, ticket.key), false, input.dataset.sec || 'overall');
+	updateProgress();
+});
+document.addEventListener('click', (event) => {
+	const jump = event.target.closest('[data-jump]');
+	if (jump) {
+		jumpTo(jump.dataset.jump);
+		return;
+	}
+	const pane = event.target.closest('[data-pane]');
+	if (pane) {
+		setPane(pane.dataset.pane);
+		return;
+	}
+	const pick = event.target.closest('#pane-tickets button[data-key]');
+	if (pick) {
+		selectTicket(pick.dataset.key);
+		return;
+	}
+	const button = event.target.closest('[data-act]');
+	if (!button) return;
+	const action = button.dataset.act;
+	if (action === 'submit') submit();
+	else if (action === 'refresh') refresh();
+	else if (action === 'edit') reopen();
+	else if (action === 'go') selectTicket(button.dataset.key);
+	else if (action === 'results') location.hash = 'results';
+	else if (action === 'real') toggleReal();
+	else if (action === 'close-side') closeSheet();
+	else if (action === 'unlock' || action === 'lock') {
+		state.unlocked[state.session] = action === 'unlock';
+		renderSession();
+	}
+});
+document.addEventListener('keydown', (event) => {
+	if (event.key === 'Escape' && state.sheet) closeSheet();
+});
+document.getElementById('howto').addEventListener('toggle', (event) => {
+	state.ui.howtoOpen = event.target.open;
+	saveUi();
+});
+document.getElementById('view-results').addEventListener('change', (event) => {
+	if (event.target.id === 'inc-sample') {
+		state.includeSample = event.target.checked;
+		renderResults();
+	} else if (event.target.name === 'results-run') {
+		state.ui.resultsRun = event.target.value;
+		saveUi();
+		renderResults();
+	}
+});
+narrow.addEventListener('change', () => {
+	if (!narrow.matches) state.sheet = false;
+	if (state.view === 'session') renderSide();
+	document.body.classList.toggle('sheet-open', state.sheet && narrow.matches);
+});
+window.addEventListener('hashchange', route);
+
+/* start */
+state.ui = lsGet(LS_UI) || {};
+if (state.ui.current && typeof state.ui.current === 'object') state.current = state.ui.current;
+const savedReviews = lsGet(LS_REVIEWS);
+if (savedReviews && typeof savedReviews === 'object') state.reviews = savedReviews;
+renderHowto();
+renderWho();
+renderSync();
+route();
+connect();
+</script>

@@ -115,6 +115,8 @@ def test_a_new_ticket_is_triaged_as_a_record_and_posted_to_the_developers(tmp_pa
 	# the analyst's Slack name, as text: a mention would notify them of the draft
 	assert '\n**uana Todos:**\n1. Set the ID' in block['text'] and '<@UANA' not in block['text']
 	assert '\n\n_Draft by Claude · 1,234 tokens · ≈ $0.02 · ' in block['text']
+	review = "\n\n[Please review the bot's report](https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt#DSS-1234)"
+	assert block['text'].endswith(review)
 	assert decision['unfurl_media'] is False and 'unfurl_links' not in decision
 	assert proof['thread_ts'] == '900.0' and proof['blocks'][0]['text'].startswith('**Why:** ')
 	saved = bot.store.get(CHANNEL, '1792523850.5')

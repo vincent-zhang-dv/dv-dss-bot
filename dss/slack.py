@@ -40,6 +40,8 @@ SEEN_S = 600  # an event seen this recently is a redelivery; Slack resends unack
 MARKDOWN_CHARS = 12_000  # Slack's limit for the Markdown block of one message
 ENV = ('DSS_SLACK_BOT_TOKEN', 'DSS_SLACK_APP_TOKEN')
 LABEL = 'Draft by Claude'  # starts the post's footer, before what the triage cost
+REVIEW_PAGE = 'https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt'  # DSS Bot Review; #<key> opens it
+REVIEW_TEXT = "Please review the bot's report"  # the page leaves this line out of what is rated
 MARKDOWN_LINK = re.compile(r'\[([^\]\n]*)\]\([^)\s]*\)')
 
 log = logging.getLogger(__name__)
@@ -145,7 +147,7 @@ class SlackDesk:
 		for name in ('problems', 'tokens', 'cost_usd', 'seconds', 'turns'):
 			saved[name] = result[name]
 		self.store.put(channel, ts, saved)
-		decision = self._post(result['dm'])
+		decision = self._post(f'{result["dm"]}\n\n[{REVIEW_TEXT}]({REVIEW_PAGE}#{key})')
 		self._post(result['thread'], thread_ts=decision)
 
 	def catch_up(self) -> None:
