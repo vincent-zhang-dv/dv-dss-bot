@@ -35,6 +35,13 @@ OUT_OF_DATE_AFTER = timedelta(days=365)
 ENV = ('CONFLUENCE_URL', 'CONFLUENCE_EMAIL', 'CONFLUENCE_TOKEN')
 HEADINGS = ('h1', 'h2', 'h3', 'h4', 'h5', 'h6')
 BREAKS = frozenset({'p', 'br', 'div', 'tr', 'pre', 'table', *HEADINGS})  # tags that end a line
+# Sent with each Confluence page and MATLAB CAT read, where a disagreement shows
+SOURCES_DISAGREE = (
+	"When the Confluence SOP, the Cerberus code at the analyst's version and MATLAB CAT disagree, "
+	"don't decide which is right: quote each with its age (the page's last edit, the MATLAB "
+	"file's last change, the code's last change) and ask the developers to confirm which holds, "
+	'under Not proved.'
+)
 
 
 class ConfluenceError(RuntimeError):
@@ -261,7 +268,8 @@ def _strip_highlight(excerpt: str) -> str:
 def register(server) -> None:
 	@server.tool()
 	def confluence_search(text: str, limit: int = 10) -> list[dict]:
-		"""Search DarkVision's Confluence (SOPs, how-tos, known issues) for *text*.
+		"""Search DarkVision's Confluence (SOPs, how-tos, known issues) for *text*: 2 or 3 words,
+		such as the output's name. A page must contain every word, so a long *text* finds nothing.
 
 		Returns id, title, space, excerpt, updated and url per page, and may_be_out_of_date for
 		a page last edited over a year before the ticket; read one with confluence_page. Cite the
@@ -273,4 +281,4 @@ def register(server) -> None:
 	def confluence_page(page_id: str) -> dict:
 		"""The text of the Confluence page *page_id* (an id from confluence_search), with
 		may_be_out_of_date when it was last edited over a year before the ticket."""
-		return page(page_id)
+		return {**page(page_id), 'note': SOURCES_DISAGREE}

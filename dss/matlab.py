@@ -12,7 +12,7 @@ origin/master as it was at the ticket's post (:func:`ref`).
 import os
 from pathlib import Path
 
-from dss import code, cutoff
+from dss import code, confluence, cutoff
 
 REPO_URL = 'https://github.com/darkvisiontech/DataAnalysis.git'
 REF = 'origin/master'
@@ -31,15 +31,18 @@ def grep(pattern: str, path: str = 'CAT', regex: bool = False) -> str:
 
 
 def read(path: str, start: int = 1, end: int = 0) -> str:
-	"""Lines *start* to *end* of one file; *end* 0 means the last line."""
+	"""Lines *start* to *end* of one file, with the date it last changed; *end* 0 means the last
+	line."""
 	at = ref()
 	lines = _git('show', f'{at}:{code._checked(path)}').splitlines()
+	changed = _git('log', '-1', '--format=%cs', at, '--', path).strip()
 	start = max(start, 1)
 	if not end:
 		end = len(lines)
 	end = min(end, start + code.MAX_LINES - 1, len(lines))
 	numbered = [f'{number}\t{lines[number - 1]}' for number in range(start, end + 1)]
-	return f'{path} at {at}, lines {start}-{end} of {len(lines)}:\n' + '\n'.join(numbered)
+	head = f'{path} at {at} (last changed {changed}), lines {start}-{end} of {len(lines)}:\n'
+	return head + '\n'.join(numbered)
 
 
 def log(path: str = 'CAT', text: str = '') -> str:
@@ -155,8 +158,9 @@ def register(server) -> None:
 
 	@server.tool()
 	def matlab_read(path: str, start: int = 1, end: int = 0) -> str:
-		"""Lines *start*-*end* of one MATLAB CAT file (at most 200 lines)."""
-		return read(path, start, end)
+		"""Lines *start*-*end* of one MATLAB CAT file (at most 200 lines), with the date the file
+		last changed."""
+		return f'{read(path, start, end)}\n\n{confluence.SOURCES_DISAGREE}'
 
 	@server.tool()
 	def matlab_log(path: str = 'CAT', text: str = '') -> str:

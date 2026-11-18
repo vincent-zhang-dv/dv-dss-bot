@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import jsonschema  # type: ignore[import-untyped]
 import pytest
 
 from dss import __main__ as cli
@@ -176,31 +177,50 @@ def test_the_trial_keeps_the_bots_steps_and_asks_for_the_record():
 	steps = runner.SYSTEM.read_text(encoding='utf-8')
 	prompt = record.system_prompt()
 	assert prompt.startswith(steps[: steps.index('Answer in Markdown')])
-	assert 'Answer in Markdown' not in prompt and 'Answer with one JSON object' in prompt
-	defs = json.loads(record.SCHEMA_FILE.read_text(encoding='utf-8'))['$defs']
-	answer = defs['triage']['properties']
-	planning = defs['class']['properties']
-	lists = [
-		answer['status']['enum'],
-		answer['confidence']['enum'],
-		answer['settled_at']['enum'],
-		answer['playbook']['enum'],
-		answer['where']['properties']['kind']['enum'],
-		answer['escalate']['properties']['kind']['enum'],
-		planning['impact']['enum'],
-		planning['fix_type']['enum'],
-		defs['cause_family']['enum'],
-		defs['feature']['enum'],
-		defs['prevent']['enum'],
-	]
-	for values in lists:
-		for value in values:
-			if value is not None:
-				assert f'`{value}`' in prompt
+	assert 'Answer with the structured output' in prompt
+	assert '\nAnswer in Markdown' not in prompt
 	for cause in json.loads(record.KNOWN_CAUSES_FILE.read_text(encoding='utf-8')):
-		assert f'`{cause["slug"]}`' in prompt
+		assert f'`{cause["slug"]}`' in prompt  # an unknown workflow gets every known cause
 	assert '$' not in prompt
-	assert len(prompt) < 24_000  # it goes on the claude command line, which Windows caps at 32,767
+
+
+def test_the_answer_schema_is_the_records_own_blocks_standing_alone():
+	schema = record.answer_schema()
+	assert set(schema['properties']) == {'triage', 'class'} == set(schema['required'])
+	assert '$ref' not in json.dumps(schema)  # claude gets one schema without references
+	assert 'allOf' not in schema  # the API takes no allOf, anyOf or oneOf at the top level
+	fields = schema['properties']['triage']['properties']
+	assert fields['headline']['maxLength'] == 60 and fields['headline']['type'] == 'string'
+	assert 'as a data developer would write it' in fields['reply']['description']
+	replay = record.answer_schema(replay=True)['properties']['replay']
+	assert set(replay['properties']) == {'fixed_later', 'leaks'}  # code fills the rest
+	# It goes on the claude command line, which Windows caps at 32,767 characters
+	assert len(json.dumps(record.answer_schema(replay=True), separators=(',', ':'))) < 24_000
+
+
+def test_an_answer_that_fits_the_schema_makes_a_record_that_passes(sources):
+	answer = json.loads(answer_text())
+	jsonschema.validate(answer, record.answer_schema())
+	ticket, _notes = record.build_ticket('DSS-1234', POSTED)
+	_record, problems = record.assemble(ticket, answer_text())
+	assert problems == []
+
+
+@pytest.mark.parametrize(
+	('workflow', 'kept', 'left_out'),
+	[
+		('PE', 'pe_baselines', 'wi_las_export'),
+		('WI', 'wi_las_export', 'pe_baselines'),
+		('CI', 'wi_las_export', 'ff_report'),
+	],
+)
+def test_a_ticket_gets_the_known_causes_of_its_own_workflow(workflow, kept, left_out):
+	assert record.for_workflow({'feature': kept}, workflow)
+	assert not record.for_workflow({'feature': left_out}, workflow)
+	assert record.for_workflow({'feature': 'client_info'}, workflow)  # any workflow's
+	assert record.for_workflow({'feature': None}, workflow)
+	assert record.for_workflow({'feature': left_out}, 'unknown')
+	assert record.for_workflow({'feature': left_out}, 'combo')
 
 
 def test_a_broken_known_causes_file_is_named_not_blamed_on_claude(tmp_path, monkeypatch):
@@ -212,20 +232,24 @@ def test_a_broken_known_causes_file_is_named_not_blamed_on_claude(tmp_path, monk
 	assert triage.explain(caught.value).startswith('The triage failed: known_causes.json is not')
 
 
-def test_the_trial_runs_the_same_locked_down_claude(sources, monkeypatch):
-	commands = []
+def test_the_trial_runs_the_same_locked_down_claude(sources, monkeypatch, tmp_path):
+	asked = []
 
-	def run_reply(prompt, trace=None, system=''):
-		commands.append(runner.command(system=system))
+	def run_reply(prompt, trace=None, system='', schema=None, budget=0):
+		asked.append({'system': system, 'schema': schema, 'budget': budget})
 		return {'result': answer_text(), 'total_cost_usd': 0.3, 'usage': {}}
 
 	monkeypatch.setattr(runner, 'run_reply', run_reply)
 	record.trial('DSS-1234', POSTED)
-	(line,) = commands
+	(call,) = asked
+	assert call['system'] == record.system_prompt('WI')  # the fake project folder is a WI job
+	assert call['schema'] == record.answer_schema() and call['budget'] == 0
+	line = runner.command(system_file=tmp_path / 'system.md', schema=call['schema'])
 	bot = runner.command()
-	prompt = line.index('--system-prompt') + 1
-	assert line[:prompt] == bot[:prompt] and line[prompt + 1 :] == bot[prompt + 1 :]
-	assert line[prompt] == record.system_prompt()
+	prompt = line.index('--system-prompt-file') + 1
+	assert line[:prompt] == bot[:prompt]
+	assert line[prompt + 1 :] == [*bot[prompt + 1 :], '--json-schema', line[-1]]
+	assert json.loads(line[-1]) == call['schema']
 
 
 def test_a_trial_checks_and_saves_the_record(sources, tmp_path):
@@ -508,8 +532,8 @@ def test_a_trial_needs_an_issue_key(sources):
 
 
 def test_cli_prints_the_dm_and_thread_of_a_trial(sources, monkeypatch, capsys, tmp_path):
-	def run_reply(prompt, trace=None, system=''):
-		assert 'Answer with one JSON object' in system
+	def run_reply(prompt, trace=None, system='', schema=None, budget=0):
+		assert 'Answer with the structured output' in system and schema is not None
 		write_trace(trace, IN_ORDER)
 		return {'result': answer_text(), 'total_cost_usd': 0.3, 'usage': {'input_tokens': 5000}}
 

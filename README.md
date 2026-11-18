@@ -62,7 +62,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `docs/triage_record.schema.json`, `docs/triage_record.example.json`, `docs/known_causes.json` | The triage record's schema (a proposal), a made-up example, and a draft list of known causes. Only trial mode uses them. |
 | `dss/record.py`, `dss/triage_record.md` | Trial mode: the triage as a checked record, and the answer section that replaces `triage.md`'s. |
 | `dss/replay.py`, `dss/cutoff.py` | Replay mode: old tickets triaged as they stood when posted, and the cutoff every tool answers by. |
-| `dss/runner.py` | The locked-down `claude -p` command line. |
+| `dss/runner.py` | The locked-down `claude -p` command line; the system prompt goes in a file. |
 | `dss/server.py` | The `dss` MCP server. |
 | `dss/thread.py`, `jira.py`, `cerb.py`, `code.py`, `confluence.py` | The tools, one module per source. |
 | `dss/worker.py` | Runs a function in another app's venv. |
@@ -108,7 +108,7 @@ Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, 
 `python -m dss trial` runs the triage record design (the DSS Triage Flow page) by hand, without changing the bot. It takes the same arguments as `triage` and runs the same locked-down Claude with the same steps and rules. Four things differ:
 
 - Before Claude starts, code reads the `dss_ticket` block: the reporter, DVT, project folder, workflow, Toolbox Name, the reporter's Cerberus version, last failed run and terminal log (1.1 and later), and the prod version. A source that fails leaves its facts null and is noted; it doesn't stop the triage.
-- Claude answers with one JSON object (the `triage` and `class` blocks), following [dss/triage_record.md](dss/triage_record.md) in place of `triage.md`'s Markdown answer section.
+- Claude answers with one JSON object (the `triage` and `class` blocks) through claude's structured output (`--json-schema`). Code builds that schema from `docs/triage_record.schema.json` (`record.answer_schema`); each field's description is what Claude reads about that field, and claude asks Claude again until the answer fits. [dss/triage_record.md](dss/triage_record.md) replaces `triage.md`'s Markdown answer section with the few rules that aren't about one field, and the known causes that can apply to the ticket's workflow.
 - Code checks the record against `docs/triage_record.schema.json`.
 - Code renders a post (the decision) and a thread reply (the proof), as the Slack bot posts them (below). An answer that fails the check is shown as given, with the problems.
 

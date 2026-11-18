@@ -1193,7 +1193,9 @@ def test_matlab_tools_read_cat_at_origin_master(matlab_clone):
 	found = matlab.grep('resample2const')
 	assert 'CAT/Export/cat_export_las.m:2:vals = resample2const(vals, dref);' in found
 	assert 'nothing found' in matlab.grep('interp1')  # gone from master; notes.txt is not MATLAB
-	assert '1\t% Peak preserve maxPen' in matlab.read('CAT/Export/cat_export_las.m', 1, 1)
+	read = matlab.read('CAT/Export/cat_export_las.m', 1, 1)
+	assert '1\t% Peak preserve maxPen' in read
+	assert '(last changed 20' in read
 	history = matlab.log('CAT/Export', text='resample2const')
 	assert 'Keep the maxPen peaks' in history and 'Export the LAS' not in history
 	assert 'Export the LAS' in matlab.log('CAT')

@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -27,7 +28,9 @@ def test_claude_is_locked_down():
 	assert line[line.index('--permission-mode') + 1] == 'dontAsk'
 	assert line[line.index('--allowedTools') + 1] == 'mcp__dss__*'
 	assert '"dss"' in line[line.index('--mcp-config') + 1]
-	assert 'Gate A' in line[line.index('--system-prompt') + 1]
+	system = Path(line[line.index('--system-prompt-file') + 1])
+	assert 'Gate A' in system.read_text(encoding='utf-8')
+	assert '--system-prompt' not in line  # the prompt is read from a file, never typed inline
 
 
 def test_run_reply_sends_the_prompt_and_reports_failures(tmp_path, monkeypatch):
