@@ -390,29 +390,6 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .meter .m-gap { width: 8px; border: 0; background: none; cursor: default; }
 .bar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* comparing with the previous run: a word diff under each section, the old ratings beside */
-.cmp-bar { padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; border-left: 3px solid var(--accent); }
-.cmp-text { margin: 0; font-size: 13px; color: var(--fg-muted); max-width: 80ch; }
-.cmp-text b { color: var(--fg); font-weight: 500; }
-.prev { margin-top: 10px; font: 400 13px/1.5 var(--font-ui); color: var(--fg-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-details.prev { display: block; border: 1px solid var(--line); background: var(--surface); }
-details.prev summary { cursor: pointer; padding: 6px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; list-style: none; }
-details.prev summary::-webkit-details-marker { display: none; }
-details.prev summary::before { content: '+'; font-family: var(--font-mono); width: 10px; }
-details.prev[open] summary::before { content: '\2212'; }
-.chg { font: 500 11px/1.4 var(--font-ui); text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border: 1px solid var(--line-strong); }
-.chg-diff { border-color: var(--accent); color: var(--accent-ink); }
-.chg-same { color: var(--fg-muted); }
-.diff { padding: 8px 10px 10px; border-top: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font: 400 13px/1.55 var(--font-mono); color: var(--fg); }
-.diff del { background: var(--bad-tint); color: var(--bad-ink); text-decoration: line-through; }
-.diff ins { background: var(--ok-tint); color: var(--ok-ink); text-decoration: none; }
-.was { margin-top: 6px; opacity: .75; }
-.prev-votes { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
-.prev-votes .eyebrow { margin-bottom: 6px; }
-.run-seg { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 220px; }
-.run-seg input:checked + label { background: var(--accent); color: var(--on-accent); }
-.runs-tbl td { min-width: 160px; }
-.runs-tbl .na { display: block; margin-top: 2px; }
 
 /* results */
 .results { display: grid; gap: 16px; padding-top: 8px; }
@@ -1257,122 +1234,7 @@ function ensureReview(sessionId, key) {
 }
 
 /* comparing a ticket's run with its previous run */
-function comparing(ticket) {
-	return Boolean(ticket.previous) && state.ui.compare !== false;
-}
-function runLabel(run) {
-	const day = /(\d{4})-(\d{2})-(\d{2})$/.exec(run || '');
-	if (!day) return run || 'earlier run';
-	const date = new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]));
-	return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} run`;
-}
-function previousPart(ticket, id) {
-	for (const part of [...ticket.previous.post, ...ticket.previous.thread]) {
-		if (part.id === id) return part;
-	}
-	return null;
-}
-function changedCount(ticket) {
-	let changed = 0;
-	for (const part of ratedParts(ticket)) {
-		if ((previousPart(ticket, part.id)?.md || '') !== (part.md || '')) changed++;
-	}
-	return changed;
-}
 /* Word diff of two texts (longest common subsequence of words and the spaces between them) */
-function diffHtml(before, after) {
-	const words = before.split(/(\s+)/);
-	const newWords = after.split(/(\s+)/);
-	let head = 0;
-	while (head < words.length && head < newWords.length && words[head] === newWords[head]) head++;
-	let tail = 0;
-	while (tail < words.length - head && tail < newWords.length - head && words[words.length - 1 - tail] === newWords[newWords.length - 1 - tail]) tail++;
-	const lead = esc(words.slice(0, head).join(''));
-	const end = esc(words.slice(words.length - tail).join(''));
-	const left = words.slice(head, words.length - tail);
-	const right = newWords.slice(head, newWords.length - tail);
-	if (left.length * right.length > 4e6) return `${lead}<del>${esc(left.join(''))}</del><ins>${esc(right.join(''))}</ins>${end}`;
-	const table = [];
-	for (let row = 0; row <= left.length; row++) table.push(new Int32Array(right.length + 1));
-	for (let row = left.length - 1; row >= 0; row--) {
-		for (let col = right.length - 1; col >= 0; col--) {
-			if (left[row] === right[col]) table[row][col] = table[row + 1][col + 1] + 1;
-			else table[row][col] = Math.max(table[row + 1][col], table[row][col + 1]);
-		}
-	}
-	const spans = [];
-	function add(kind, text) {
-		if (!text) return;
-		const last = spans[spans.length - 1];
-		if (last && last.kind === kind) last.text += text;
-		else spans.push({ kind, text });
-	}
-	let row = 0;
-	let col = 0;
-	while (row < left.length && col < right.length) {
-		if (left[row] === right[col]) {
-			add('same', left[row]);
-			row++;
-			col++;
-		} else if (table[row + 1][col] >= table[row][col + 1]) {
-			add('del', left[row++]);
-		} else {
-			add('ins', right[col++]);
-		}
-	}
-	while (row < left.length) add('del', left[row++]);
-	while (col < right.length) add('ins', right[col++]);
-	let html = lead;
-	for (const span of spans) {
-		if (span.kind === 'same') html += esc(span.text);
-		else html += `<${span.kind}>${esc(span.text)}</${span.kind}>`;
-	}
-	return html + end;
-}
-function compareBox(ticket, id, current) {
-	if (!comparing(ticket)) return '';
-	const was = previousPart(ticket, id)?.md || '';
-	const now = current || '';
-	let badge = '<span class="chg chg-same">Same as before</span>';
-	if (!was && now) badge = '<span class="chg chg-diff">New in this run</span>';
-	else if (was && !now) badge = '<span class="chg chg-diff">Left out in this run</span>';
-	else if (was !== now) badge = '<span class="chg chg-diff">Changed</span>';
-	if (was === now) return `<div class="prev prev-same">${badge}<span>${esc(runLabel(ticket.previous.run))} said the same</span></div>`;
-	return `<details class="prev" open><summary>${badge}<span>What changed since the ${esc(runLabel(ticket.previous.run))}</span></summary><div class="diff">${diffHtml(was, now)}</div></details>`;
-}
-function previousVotes(ticket, id) {
-	if (!comparing(ticket)) return '';
-	let list = '';
-	for (const session of SESSIONS) {
-		const review = reviewOf(session.id, ticket.key, ticket.previous.run);
-		const rating = review?.sections?.[id];
-		if (rating?.rating) list += vote(session.name, rating, review.submittedAt ? '' : 'not submitted');
-	}
-	if (!list) return '';
-	return `<div class="prev-votes"><p class="eyebrow">Rated on the ${esc(runLabel(ticket.previous.run))}</p><ul class="votes">${list}</ul></div>`;
-}
-function previousOverall(ticket) {
-	if (!comparing(ticket)) return '';
-	let list = '';
-	for (const session of SESSIONS) {
-		const review = reviewOf(session.id, ticket.key, ticket.previous.run);
-		if (review?.overall?.act) list += overallVote(session.name, review.overall, review.submittedAt ? '' : 'not submitted');
-	}
-	if (!list) return '';
-	return `<div class="prev-votes"><p class="eyebrow">Overall, on the ${esc(runLabel(ticket.previous.run))}</p><ul class="votes">${list}</ul></div>`;
-}
-function compareBar(ticket) {
-	if (!ticket.previous) return '';
-	const toggle = `<label class="inc"><input type="checkbox" id="cmp-toggle"${state.ui.compare !== false ? ' checked' : ''}>Compare with the ${esc(runLabel(ticket.previous.run))}</label>`;
-	const bot = ticket.previous.time?.bot;
-	let cost = '';
-	if (bot) cost = ` · ${esc(duration(bot.seconds / 60))} · ≈ $${esc(bot.cost_usd.toFixed(2))}`;
-	const total = ratedParts(ticket).length;
-	return `<section class="card cmp-bar">
-		<p class="cmp-text"><b>${changedCount(ticket)} of ${total}</b> rated sections changed since the ${esc(runLabel(ticket.previous.run))}${cost}. This is the ${esc(runLabel(ticket.run))}: rate it afresh; your ratings of the earlier run stay as they were.</p>
-		${toggle}
-	</section>`;
-}
 function firstOpen(sessionId) {
 	const tickets = sessionTickets(sessionId);
 	const open = tickets.find((ticket) => !reviewOf(sessionId, ticket.key)?.submittedAt);
@@ -1692,7 +1554,6 @@ function renderTicket() {
 	if (ticket.botLink) posted += ` · <a href="${esc(ticket.botLink)}" target="_blank" rel="noopener">open in Slack</a>`;
 	el.classList.toggle('show-missing', state.showMissing && mode === 'edit');
 	el.innerHTML = ticketHead(ticket)
-		+ compareBar(ticket)
 		+ `<div class="group"><h3>The bot's post</h3><span>${posted}</span></div>`
 		+ messageBlock(ticket, ticket.post, 'post', mode)
 		+ '<div class="group"><h3>The bot\'s thread reply</h3><span>the proof, posted under the post</span></div>'
@@ -1771,14 +1632,7 @@ function messageBlock(ticket, parts, kind, mode) {
 		if (SECTIONS[part.id]) {
 			html += ratedRow(ticket, part, mode);
 		} else {
-			html += `<div class="row row-ctx"><div class="cs sl">${md(part.md)}${compareBox(ticket, part.id, part.md)}</div><div class="cr">${esc(CONTEXT[part.id] || 'Context')} · shown for context, not rated</div></div>`;
-		}
-	}
-	if (comparing(ticket)) {
-		const shown = new Set(parts.map((part) => part.id));
-		for (const part of ticket.previous[kind]) {
-			if (shown.has(part.id) || !part.md) continue;
-			html += `<div class="row row-ctx"><div class="cs sl"><div class="prev"><span class="chg chg-diff">Only in the ${esc(runLabel(ticket.previous.run))}</span></div><div class="was">${md(part.md)}</div></div><div class="cr">${esc(SECTIONS[part.id]?.title || CONTEXT[part.id] || 'Context')} · left out of this run</div></div>`;
+			html += `<div class="row row-ctx"><div class="cs sl">${md(part.md)}</div><div class="cr">${esc(CONTEXT[part.id] || 'Context')} · shown for context, not rated</div></div>`;
 		}
 	}
 	return html + '</div>';
@@ -1788,7 +1642,7 @@ function ratedRow(ticket, part, mode) {
 	if (part.md) content = md(part.md);
 	let right = rateForm(ticket, part.id);
 	if (mode !== 'edit') right = resultView(ticket, part.id);
-	return `<div class="row" id="row-${esc(ticket.key)}-${part.id}" data-sec="${part.id}"><div class="cs sl">${content}${compareBox(ticket, part.id, part.md)}</div><div class="cr">${right}${previousVotes(ticket, part.id)}</div></div>`;
+	return `<div class="row" id="row-${esc(ticket.key)}-${part.id}" data-sec="${part.id}"><div class="cs sl">${content}</div><div class="cr">${right}</div></div>`;
 }
 function rateForm(ticket, id) {
 	const section = SECTIONS[id];
@@ -1876,7 +1730,7 @@ function overallCard(ticket, review, mode) {
 	if (mode !== 'edit') {
 		let list = overallVote(nameOf(overall.by), overall, draftTag(review), overall.by);
 		for (const item of othersFor(state.session, key)) list += overallVote(item.name, item.entry.overall || {}, item.tag, item.entry.session);
-		return `<section class="card overall" id="overall"><div class="sec-head"><span class="sec-title">${title}</span></div><ul class="votes">${list}</ul>${previousOverall(ticket)}</section>`;
+		return `<section class="card overall" id="overall"><div class="sec-head"><span class="sec-title">${title}</span></div><ul class="votes">${list}</ul></section>`;
 	}
 	let radios = '';
 	for (const [value, label, tone] of ACTS) {
@@ -1896,7 +1750,7 @@ function overallCard(ticket, review, mode) {
 			<label class="should-l" for="n-${key}">Anything else? <span class="opt">Optional, unless you marked it harmful</span></label>
 			<textarea id="n-${key}" rows="2" data-kind="note" placeholder="What a reader should know about this post">${esc(overall.note || '')}</textarea>
 			<p class="need">${ICON.alert}<span>${esc(gap || 'Answer the overall question')}</span></p>
-		</fieldset>${others}${previousOverall(ticket)}
+		</fieldset>${others}
 	</section>`;
 }
 function overallVote(name, overall, tag, id) {
@@ -2108,75 +1962,18 @@ function closeSheet() {
 }
 
 /* results */
-/* *which* is 'current' (each ticket's newest run) or 'previous' (the run before it, where a
-   ticket has one) */
-function collectRows(which = resultsRun()) {
+function collectRows() {
 	const rows = [];
 	for (const ticket of TICKETS) {
-		let run = ticket.run;
-		if (which === 'previous') {
-			if (!ticket.previous) continue;
-			run = ticket.previous.run;
-		}
 		for (const session of SESSIONS) {
-			const review = reviewOf(session.id, ticket.key, run);
+			const review = reviewOf(session.id, ticket.key);
 			if (review?.submittedAt) rows.push({ key: ticket.key, who: nameOf(review.submittedBy) || 'Someone', entry: review });
 		}
-		if (state.includeSample && ticket.sample && which === 'current') rows.push({ key: ticket.key, who: 'Example reviewer', sample: true, entry: ticket.sample });
+		if (state.includeSample && ticket.sample) rows.push({ key: ticket.key, who: 'Example reviewer', sample: true, entry: ticket.sample });
 	}
 	return rows;
 }
-function resultsRun() {
-	return state.ui.resultsRun === 'previous' ? 'previous' : 'current';
-}
-function runSwitch() {
-	if (!TICKETS.some((ticket) => ticket.previous)) return '';
-	let buttons = '';
-	for (const [value, label] of [['current', 'This run'], ['previous', 'Previous run']]) {
-		buttons += `<input class="vh" type="radio" id="rr-${value}" name="results-run" value="${value}"${resultsRun() === value ? ' checked' : ''}><label for="rr-${value}">${label}</label>`;
-	}
-	return `<div class="seg run-seg" role="radiogroup" aria-label="Which run's ratings">${buttons}</div>`;
-}
 /* Each section's ratings on the previous run beside this run's: did the change help? */
-function runsPanel() {
-	if (!TICKETS.some((ticket) => ticket.previous)) return '';
-	const before = collectRows('previous');
-	const after = collectRows('current');
-	function bar(rows, id) {
-		const counts = { correct: 0, partial: 0, incorrect: 0 };
-		for (const row of rows) {
-			const rating = row.entry.sections?.[id]?.rating;
-			if (rating) counts[rating]++;
-		}
-		const total = counts.correct + counts.partial + counts.incorrect;
-		if (!total) return '<span class="na">not rated yet</span>';
-		let spans = '';
-		for (const [value, label] of RATINGS) {
-			if (counts[value]) spans += `<span class="sb-${value}" style="flex-grow:${counts[value]}" title="${label}: ${counts[value]} of ${total}"></span>`;
-		}
-		const aria = RATINGS.map(([value, label]) => `${label} ${counts[value]}`).join(', ');
-		return `<div class="sbar" role="img" aria-label="${aria}">${spans}</div><span class="na">${counts.correct} of ${total} correct</span>`;
-	}
-	let body = '';
-	for (const id of SECTION_ORDER) {
-		body += `<tr><td>${esc(SECTIONS[id].title)}</td><td>${bar(before, id)}</td><td>${bar(after, id)}</td></tr>`;
-	}
-	let changed = 0;
-	let total = 0;
-	for (const ticket of TICKETS) {
-		if (!ticket.previous) continue;
-		changed += changedCount(ticket);
-		total += ratedParts(ticket).length;
-	}
-	return `<section class="card panel">
-		<h3>Previous run against this run</h3>
-		<p class="means">Submitted ratings of each run, by section. ${changed} of ${total} rated sections changed between the runs.</p>
-		<div class="tbl-wrap"><table class="runs-tbl">
-			<thead><tr><th>Section</th><th>Previous run</th><th>This run</th></tr></thead>
-			<tbody>${body}</tbody>
-		</table></div>
-	</section>`;
-}
 function shortStatus(kind) {
 	if (kind === 'done') return 'Done';
 	if (kind === 'progress') return 'In progress';
@@ -2242,11 +2039,10 @@ function renderResults() {
 	const rows = collectRows();
 	let sample = '';
 	if (TICKETS.some((ticket) => ticket.sample)) sample = `<label class="inc"><input type="checkbox" id="inc-sample"${state.includeSample ? ' checked' : ''}>Include the made-up example reviewer</label>`;
-	let which = 'Every submitted rating.';
-	if (TICKETS.some((ticket) => ticket.previous)) which = `Every submitted rating of the ${resultsRun() === 'previous' ? 'previous run' : 'newest run'} of each ticket.`;
-	const head = `<div class="res-head"><div><h2>Results</h2><p class="means">${which} Ratings not yet submitted show beside each section.</p></div>${runSwitch()}${sample}</div>`;
+	const which = 'Every submitted rating.';
+	const head = `<div class="res-head"><div><h2>Results</h2><p class="means">${which} Ratings not yet submitted show beside each section.</p></div>${sample}</div>`;
 	if (!rows.length) {
-		el.innerHTML = `<div class="results">${head}${runsPanel()}${progressPanel()}${timePanel()}<div class="card empty"><b>No submitted ratings yet.</b>Submit a ticket in your session and its ratings show here, with everyone else's.</div></div>`;
+		el.innerHTML = `<div class="results">${head}${progressPanel()}${timePanel()}<div class="card empty"><b>No submitted ratings yet.</b>Submit a ticket in your session and its ratings show here, with everyone else's.</div></div>`;
 		return;
 	}
 	let usable = 0;
@@ -2335,7 +2131,7 @@ function renderResults() {
 	}
 	const fixes = `<section class="card panel"><h3>Corrections</h3><p class="means">What each section should have said. Each one can become a golden case for <code>dss eval</code>.</p>${list || '<p class="means">None yet.</p>'}</section>`;
 
-	el.innerHTML = `<div class="results">${head}${runsPanel()}${progressPanel()}${timePanel()}${stats}${sections}${tags}${fixes}</div>`;
+	el.innerHTML = `<div class="results">${head}${progressPanel()}${timePanel()}${stats}${sections}${tags}${fixes}</div>`;
 }
 
 /* views and routes: #results, #DSS-<n> (that ticket, from the link under its Slack post), else the viewer's reviews */
@@ -2598,12 +2394,6 @@ function onMeta(snapshot) {
 const ticketEl = document.getElementById('ticket');
 ticketEl.addEventListener('change', (event) => {
 	const input = event.target;
-	if (input.id === 'cmp-toggle') {
-		state.ui.compare = input.checked;
-		saveUi();
-		renderTicket();
-		return;
-	}
 	const kind = input.dataset.kind;
 	if (!kind) return;
 	const ticket = currentTicket();
@@ -2719,10 +2509,6 @@ document.getElementById('howto').addEventListener('toggle', (event) => {
 document.getElementById('view-results').addEventListener('change', (event) => {
 	if (event.target.id === 'inc-sample') {
 		state.includeSample = event.target.checked;
-		renderResults();
-	} else if (event.target.name === 'results-run') {
-		state.ui.resultsRun = event.target.value;
-		saveUi();
 		renderResults();
 	}
 });
