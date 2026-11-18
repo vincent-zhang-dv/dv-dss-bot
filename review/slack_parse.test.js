@@ -10,7 +10,7 @@ const BLOCK = PAGE.slice(PAGE.indexOf('/* parse:start */'), PAGE.indexOf('/* par
 const SECTIONS = Object.fromEntries(
 	['headline', 'summary', 'analyst_todos', 'dev_todos', 'reply', 'why', 'past', 'evidence', 'confidence'].map((id) => [id, {}]),
 );
-const parser = new Function('SECTIONS', `${BLOCK}; return { fromSlack, threadMessages, channelMessages, botPost, buildTicket, BOT_CHANNELS };`)(SECTIONS);
+const parser = new Function('SECTIONS', `${BLOCK}; return { fromSlack, threadMessages, channelMessages, botPost, buildTicket, usableTicket, BOT_CHANNELS };`)(SECTIONS);
 
 const DSS_TS = '1800000000.000100';
 const BOT_TS = '1800000090.000200';
@@ -35,8 +35,7 @@ const POST = [
 	'*Draft Reply:*',
 	'> Set the ID to 4.778 in the client info.',
 	'_Draft by Claude · 12,345 tokens · ≈ $0.21 · 42 s_',
-	'',
-	`<https://claude.ai/artifact/x#DSS-9001|Please review the bot's report>`,
+	"Please review the bot's report button",  // how the Slack connector shows the review button
 	`Forwarded message from Data Support Request (${LINK}): <@UANA|ana> created DSS-9001`,
 ].join('\n');
 const PROOF = '*Why:* The tally says 4.778.\n*Evidence*\n1. Tally row 3 (`cerb_read_sheet:ACME`)\n*Confidence:* high';
@@ -111,6 +110,16 @@ test('a ticket keeps the post sections, the proof and the real thread', () => {
 	assert.strictEqual(ticket.time.developers.response_minutes, 5);
 	assert.strictEqual(ticket.time.developers.solving_minutes, 60);
 	assert.strictEqual(ticket.botLink, 'https://darkvision.slack.com/archives/C0CF1J345EY/p1800000090000200');
+});
+
+test('the page shows only tickets with Slack links and the parts it reads', () => {
+	const ticket = parser.buildTicket(POST_INFO, parser.threadMessages([BOT_THREAD]), parser.threadMessages([DSS_THREAD]));
+	assert.ok(parser.usableTicket(ticket));
+	assert.ok(!parser.usableTicket({ ...ticket, link: 'javascript:alert(1)' }));
+	assert.ok(!parser.usableTicket({ ...ticket, botLink: 'https://example.com/p1' }));
+	assert.ok(!parser.usableTicket({ ...ticket, filed: undefined }));
+	assert.ok(!parser.usableTicket({ ...ticket, thread: null }));
+	assert.ok(!parser.usableTicket({ ...ticket, key: 'x' }));
 });
 
 test('a post missing from its thread is an error, not an empty ticket', () => {

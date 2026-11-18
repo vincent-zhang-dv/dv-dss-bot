@@ -824,6 +824,7 @@ const OLDEST_TS = '1795015000';  // shortly before DSS-1256 was posted
 const SLACK_ZONE = 'America/Edmonton';
 const MAX_PAGES = 5;
 const REVIEW_LINK = "Please review the bot's report";
+const SLACK_LINK = 'https://darkvision.slack.com/';
 const BOT_HEAD = /^\*<https:\/\/darkvision\.slack\.com\/archives\/C0793LJ1KDM\/p(\d{10})(\d{6})[^|>]*\|(DSS-(\d+))>/;
 const POST_HEADS = [['**Bot Summary:**', 'summary'], ['**Data Dev Todos:**', 'dev_todos'], ['**Draft Reply:**', 'reply']];
 const THREAD_HEADS = [
@@ -999,6 +1000,14 @@ function buildTicket(post, botThread, dssThread) {
 		real,
 		time,
 	};
+}
+/* A ticket document the page can show. Any Contributor can write one, so its links must be Slack's
+   (a javascript: link would run in a viewer's page) and the parts the page reads must be there. */
+function usableTicket(body) {
+	if (!body || typeof body !== 'object' || !/^DSS-\d+$/.test(body.key || '')) return false;
+	if (!Array.isArray(body.post) || !Array.isArray(body.thread)) return false;
+	if (!body.filed || typeof body.filed !== 'object') return false;
+	return [body.link, body.botLink].every((url) => typeof url === 'string' && url.startsWith(SLACK_LINK));
 }
 /* parse:end */
 
@@ -2554,7 +2563,7 @@ function onTickets(snapshot) {
 	for (const key of Object.keys(TICKET_BY_KEY)) delete TICKET_BY_KEY[key];
 	for (const doc of snapshot.docs) {
 		const body = doc.data();
-		if (!body || typeof body !== 'object' || !/^DSS-\d+$/.test(body.key || '') || !Array.isArray(body.post)) continue;
+		if (!usableTicket(body)) continue;
 		const ticket = structuredClone(body);  // snapshots are frozen
 		TICKETS.push(ticket);
 		TICKET_BY_KEY[ticket.key] = ticket;
