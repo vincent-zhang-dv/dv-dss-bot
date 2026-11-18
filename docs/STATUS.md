@@ -42,6 +42,10 @@
   - `.claude/skills/dss-learn/SKILL.md`: the weekly run. Export the page's database, `dss learn`,
     draft fixes (code, then known causes, then tool notes, then `triage.md`), replay up to 6
     tickets, `dss eval --judge` before and after, commit; pushing and the PR wait for an owner.
+  - Routine "DSS learning reminder" (claude.ai, `trig_014ZGAdkWcyMsnH6AwMNx7en`, Mondays 16:30
+    UTC = 8:30 in BC in winter, 9:30 in summer): reads the page's `reviews` with ArtifactData and
+    DMs Vincent only when some were submitted in the past 7 days. Slack is its only connector. A
+    test run read the database and, with nothing submitted, sent nothing.
 - **Checked:** whole suite 279 passed; ruff clean on the changed files except the older SIM110.
 - **Not done / open:**
   - The first real run waits for submitted reviews (none yet).
