@@ -389,6 +389,16 @@ def test_questions_and_what_is_not_proved_become_actions(sources):
 	assert f'- {QUESTION["ask"]}: settles {QUESTION["settles"]}' in thread
 
 
+def test_a_proved_cause_keeps_its_follow_ups_as_confirm_actions(sources):
+	follow_up = 'Check which release the DTN-3570 fix is planned for'
+	text = answer_text(follow_ups=[follow_up])
+	result = record.trial('DSS-1234', POSTED, ask=claude(text, []))
+	assert result['problems'] == []
+	assert result['record']['triage']['status'] == 'proved'
+	assert f'Confirm: {follow_up}' in result['dm']
+	assert follow_up not in result['thread']  # said once, as an action
+
+
 def test_a_check_that_starts_with_confirm_says_it_once(sources):
 	text = answer_text(status='likely', not_proved=['Confirm the wheel was built from ab952f341'])
 	dm = record.trial('DSS-1234', POSTED, ask=claude(text, []))['dm']
@@ -511,6 +521,8 @@ def test_the_record_may_come_in_a_code_fence(sources):
 	[
 		(answer_text(evidence=[]), 'triage.evidence:'),  # proved needs evidence
 		(answer_text(status='likely', not_proved=[]), 'triage.not_proved:'),
+		# a cause with an unread link is likely, not proved
+		(answer_text(not_proved=['See why pyarrow is missing']), 'triage.not_proved:'),
 		('I could not finish the triage.', 'the answer has no JSON object'),
 		('{"triage": }', 'the answer is not valid JSON'),
 		(

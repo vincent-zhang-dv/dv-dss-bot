@@ -123,7 +123,8 @@
 						}
 					}
 				},
-				"not_proved": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "Each the check a developer would make to settle what could not be proved, such as \"Read DVT4932's Perf Info dvStage for client stages 69-71 to confirm they share one DV stage\". The post lists them as the developers' Confirm actions. Each settles part of this ticket's cause; leave out code changes that would not resolve it."},
+				"not_proved": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "Each link of this ticket's cause that no tool read, as the check a developer would make to settle it, such as \"Read DVT4932's Perf Info dvStage for client stages 69-71 to confirm they share one DV stage\". The post lists them as the developers' Confirm actions. Each settles part of this ticket's cause; leave out code changes that would not resolve it. Empty when the status is proved: a cause with an unread link is likely."},
+				"follow_ups": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "Checks after the cause is settled that do not change it: where or when a fix lands, housekeeping such as a stale file, or whether the data changed since the ticket. The post lists them as the developers' Confirm actions too."},
 				"questions": {
 					"description": "Only questions whose answer settles something, each saying what it settles. The post lists them as the analyst's Answer actions.",
 					"type": "array",
@@ -173,7 +174,12 @@
 			"allOf": [
 				{
 					"if": {"properties": {"status": {"const": "proved"}}},
-					"then": {"$ref": "#/$defs/answered"}
+					"then": {
+						"allOf": [
+							{"$ref": "#/$defs/answered"},
+							{"properties": {"not_proved": {"type": "array", "maxItems": 0}}}
+						]
+					}
 				},
 				{
 					"if": {"properties": {"status": {"const": "likely"}}},

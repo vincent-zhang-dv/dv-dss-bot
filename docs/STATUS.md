@@ -22,8 +22,16 @@
 - **Not done / open:**
   - Prefetch: held on `prefetch-port` until the "likely" to "proved" shift is understood.
   - Step 3 (a scripted past-issue search) dropped by Vincent: the search words are judgement.
-  - 13 of 20 "proved" answers today also list not-proved checks, on main too; the schema says
-    proved means every link was read. Vincent is deciding whether code should enforce it.
+- **Then, the proved rule** (branch `proved-rule`, on `evidence-check`, Vincent's choice): 13 of
+  20 "proved" answers today also listed not-proved checks. Most were follow-ups after a read
+  cause (where a fix lands, a stale file); DSS-1255's was a link of the cause itself. The schema
+  now has `follow_ups` beside `not_proved`, and proved needs `not_proved` empty; claude's
+  structured output enforces it during the run. Both still show as the developers' Confirm todos.
+  Replays of the six tickets: DSS-1256 stays proved (with a follow-up), DSS-1255 likely, DSS-1254
+  needs info, DSS-1222 and 1249 likely (1249's headline now "likely by design", asking developers
+  which of MATLAB and Cerberus holds), DSS-1239 proved to likely because the replay's spreadsheet
+  changed after the ticket; follow-ups in all six; $4.16 against main's $4.23. Suite 286 passed
+  (`test_web_links_name_only_what_the_clone_has` failed once and passed on rerun, on main too).
 
 ### 2026-11-18: DSS Bot Review page in the repo, step 1 of learning from reviews (Vincent, with Claude)
 - **Why:** the team approved learning from the developers' reviews: reviews on the DSS Bot Review
