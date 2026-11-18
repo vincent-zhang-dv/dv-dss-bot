@@ -35,7 +35,11 @@ Toolbox Name: CERB-PE · Investigation Outcome: User Error
 CALLS = [
 	{'tool': 'jira_get_issue', 'arguments': {'key': 'DSS-1234'}, 'result': '{}'},
 	{'tool': 'cerb_find_project', 'arguments': {'dvt': 1234}, 'result': '{}'},
-	{'tool': 'code_grep', 'arguments': {'pattern': 'Bookmarks'}, 'result': 'Cerberus at abc1234, x'},
+	{
+		'tool': 'code_grep',
+		'arguments': {'pattern': 'Bookmarks'},
+		'result': 'Cerberus at abc1234, x',
+	},
 ]
 
 
@@ -61,7 +65,7 @@ def test_example_row_loads():
 	('line', 'message'),
 	[
 		('not json', 'line 2: not JSON'),
-		('{"key": "DSS-1"}', 'line 2: no posted, gate, outcome'),
+		('{"key": "DSS-1"}', 'line 2: no posted, outcome'),
 		('{"key": "DSS-1", "posted": "x", "gate": "D", "outcome": "y"}', 'gate must be one of'),
 	],
 )
@@ -197,6 +201,16 @@ def test_run_scores_every_row_and_saves_them(tmp_path):
 	assert [json.loads(line)['key'] for line in saved] == ['DSS-1234', 'DSS-1235']
 	assert eval.summary(scores[0]).startswith('DSS-1234   gate C        read 2/3 · citations 4/4')
 	assert eval.summary(scores[1]).endswith('no answer saved')
+
+
+def test_a_row_from_a_developer_review_needs_no_gate(tmp_path):
+	golden = tmp_path / 'golden.jsonl'
+	golden.write_text(
+		'{"key": "DSS-9001", "posted": "2027-01-15_09-00-00", "outcome": "x"}\n', encoding='utf-8'
+	)
+	(score,) = eval.run(golden, tmp_path, resolve=fake_resolver())
+	assert score == {'key': 'DSS-9001', 'gate': None, 'missing': True}
+	assert eval.summary(score) == 'DSS-9001   gate -        no answer saved'
 
 
 def test_run_without_judge_starts_no_claude(tmp_path, monkeypatch):

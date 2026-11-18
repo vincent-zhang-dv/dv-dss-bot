@@ -7,6 +7,7 @@
 	python -m dss replay DSS-1229 ... [--golden out/eval/golden.jsonl] [--go] [--post-test]
 	                                          # old tickets as they stood when posted (dss.replay)
 	python -m dss eval out/eval/golden.jsonl out/eval/<run> [--judge] # score saved answers
+	python -m dss learn <export folder>                              # reviews: golden rows, digest
 	python -m dss cerberus                                           # set up the bot's Cerberus
 	python -m dss slack                                              # the bot (see dss.slack)
 	python -m dss mcp                                                # the tools over stdio (MCP)
@@ -84,6 +85,10 @@ def main() -> None:
 	evaluate.add_argument(
 		'--judge', action='store_true', help='also ask Haiku whether each answer found the outcome'
 	)
+	learn = commands.add_parser(
+		'learn', help="turn the review page's submitted reviews into golden rows and a digest"
+	)
+	learn.add_argument('export', type=Path, help='folder with reviews/ and tickets/ JSON files')
 	commands.add_parser(
 		'cerberus', help="set up or update the bot's own Cerberus copies and show what they hold"
 	)
@@ -125,6 +130,15 @@ def main() -> None:
 			raise SystemExit(f'cannot score: {error}') from error
 		for result in scores:
 			print(scoring.summary(result))
+	elif args.command == 'learn':
+		from dss import learn as lessons
+
+		try:
+			lines = lessons.run(args.export)
+		except (OSError, ValueError) as error:  # a missing folder or a file that is not JSON
+			raise SystemExit(f'cannot read the export: {error}') from error
+		for line in lines:
+			print(line)
 	elif args.command == 'replay':
 		from dss import replay
 
