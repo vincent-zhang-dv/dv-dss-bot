@@ -105,7 +105,7 @@ def test_a_new_ticket_is_triaged_as_a_record_and_posted_to_the_developers(tmp_pa
 	assert decision['channel'] == proof['channel'] == DEVELOPERS  # nothing in the DSS channel
 	head = 'DSS-1234 · Input problem: casing ID differs from the tally · proved'
 	assert decision['text'] == head  # the first line without its link, for notifications
-	(block,) = decision['blocks']
+	block, actions = decision['blocks']
 	assert block['type'] == 'markdown'
 	# the key links to the DSS post, which Slack shows below; no other link shows a preview
 	assert block['text'].startswith(
@@ -115,10 +115,14 @@ def test_a_new_ticket_is_triaged_as_a_record_and_posted_to_the_developers(tmp_pa
 	# the analyst's Slack name, as text: a mention would notify them of the draft
 	assert '\n**uana Todos:**\n1. Set the ID' in block['text'] and '<@UANA' not in block['text']
 	assert '\n\n_Draft by Claude · 1,234 tokens · ≈ $0.02 · ' in block['text']
-	review = "\n\n[Please review the bot's report](https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt#DSS-1234)"
-	assert block['text'].endswith(review)
+	assert block['text'].endswith(' s_')  # the footer ends the text
+	# the review page is a button: Slack gives a link in the text its own preview
+	(button,) = actions['elements']
+	assert button['text']['text'] == "Please review the bot's report"
+	assert button['url'] == 'https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt#DSS-1234'
 	assert decision['unfurl_media'] is False and 'unfurl_links' not in decision
 	assert proof['thread_ts'] == '900.0' and proof['blocks'][0]['text'].startswith('**Why:** ')
+	assert len(proof['blocks']) == 1  # no button in the thread
 	saved = bot.store.get(CHANNEL, '1792523850.5')
 	assert saved['ticket'] == 'DSS-1234' and saved['tokens'] == 1234 and saved['problems'] == []
 	assert saved['trial'].endswith('.json')

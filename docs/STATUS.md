@@ -9,14 +9,16 @@
     its claude.ai database). `review/slack_parse.test.js` tests its Slack parser on made-up data
     with Node's own test runner; `tests/test_review_page.py` runs it, and checks the page against
     `record.render`'s headings and the bot's review link.
-  - Each live bot post ends with "Please review the bot's report", linking to its ticket on the
-    page (`slack.REVIEW_PAGE`, `#DSS-<n>`). Replays and trials don't get it.
+  - Each live bot post has a "Please review the bot's report" button, opening its ticket on the
+    page (`slack.REVIEW_PAGE`, `#DSS-<n>`). A link in the text got a claude.ai preview card under
+    the post (Vincent saw it); `unfurl_links=False` removes the DSS post's preview too (tried), and
+    a button gets none. Its click is acknowledged and does nothing else. Replays and trials don't
+    get it.
 - **Checked:** `node --test`: 5 passed; whole pytest suite: 271 passed. Ruff clean on the changed
   files. The page's refresh ran in
   Vincent's browser through his Slack connector and wrote the same DSS-1256 ticket the tests'
   parser builds.
 - **Not done / open:**
-  - Slack may unfurl the claude.ai link under the post; not seen yet (no draft post sent).
   - Step 2: `python -m dss learn` (reviews to golden cases and a digest). Step 3: the weekly
     `dss-learn` skill (draft fixes, replay, PR).
 

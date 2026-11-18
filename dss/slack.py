@@ -41,7 +41,8 @@ MARKDOWN_CHARS = 12_000  # Slack's limit for the Markdown block of one message
 ENV = ('DSS_SLACK_BOT_TOKEN', 'DSS_SLACK_APP_TOKEN')
 LABEL = 'Draft by Claude'  # starts the post's footer, before what the triage cost
 REVIEW_PAGE = 'https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt'  # DSS Bot Review; #<key> opens it
-REVIEW_TEXT = "Please review the bot's report"  # the page leaves this line out of what is rated
+REVIEW_TEXT = "Please review the bot's report"  # a button: a link would get its own preview
+BUTTON_ACTION = 'open_link'  # a link button still sends its click to the app
 MARKDOWN_LINK = re.compile(r'\[([^\]\n]*)\]\([^)\s]*\)')
 
 log = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ class SlackDesk:
 		for name in ('problems', 'tokens', 'cost_usd', 'seconds', 'turns'):
 			saved[name] = result[name]
 		self.store.put(channel, ts, saved)
-		decision = self._post(f'{result["dm"]}\n\n[{REVIEW_TEXT}]({REVIEW_PAGE}#{key})')
+		decision = self._post(result['dm'], button=(REVIEW_TEXT, f'{REVIEW_PAGE}#{key}'))
 		self._post(result['thread'], thread_ts=decision)
 
 	def catch_up(self) -> None:
@@ -182,19 +183,21 @@ class SlackDesk:
 		except Exception:  # noqa: BLE001 - a link is a convenience
 			return f'https://slack.com/archives/{channel}/p{ts.replace(".", "")}'
 
-	def _post(self, text: str, thread_ts: str = '') -> str:
+	def _post(self, text: str, thread_ts: str = '', button: tuple[str, str] | None = None) -> str:
 		"""*text* (Markdown) to the destination, in the thread *thread_ts* when given; its ts."""
 		if self.destination in (self.channel, CHANNEL):  # checked at start too; never post there
 			raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
-		return post(self.client, self.destination, text, thread_ts)
+		return post(self.client, self.destination, text, thread_ts, button)
 
 
-def post(client, to: str, text: str, thread_ts: str = '') -> str:
+def post(
+	client, to: str, text: str, thread_ts: str = '', button: tuple[str, str] | None = None
+) -> str:
 	"""*text* (Markdown) to the channel or DM *to*, in the thread *thread_ts* when given; its ts.
 
 	Never to #data-dev-support or the watched channel. Slack previews the link to the DSS post and
 	no Jira or GitHub link. unfurl_links stays at Slack's default: False hides the DSS post's
-	preview too.
+	preview too. *button* (label, url) adds a link button under the text; it gets no preview.
 	"""
 	if to in (watched_channel(), CHANNEL):
 		raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
@@ -205,6 +208,11 @@ def post(client, to: str, text: str, thread_ts: str = '') -> str:
 		'blocks': [{'type': 'markdown', 'text': text[:MARKDOWN_CHARS]}],
 		'unfurl_media': False,
 	}
+	if button:
+		label, url = button
+		element = {'type': 'button', 'action_id': BUTTON_ACTION, 'url': url}
+		element['text'] = {'type': 'plain_text', 'text': label}
+		message['blocks'].append({'type': 'actions', 'elements': [element]})
 	if thread_ts:
 		message['thread_ts'] = thread_ts
 	return client.chat_postMessage(**message)['ts']
@@ -227,6 +235,7 @@ def build_app(store: AnswerStore, to: str):
 	app = App(token=os.environ['DSS_SLACK_BOT_TOKEN'])
 	desk = SlackDesk(app.client, to, store, watched_channel())
 	app.event('message')(lambda event: desk.on_message(event))
+	app.action(BUTTON_ACTION)(lambda ack: ack())  # the button only opens its link
 	return app, desk
 
 

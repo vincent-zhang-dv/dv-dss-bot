@@ -170,7 +170,7 @@ The bot runs on the `ddev-support-bot` app (Socket Mode, the `message.groups` an
 
 Each analysis is a checked record, as in trial mode, posted to `DSS_SLACK_POST_CHANNEL` (#data-dev-support-assist), or without that setting to `DSS_SLACK_REVIEWER`'s DM. The bot refuses #data-dev-support, or the watched channel, as a destination. New features are tried in #data-dev-support-assist-test.
 
-- **The post:** the headline (the verdict in a few words, its ticket key linked to the DSS post), Bot Summary (the problem in one sentence), numbered todos for the analyst (headed by their Slack name) and for the data developers (including the questions to ask and the checks that would settle what is not proved), and the Draft Reply to the analyst last, in plain words with no code. A todo list with nothing in it is left out. Under the footer, "Please review the bot's report" opens the ticket on the review page (below).
+- **The post:** the headline (the verdict in a few words, its ticket key linked to the DSS post), Bot Summary (the problem in one sentence), numbered todos for the analyst (headed by their Slack name) and for the data developers (including the questions to ask and the checks that would settle what is not proved), and the Draft Reply to the analyst last, in plain words with no code. A todo list with nothing in it is left out. Under it, a "Please review the bot's report" button opens the ticket on the review page (below); a button, because Slack would preview a link to the page.
 - **Its thread**, each section only when it has something:
 
   | Section | Record fields | Shown when |
