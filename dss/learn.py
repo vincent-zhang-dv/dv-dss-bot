@@ -48,14 +48,20 @@ MARKUP = re.compile(r'\[([^\]\n]*)\]\([^)\s]*\)|\*\*|`')
 
 def load(export: Path) -> tuple[dict[str, dict], dict[str, dict]]:
 	"""The reviews and tickets of *export*, by ticket key. A review saved under another id (the
-	page's first, per-reviewer format) is left out, as the page leaves it out."""
+	page's first, per-reviewer format) is left out, as the page leaves it out, and so is a ticket
+	without its filing time. FileNotFoundError when *export* has no reviews folder."""
+	if not (export / 'reviews').is_dir():
+		raise FileNotFoundError(f'no reviews folder in {export}')
 	found: tuple[dict[str, dict], dict[str, dict]] = ({}, {})
 	for into, name in zip(found, ('reviews', 'tickets'), strict=True):
 		for path in sorted((export / name).glob('*.json')):
 			body = json.loads(path.read_text(encoding='utf-8'))
 			if isinstance(body, dict) and body.get('key') == path.stem:
 				into[path.stem] = body
-	return found
+	reviews, tickets = found
+	return reviews, {
+		key: ticket for key, ticket in tickets.items() if (ticket.get('filed') or {}).get('created')
+	}
 
 
 def plain(markdown: str) -> str:

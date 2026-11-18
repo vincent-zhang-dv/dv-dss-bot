@@ -6,6 +6,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from dss import __main__ as cli
 from dss import eval, learn
 
@@ -151,6 +153,26 @@ def test_learn_knows_the_page_sections_and_reasons():
 		dict(re.findall(r"\['(\w+)', '([^']+)', '(?:correct|partial|incorrect)'\]", page))
 		== learn.ACTS
 	)
+
+
+def test_a_ticket_without_its_filing_time_gives_no_row(tmp_path):
+	folder = export(tmp_path)
+	broken = ticket('DSS-9002', 'x')
+	del broken['filed']['created']
+	(folder / 'tickets' / 'DSS-9002.json').write_text(json.dumps(broken), encoding='utf-8')
+	lines = learn.run(folder, tmp_path / 'golden.jsonl')
+	assert 'No golden row (no ticket, or no outcome given): DSS-9002' in lines
+
+
+def test_a_wrong_export_folder_stops_and_keeps_the_golden_rows(tmp_path, monkeypatch):
+	golden = tmp_path / 'golden.jsonl'
+	golden.write_text('{"key": "DSS-9001"}\n', encoding='utf-8')
+	monkeypatch.setattr(learn, 'GOLDEN', golden)
+	monkeypatch.setattr(sys, 'argv', ['dss', 'learn', str(tmp_path / 'no-such-export')])
+	monkeypatch.setattr(cli, 'load_env', lambda: None)
+	with pytest.raises(SystemExit, match='cannot read the export: no reviews folder'):
+		cli.main()
+	assert golden.read_text(encoding='utf-8') == '{"key": "DSS-9001"}\n'
 
 
 def test_cli_learn_prints_the_digest(tmp_path, monkeypatch, capsys):
