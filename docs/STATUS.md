@@ -20,7 +20,10 @@
 - **Checked:** whole suite 284 passed; ruff clean on the changed files. 38 real records, 251 evidence refs, 0 marked. No real
   run has cited an unread source yet, so only the unit tests show it catching one.
 - **Not done / open:**
-  - Prefetch: held on `prefetch-port` until the "likely" to "proved" shift is understood.
+  - Prefetch, retested on top of the proved rule (branch `prefetch`): on the six tickets, model
+    turns 181 to 154, tool calls 169 to 142, cost $4.16 to $3.43; the same statuses on all six,
+    none proved with an unread link; no evidence marks. DSS-1249 suggested a peak-preserving DTN
+    again, as main did; its gap (the LAS SOP page is not found) is open on every branch.
   - Step 3 (a scripted past-issue search) dropped by Vincent: the search words are judgement.
 - **Then, the proved rule** (branch `proved-rule`, on `evidence-check`, Vincent's choice): 13 of
   20 "proved" answers today also listed not-proved checks. Most were follow-ups after a read
