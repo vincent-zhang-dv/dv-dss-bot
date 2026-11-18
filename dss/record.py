@@ -678,8 +678,8 @@ def render_refused(
 def _decision(record: dict, ticket_link: str = '', analyst: str = '') -> str:
 	"""The post: headline, the bot's summary, each side's todos, and the draft reply last.
 
-	The analyst's questions are their "Answer" todos, and what is not proved is the developers'
-	"Confirm" todos, so each is said once. A side with nothing to do is left out. *analyst* is the
+	The analyst's questions are their "Answer" todos, and what is not proved and the follow-ups
+	are the developers' "Confirm" todos, so each is said once. A side with nothing to do is left out. *analyst* is the
 	analyst's Slack name; the Jira reporter's name stands in without it.
 	"""
 	ticket, answer = record['dss_ticket'], record['triage']
@@ -693,7 +693,7 @@ def _decision(record: dict, ticket_link: str = '', analyst: str = '') -> str:
 	for question in answer.get('questions') or []:
 		analyst_todos.append(f'Answer: {question["ask"]}')
 	developer_todos = list(answer['actions']['developers'])
-	for check in answer.get('not_proved') or []:
+	for check in (answer.get('not_proved') or []) + (answer.get('follow_ups') or []):
 		if check.lower().startswith('confirm '):  # "Confirm: Confirm the ..." says it twice
 			check = check[len('confirm ') :]
 		developer_todos.append(f'Confirm: {check}')
