@@ -33,8 +33,18 @@
 - **Checked:** whole suite 277 passed (`test_the_analysts_build_is_exported_from_git_without_a_wheel`
   failed once and passed on rerun, as on 2026-11-17). A dry run on the real export found the
   DSS-1256 review not submitted yet, so no rows.
+- **Step 3 done** (same branch), with Vincent's choices: eval learns replays, a weekly reminder
+  to Vincent starts the run, and the run may replay up to 6 tickets before asking.
+  - `dss eval` scores a replay folder: without `<key>.md`, the newest `<key>_<time>.json` record's
+    post and thread is the answer (a stopped replay is "no answer saved"). The judge and the
+    evidence check apply; a record has no Checked section, so no citations. Checked on the
+    DSS-1256 replay of today: read 2/2.
+  - `.claude/skills/dss-learn/SKILL.md`: the weekly run. Export the page's database, `dss learn`,
+    draft fixes (code, then known causes, then tool notes, then `triage.md`), replay up to 6
+    tickets, `dss eval --judge` before and after, commit; pushing and the PR wait for an owner.
+- **Checked:** whole suite 279 passed; ruff clean on the changed files except the older SIM110.
 - **Not done / open:**
-  - Step 3: the weekly `dss-learn` skill (export, `dss learn`, draft fixes, replay, PR).
+  - The first real run waits for submitted reviews (none yet).
 
 ### 2026-11-18: lessons from how the developers handled DSS-1246 to 1256 (Vincent, with Claude)
 - **Why:** on DSS-1256 (a custom plot for a sales trial) the live bot told a developer to make

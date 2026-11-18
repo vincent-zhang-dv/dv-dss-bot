@@ -13,7 +13,8 @@ closed DSS ticket; docs/golden.example.jsonl is a made-up row to copy. Its field
 - toolbox, investigation_outcome: the labels Jira has; Suggested labels should name them.
 - source_of_truth: where the outcome comes from (Jira comment, Slack thread, DTN ticket).
 
-The run folder holds `<key>.md` (the answer) and `<key>*.jsonl` (its trace, from DSS_TRACE=1).
+The run folder holds `<key>.md` (the answer) and `<key>*.jsonl` (its trace, from DSS_TRACE=1), or
+is a replay folder (out/replay/<date>), whose newest `<key>_<time>.json` record gives the answer.
 Every Jira key, Confluence page id and file:line under Checked is looked up, read-only. With
 --judge, a locked-down Haiku also says whether the answer reached the outcome; each judgement is
 one more `claude -p` run under the person's login.
@@ -204,9 +205,14 @@ def ref_from(calls: list[dict]) -> str:
 
 
 def load_run(run_dir: Path, key: str) -> tuple[str, list[dict]] | None:
-	"""The answer and traced calls saved for *key* in *run_dir*; None without an answer."""
+	"""The answer and traced calls saved for *key* in *run_dir*; None without an answer. The answer
+	is `<key>.md` (`dss triage`), else the newest replay record's post and thread (`dss replay`)."""
 	answer_file = run_dir / f'{key}.md'
-	if not answer_file.exists():
+	if answer_file.exists():
+		answer = answer_file.read_text(encoding='utf-8')
+	else:
+		answer = replay_answer(run_dir, key)
+	if not answer:
 		return None
 	calls = []
 	traces = sorted(run_dir.glob(f'{key}_*.jsonl'))
@@ -214,7 +220,19 @@ def load_run(run_dir: Path, key: str) -> tuple[str, list[dict]] | None:
 		for line in traces[-1].read_text(encoding='utf-8').splitlines():
 			if line.strip():
 				calls.append(json.loads(line))
-	return answer_file.read_text(encoding='utf-8'), calls
+	return answer, calls
+
+
+def replay_answer(run_dir: Path, key: str) -> str:
+	"""The post and thread of the newest replay record of *key* (`<key>_<time>.json`) in
+	*run_dir*; empty when there is none or the replay stopped before an answer."""
+	records = sorted(run_dir.glob(f'{key}_*.json'))
+	if not records:
+		return ''
+	record = json.loads(records[-1].read_text(encoding='utf-8'))
+	if not record.get('dm'):
+		return ''
+	return f'{record["dm"]}\n\n{record.get("thread", "")}'
 
 
 def judge(row: dict, answer: str, ask=None) -> dict:
