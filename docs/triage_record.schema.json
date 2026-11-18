@@ -55,22 +55,22 @@
 			"required": ["status", "confidence", "settled_at", "headline", "what", "request", "prior_art", "actions"],
 			"additionalProperties": false,
 			"properties": {
-				"status": {"enum": ["proved", "likely", "needs_info", "not_cerberus"]},
+				"status": {"enum": ["proved", "likely", "needs_info", "not_cerberus"], "description": "proved when every link of the cause was read with a tool; likely when the cause fits the evidence but no tool can read one link; needs_info when the answer depends on something only the analyst can give; not_cerberus when Gate A says so."},
 				"confidence": {"enum": ["high", "medium", "low"]},
-				"headline": {"$ref": "#/$defs/text", "maxLength": 60, "description": "The verdict in a few plain words."},
+				"headline": {"$ref": "#/$defs/text", "maxLength": 60, "description": "The verdict in a few plain words, such as \"Known issue, fix coming in Cerberus 1.1\", \"New bug, not fixed yet\", \"Two bugs, neither fixed\", \"Input problem: casing ID differs from the tally\", \"One question for the analyst\" or \"Not Cerberus: ask the VizApp team\". Name a release only when a DTN ticket's fix version names it."},
 				"actions": {
-					"description": "What each side should do; an empty list means nothing.",
+					"description": "What each side should do: short instructions that start with a verb; an empty list means there is nothing to do. Never repeat a question or a not_proved check here: code adds those.",
 					"type": "object",
 					"required": ["analyst", "developers"],
 					"additionalProperties": false,
 					"properties": {
-						"analyst": {"type": "array", "items": {"$ref": "#/$defs/text"}},
-						"developers": {"type": "array", "items": {"$ref": "#/$defs/text"}}
+						"analyst": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "Correct an input (name the file, sheet and row or cell, and the value to set), update Cerberus and rerun, or wait for the release. When the cause is in their data, start with the check that shows it in their tools, then the fix, then each step to rerun in order (such as re-exporting calipers before CatCall). When Cerberus works as designed, still check the inputs the evidence shows (calipers from different passes or folders). When it is a Cerberus bug, review the output a developer regenerates from the fix branch."},
+						"developers": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "Raise a DTN ticket (say what for), set a fix version, regenerate the deliverable from a fixed branch or PR (name it), or review or merge an existing PR (name it). Give a deadline when the analyst's review date makes one matter. Only steps that confirm or fix this ticket's cause. For a custom request, the DFR steps from the rules instead of building it."}
 					}
 				},
-				"settled_at": {"enum": ["request", "prior_art", "gate_a", "gate_b", "gate_c", "playbook"]},
-				"playbook": {"enum": ["crash", "wrong_numbers", "missing_output", "feature_request", "how_to", null]},
-				"what": {"$ref": "#/$defs/text"},
+				"settled_at": {"enum": ["request", "prior_art", "gate_a", "gate_b", "gate_c", "playbook"], "description": "The step that settled it: request (step 1), prior_art (steps 2 and 3), a gate, or a step 7 playbook."},
+				"playbook": {"enum": ["crash", "wrong_numbers", "missing_output", "feature_request", "how_to", null], "description": "Step 7's playbook; null when it settled before step 7."},
+				"what": {"$ref": "#/$defs/text", "description": "The summary: what the analyst reported, in one plain sentence."},
 				"request": {
 					"description": "Step 1: what the analyst asks, stated before the investigation.",
 					"type": "object",
@@ -91,15 +91,16 @@
 						"additionalProperties": false,
 						"properties": {
 							"ref": {"$ref": "#/$defs/text", "description": "A DSS or DTN key, a commit, a branch or a page."},
-							"what": {"$ref": "#/$defs/text"},
+							"what": {"$ref": "#/$defs/text", "description": "The past issue in one line."},
 							"state": {"enum": ["fixed_released", "fixed_unreleased", "open", "explained", "unknown"]},
 							"applies": {"enum": ["yes", "partly", "no"]},
 							"why": {"$ref": "#/$defs/text", "description": "The evidence for applies, such as a code_contains result."}
 						}
 					}
 				},
-				"cause": {"type": ["string", "null"], "description": "One sentence: X was Y, so Z."},
+				"cause": {"type": ["string", "null"], "description": "One sentence with its mechanism, \"X was Y, so Z\"; when the analyst reports several issues, one such sentence for each, in their order; null when unknown."},
 				"where": {
+					"description": "Where the cause lives; null when unknown.",
 					"type": ["object", "null"],
 					"required": ["kind"],
 					"additionalProperties": false,
@@ -110,6 +111,7 @@
 					}
 				},
 				"evidence": {
+					"description": "The proved results (the rules' Checked).",
 					"type": "array",
 					"items": {
 						"type": "object",
@@ -117,12 +119,13 @@
 						"additionalProperties": false,
 						"properties": {
 							"fact": {"$ref": "#/$defs/text"},
-							"ref": {"$ref": "#/$defs/text", "description": "The tool call that read it, or 'computed'."}
+							"ref": {"$ref": "#/$defs/text", "description": "The tool call that read it, such as cerb_client_info:1234, code_read:cerberus/plots.py:120, slack_thread:reply 1 screenshot or terminal_log:line 1201, or 'computed'."}
 						}
 					}
 				},
-				"not_proved": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+				"not_proved": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "Each the check a developer would make to settle what could not be proved, such as \"Read DVT4932's Perf Info dvStage for client stages 69-71 to confirm they share one DV stage\". The post lists them as the developers' Confirm actions. Each settles part of this ticket's cause; leave out code changes that would not resolve it."},
 				"questions": {
+					"description": "Only questions whose answer settles something, each saying what it settles. The post lists them as the analyst's Answer actions.",
 					"type": "array",
 					"items": {
 						"type": "object",
@@ -135,7 +138,7 @@
 					}
 				},
 				"escalate": {
-					"description": "The existing DTN ticket that covers this problem. The bot writes no DTN drafts: the team writes DTN tickets with its own skill.",
+					"description": "The existing DTN ticket that covers this problem; null when there is none. The bot writes no DTN drafts: the team writes DTN tickets with its own skill.",
 					"type": ["object", "null"],
 					"required": ["kind", "dtn_ticket"],
 					"additionalProperties": false,
@@ -145,11 +148,13 @@
 					}
 				},
 				"reply": {
-					"description": "To the analyst: no Cerberus code paths, .py files or line numbers.",
+					"description": "The reply to the analyst, as a data developer would write it: at most 3 short sentences, the answer or solution first (\"works as intended\" when it does). Leave out side facts and numbers that don't change what they do next. Give exact facts they can check (the design, stage, joint or file, the counts, the sheet and column where they see it), and only proved ones. Leave out implementation details (Cerberus code paths, functions, line numbers, libraries) and what they can already tell (their DVT or version, that there is no workaround, that their data or inputs are not at fault when it is a Cerberus bug). Name a release only from a DTN ticket's fix version, and promise no other work. When the status is needs_info, the reply asks the questions. Null when nothing should be sent yet.",
 					"type": ["string", "null"],
+					"maxLength": 700,
 					"not": {"type": "string", "pattern": "\\.py\\b|cerberus[/\\\\]|\\blines? [0-9]+"}
 				},
 				"secondary": {
+					"description": "A separate cause the analyst did not report; class is a whole class object, not a single value. Label suggestions go in class.labels, not here.",
 					"type": "array",
 					"items": {
 						"type": "object",
@@ -161,9 +166,9 @@
 						}
 					}
 				},
-				"similar_dss_tickets": {"type": "array", "items": {"$ref": "#/$defs/dss_key"}},
-				"flags": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "What this run could not read."},
-				"details": {"type": "object", "description": "Depends on the step or playbook; see the details table on the page."}
+				"similar_dss_tickets": {"type": "array", "items": {"$ref": "#/$defs/dss_key"}, "description": "Keys of similar DSS tickets, for linking in Jira."},
+				"flags": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "What this run could not read (a tool that failed, a file it could not open)."},
+				"details": {"type": "object", "description": "By where it settled; {} otherwise. not_cerberus: {owner, sop}, the likely owner and the SOP link. Gate B: {version, prod_version, failed_run, config}. crash: {error, raises_at, changed_since}, the exact error text, the file:line that raises it, and whether that code changed since the analyst's version. wrong_numbers: {reported: {value, where}, expected: {value, where}, first_difference}, both values and the first input where they differ."}
 			},
 			"allOf": [
 				{
@@ -175,25 +180,25 @@
 					"then": {
 						"allOf": [
 							{"$ref": "#/$defs/answered"},
-							{"required": ["not_proved"], "properties": {"not_proved": {"minItems": 1}}}
+							{"required": ["not_proved"], "properties": {"not_proved": {"type": "array", "minItems": 1}}}
 						]
 					}
 				},
 				{
 					"if": {"properties": {"status": {"const": "needs_info"}}},
-					"then": {"required": ["questions"], "properties": {"questions": {"minItems": 1}}}
+					"then": {"required": ["questions"], "properties": {"questions": {"type": "array", "minItems": 1}}}
 				},
 				{
 					"if": {"properties": {"status": {"const": "not_cerberus"}}},
-					"then": {"required": ["details"], "properties": {"details": {"required": ["owner"]}}}
+					"then": {"required": ["details"], "properties": {"details": {"type": "object", "required": ["owner"]}}}
 				},
 				{
 					"if": {"properties": {"status": {"const": "proved"}, "playbook": {"const": "wrong_numbers"}}, "required": ["playbook"]},
-					"then": {"required": ["details"], "properties": {"details": {"required": ["reported", "expected", "first_difference"]}}}
+					"then": {"required": ["details"], "properties": {"details": {"type": "object", "required": ["reported", "expected", "first_difference"]}}}
 				},
 				{
 					"if": {"properties": {"settled_at": {"const": "prior_art"}}},
-					"then": {"properties": {"prior_art": {"contains": {"properties": {"applies": {"const": "yes"}}}}}}
+					"then": {"properties": {"prior_art": {"type": "array", "contains": {"type": "object", "properties": {"applies": {"const": "yes"}}}}}}
 				}
 			]
 		},
@@ -202,11 +207,11 @@
 			"required": ["cause", "evidence"],
 			"properties": {
 				"cause": {"$ref": "#/$defs/text"},
-				"evidence": {"minItems": 1}
+				"evidence": {"type": "array", "minItems": 1}
 			}
 		},
 		"class": {
-			"description": "Planning fields: enums and keys only, no client names, safe to count and share. cause_family, feature and prevent are null while the cause is unknown.",
+			"description": "Planning fields: values from the lists and keys only, never client, project or person names; safe to count and share. cause_family, feature and prevent are null while the cause is unknown.",
 			"type": "object",
 			"required": ["cause_family", "feature", "prevent"],
 			"additionalProperties": false,
@@ -217,16 +222,16 @@
 				"known_cause": {
 					"type": ["string", "null"],
 					"pattern": "^(new:)?[a-z0-9]+(-[a-z0-9]+)*$",
-					"description": "A slug from docs/known_causes.json, or new:<slug> for the reviewer to accept."
+					"description": "A slug from the known causes in the system prompt, new:<slug> for a repeatable cause not in it, or null."
 				},
-				"impact": {"enum": ["blocked", "workaround", "question", null]},
+				"impact": {"enum": ["blocked", "workaround", "question", null], "description": "Null when the ticket does not say."},
 				"fix_type": {"enum": ["analyst_action", "setup", "update", "code_fix", "workaround", "explained", "redirect", null]},
-				"prevent": {"anyOf": [{"$ref": "#/$defs/prevent"}, {"type": "null"}]},
-				"prevent_note": {"type": "string"},
-				"dtn_tickets": {"type": "array", "items": {"$ref": "#/$defs/dtn_key"}},
+				"prevent": {"anyOf": [{"$ref": "#/$defs/prevent"}, {"type": "null"}], "description": "What would stop the next one."},
+				"prevent_note": {"type": "string", "description": "One line on prevent, or leave it out."},
+				"dtn_tickets": {"type": "array", "items": {"$ref": "#/$defs/dtn_key"}, "description": "DTN keys linked to the ticket or found."},
 				"labels": {
 					"type": "object",
-					"description": "Jira's own two fields on the DSS ticket.",
+					"description": "Jira's own two fields on the DSS ticket: the Toolbox Name and Investigation Outcome to set.",
 					"additionalProperties": false,
 					"properties": {
 						"toolbox": {"type": ["string", "null"]},

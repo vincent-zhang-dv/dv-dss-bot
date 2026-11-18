@@ -26,14 +26,13 @@ nothing runs: each ticket's post, cutoff and Cerberus commit are shown.
 """
 
 import contextlib
-import functools
 import json
 import os
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from dss import code, cutoff, jira, record, runner, slack, thread, triage
+from dss import code, cutoff, jira, record, slack, thread, triage
 from dss.worker import ROOT
 
 REPLAY_DIR = ROOT / 'out' / 'replay'  # a folder per day; never out/answers, which the bot reads
@@ -255,10 +254,6 @@ def replay(plan: dict, folder: Path, ask=None) -> dict:
 		'code_ref': plan['ref'],
 	}
 	with replaying(key, ts, plan['ref']):
-		if ask is None:
-			ask = functools.partial(
-				runner.run_reply, system=record.system_prompt(), budget=MAX_COST_USD
-			)
 		try:
 			return record.trial(
 				key,
@@ -272,6 +267,7 @@ def replay(plan: dict, folder: Path, ask=None) -> dict:
 				replay=facts,
 				folder=folder,
 				trace=trace,
+				budget=MAX_COST_USD,
 			)
 		except Exception as error:  # noqa: BLE001 - a stopped replay is a result too
 			why = triage.explain(error)

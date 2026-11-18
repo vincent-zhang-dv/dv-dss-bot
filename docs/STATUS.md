@@ -1,5 +1,84 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-18: lessons from how the developers handled DSS-1246 to 1256 (Vincent, with Claude)
+- **Why:** on DSS-1256 (a custom plot for a sales trial) the live bot told a developer to make
+  the plot; Annika's first question was "is there a DFR?", and Dimitri then raised one. The
+  process for custom asks needing Dev support is in a 2025-05 Slack thread (channel
+  C0515F6HWNT), not in Confluence: a DFR is raised (marked Needs Product Approval and Dev support), linked from the
+  DSS; the developer comments the effort and what it displaces in the DFR and tags Product, who
+  approve or reject. The Custom Requests Guidelines page (last edited 2024-07-30) is outdated.
+- **Done** (same branch):
+  - `triage.md`: the DFR rule now covers custom outputs (plots, tables, deliverables) as well
+    as changes against Cerberus. The bot looks for a DFR key in the thread and the Jira links;
+    without one, the reply asks for a DFR; developer actions are the DFR steps, never building
+    the output before Product approves. The schema's `actions.developers` says the same.
+  - `triage.md`: after finding faulty code, grep its pattern in other modules (DSS-1251: Annika
+    noted sibling files already had the fix); check Cerberus' version pins before an install
+    action (DSS-1255: pyarrow needs numpy 2, Cerberus pins numpy < 2).
+  - Known cause `defender-scans-cerberus-install` (DSS-1254): Windows Defender scanning the DLLs
+    of a Cerberus outside C:\code; the fix is the new cerb.bat (installs in C:\code\cerberus).
+- **Not done / open:**
+  - Annika asked for the live bot answers on the feedback (DSS Post Review) page, to rate them
+    as they come.
+  - Vincent plans an analyst-facing troubleshooting entry: "for a custom request, request a
+    sales DFR".
+  - DSS-1253 did not link the existing DTN-3638; DSS-1250's Defender first-run scan of the ML
+    script is not a known cause (different install, not verified here).
+
+### 2026-11-17: lessons from Vincent's ratings of six replays (Vincent, with Claude)
+- **Why:** Vincent rated the 2026-11-16 replays (DSS-1222, 1229, 1236, 1238, 1239, 1249). The
+  bot was right on the code bugs and the failed run (1222, 1229, 1239) and wrong on all three
+  "intended or bug" tickets: DSS-1236 (harmful: misread which white line the analyst meant, then
+  called it works-as-designed), DSS-1238 (proposed relaxing a product requirement) and DSS-1249
+  (harmful: called it a bug; the SOP says the LAS doesn't preserve peaks). Its one Confluence
+  search in DSS-1249, four words, found nothing; "LAS resampling" finds the SOP page.
+- **Done** (branch `review-lessons`), code where code can settle it, rules where it can't:
+  - `matlab_read` gives the date the MATLAB file last changed; `confluence_search` says to use 2
+    or 3 words, since a page must contain every word.
+  - `triage.md`: name the exact element the analyst points at and compare a "used to look like
+    this" image; "works as designed" needs the path that made that symptom. When any two of the
+    Confluence SOP, the code and MATLAB CAT disagree, give each with its age and ask the
+    developers to confirm (replaces "the code wins"). A requested change that neither MATLAB nor
+    Confluence describes and that goes against current Cerberus: suggest a Data Follow-up
+    Request (DFR).
+  - `triage_record.md`: `cause` covers each reported issue (DSS-1222 put issues 2 and 3 under
+    "Also found"); `secondary` is only for causes the analyst didn't report; for a Cerberus bug
+    the analyst reviews the regenerated output; the reply leaves out that their data is not at
+    fault.
+- **Then, against prompt dilution** (Vincent: agents only where they are needed), code took over
+  what it can settle, with no new agent:
+  - The answer format moved out of the prompt: claude's `--json-schema` checks the answer and
+    asks Claude again until it fits (tried: a rule broken on purpose came back fixed in 3
+    turns, also under the bot's lockdown flags). `record.answer_schema` builds it from the
+    record schema, references inlined (the API takes no top-level `allOf`). Each field's
+    guidance is now its schema description; `triage_record.md` keeps the general rules and the
+    known causes. The reply is capped at 700 characters (past replies: median 498, p90 730).
+  - The system prompt goes in a file (`--system-prompt-file`), so its size is no longer bound by
+    Windows' command line; only the schema is on it (14,578 characters with the replay block).
+  - Known causes are sent by workflow: a PE ticket doesn't get WI or FF causes
+    (`record.for_workflow`); combo and unknown get them all.
+  - Rules travel with the tool results they apply to: the source-conflict rule with
+    `confluence_page` and `matlab_read`, the VizApp support channels with `vizapp_*`.
+  - System prompt: 22,444 → 14,145 characters (unknown workflow), 13,511 (WI), 12,811 (PE).
+- **Checked:** whole suite, 268 passed (3 runs). Ruff clean on the changed files (6 older
+  findings in `cerb.py`, `code.py`, `eval.py`). The CLI accepted the full answer schema on a
+  Haiku test. Replayed the 12 rated tickets (Vincent's six, Annika's six) on this branch: all
+  passed the record check, $7.18 in all. DSS-1236 now points at the missing collar gap in the
+  Classification curve against MATLAB (likely); DSS-1238 matches Vincent's correction (works as
+  designed, suggest a DFR, no developer change) and asks to confirm a Cerberus/MATLAB rule
+  difference; DSS-1222's cause covers all three issues. The runs are on the DSS Post Review page
+  (version 9) beside the rated ones, with a word diff per section, for Vincent and Annika to rate.
+- **Not done / open:**
+  - DSS-1249 still proposes peak preservation: its one Confluence search ("LAS depth step") did
+    not return "Export Deliverable LAS from Matlab", whose 2026-07-06 version says the resampling
+    does not preserve peaks and that's OK.
+  - DSS-1239's reply still says it is "not your plugs" and "nothing needs changing on your side",
+    though the reply's schema description says to leave that out.
+  - Ratings of the 2026-11-17 runs on the review page decide the merge.
+  - Writing the reply in a separate short call (plan step 5): only if the replays still show
+    writing misses.
+  - Terminal-log instructions are still sent for pre-1.1 sessions (small; left as is).
+
 ### 2026-11-16: VizApp code and release notes as a source (Vincent, with Claude)
 - **Why:** VizApp writes most of what Cerberus reads (dvcalipers, bookmarks), so a DSS issue can
   start in VizApp; then the analyst should go to the VizApp support channels named in the

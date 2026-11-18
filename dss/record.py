@@ -1,7 +1,8 @@
 """Trial mode: one triage as a checked record (`dss-triage/3`) instead of free Markdown.
 
 Code reads the `dss_ticket` block before Claude starts. Claude follows the same steps and rules as
-the bot (`triage.md`) but answers with the `triage` and `class` blocks (`triage_record.md`). Code
+the bot (`triage.md`) but answers with the `triage` and `class` blocks (`triage_record.md`), as
+claude's structured output against :func:`answer_schema`. Code
 then checks the record against `docs/triage_record.schema.json`, checks in the run's trace that
 past issues were searched before the investigation, and renders the reviewer's DM (the decision)
 and its thread reply (the proof). The design is on the DSS Triage Flow page.
@@ -34,6 +35,7 @@ TRIAL_DIR = ROOT / 'out' / 'trial'  # one file per trial; never out/answers, whi
 RECORD_FIELDS = {**jira.TICKET_FIELDS, 'created': 'created'}
 JIRA_TIME = '%Y-%m-%dT%H:%M:%S.%f%z'  # 2026-10-22T10:00:00.000-0700
 WORKFLOWS = {'PE', 'WI', 'CI', 'FF'}
+WORKFLOW_FEATURES = {'PE': 'pe_', 'WI': 'wi_', 'CI': 'wi_', 'FF': 'ff_'}  # schema feature prefixes
 PROMPT = """New ticket {key}, posted {posted} (local time).
 
 The DSS ticket record, read by code before you started:
@@ -89,11 +91,7 @@ releases and branches, later sessions, log lines and files). Settle it as the bo
   reporter, summary, description) with absolute dates.
 - If anything you read looks like it comes from after {posted} (an answer, a fix, a later date),
   say what, and the tool call it came through, in `replay.leaks`.
-- After {calls} tool calls the tools stop answering: then answer with what you have.
-
-Add this block to your JSON, next to `triage` and `class`:
-"replay": {{"fixed_later": [{{"file": "<path>", "fix": "<what the file shows fixed>"}}],
-"leaks": [{{"via": "<tool(arguments)>", "what": "<what>"}}]}}"""
+- After {calls} tool calls the tools stop answering: then answer with what you have."""
 
 
 def trial(
@@ -108,11 +106,13 @@ def trial(
 	replay: dict | None = None,
 	folder: Path | None = None,
 	trace: Path | None = None,
+	budget: float = 0,
 ) -> dict:
 	"""One trial triage of *key*, checked, rendered and saved in TRIAL_DIR.
 
 	*posted*, *post* and *thread_ts* are as for :func:`dss.triage.triage`. *ask* defaults to
-	:func:`dss.runner.run_reply` with the record system prompt (faked in tests). *label* starts
+	:func:`dss.runner.run_reply` with the record system prompt for the ticket's workflow, the
+	answer schema and *budget* (faked in tests). *label* starts
 	the DM's footer, the headline's key links to *ticket_link* (else to Jira), and *analyst* heads
 	the analyst's todos (else the Jira reporter); the Slack bot gives its own label, the DSS post
 	and the analyst's Slack name. Returns what was saved: `ticket`, `notes` (what
@@ -125,9 +125,14 @@ def trial(
 	"""
 	if not jira.ISSUE_KEY.fullmatch(key):
 		raise ValueError(f'{key!r} is not an issue key like DSS-1234')
-	if ask is None:
-		ask = functools.partial(runner.run_reply, system=system_prompt())
 	ticket, notes = build_ticket(key, posted)
+	if ask is None:
+		ask = functools.partial(
+			runner.run_reply,
+			system=system_prompt(ticket['workflow']),
+			schema=answer_schema(replay is not None),
+			budget=budget,
+		)
 	notes += code.refresh() + matlab.refresh()
 	asked = prompt(key, posted, ticket, notes, post, thread_ts)
 	if replay is not None:
@@ -183,30 +188,82 @@ def trial(
 	return result
 
 
-def system_prompt() -> str:
+def system_prompt(workflow: str = 'unknown') -> str:
 	"""triage.md's steps and rules, with ANSWER_FILE's record answer in place of its Markdown one.
 
-	In a replay, known causes learned only from the replayed ticket or later ones are left out,
-	and so is any line naming the replayed ticket or a later one: they would give the answer away.
-	The general rules stay.
+	The known causes are those that can apply to a *workflow* ticket (:func:`for_workflow`). In
+	a replay, known causes learned only from the replayed ticket or later ones are left out, and
+	so is any line naming the replayed ticket or a later one: they would give the answer away.
+	The general rules stay. The answer's fields are described in :func:`answer_schema`.
 	"""
 	steps = runner.SYSTEM.read_text(encoding='utf-8')
 	cut = steps.find(ANSWER_HEADING)
 	if cut < 0:
 		raise ValueError(f'{runner.SYSTEM.name} has no "{ANSWER_HEADING}" section to replace')
-	defs = _schema()['$defs']
 	causes = []
 	for cause in _json_file(KNOWN_CAUSES_FILE):
-		if not learned_later(cause):
+		if for_workflow(cause, workflow) and not learned_later(cause):
 			causes.append(f'- `{cause["slug"]}`: {cause["cause"]}')
 	answer = string.Template(ANSWER_FILE.read_text(encoding='utf-8')).substitute(
-		cause_families=_choices(defs['cause_family']['enum']),
-		features=_choices(defs['feature']['enum']),
-		prevents=_choices(defs['prevent']['enum']),
-		fix_types=_choices(defs['class']['properties']['fix_type']['enum']),
 		known_causes='\n'.join(causes),
 	)
 	return _without_later_tickets(steps[:cut] + answer)
+
+
+def for_workflow(cause: dict, workflow: str) -> bool:
+	"""Whether the known *cause* can apply to a *workflow* ticket: not when its feature belongs
+	to another workflow (WORKFLOW_FEATURES). Every cause can, for a combo or unknown workflow."""
+	own = WORKFLOW_FEATURES.get(workflow)
+	if own is None:
+		return True
+	feature = cause.get('feature') or ''
+	for prefix in set(WORKFLOW_FEATURES.values()):
+		if feature.startswith(prefix):
+			return prefix == own
+	return True
+
+
+def answer_schema(replay: bool = False) -> dict:
+	"""The schema claude checks Claude's answer against: the record's `triage` and `class`
+	blocks, and in a *replay* the `fixed_later` and `leaks` of its `replay` block.
+
+	Each field's description is what Claude reads about that field. claude asks Claude again
+	until the answer fits, so a record that fails :func:`check` is rare.
+	"""
+	defs = _schema()['$defs']
+	properties = {'triage': defs['triage'], 'class': defs['class']}
+	if replay:
+		given = defs['replay']['properties']
+		properties['replay'] = {
+			'type': 'object',
+			'required': ['fixed_later', 'leaks'],
+			'additionalProperties': False,
+			'properties': {'fixed_later': given['fixed_later'], 'leaks': given['leaks']},
+		}
+	shape = {
+		'type': 'object',
+		'required': list(properties),
+		'additionalProperties': False,
+		'properties': properties,
+	}
+	return _inlined(shape, defs)
+
+
+def _inlined(node, defs: dict):
+	"""*node* with each `$ref` to one of *defs* replaced by that definition, so the schema
+	claude gets stands alone."""
+	if isinstance(node, list):
+		return [_inlined(item, defs) for item in node]
+	if not isinstance(node, dict):
+		return node
+	inlined = {}
+	ref = node.get('$ref')
+	if ref:
+		inlined.update(_inlined(defs[ref.removeprefix('#/$defs/')], defs))
+	for key, value in node.items():
+		if key != '$ref':
+			inlined[key] = _inlined(value, defs)
+	return inlined
 
 
 def _without_later_tickets(prompt: str) -> str:
@@ -723,14 +780,6 @@ def _quote(text: str) -> str:
 
 def _words(value: str) -> str:
 	return WORDS.get(value, value.replace('_', ' '))
-
-
-def _choices(values: list) -> str:
-	quoted = []
-	for value in values:
-		if value is not None:
-			quoted.append(f'`{value}`')
-	return ', '.join(quoted)
 
 
 def _key(key: str, ticket_link: str) -> str:

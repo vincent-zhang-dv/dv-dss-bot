@@ -857,7 +857,8 @@ def test_a_replay_asks_for_its_block_and_the_post_names_each_leak(sources, repla
 		folder=folder,
 		trace=folder / 'DSS-1234.jsonl',
 	)
-	assert 'This is a replay of an old ticket' in prompts[0] and '"replay": {' in prompts[0]
+	assert 'This is a replay of an old ticket' in prompts[0]
+	assert 'replay' in record.answer_schema(replay=True)['required']  # the block's shape
 	assert 'as if it were not fixed' in prompts[0]
 	assert result['problems'] == []
 	assert result['record']['replay'] == {

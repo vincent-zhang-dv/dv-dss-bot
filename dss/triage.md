@@ -28,7 +28,9 @@ gives a proved answer, and say which step that was.
      like a screenshot (`terminal_log:line <n>`). Cerberus before 1.1 writes no terminal log.
    - Then state the request before reading anything else: what the analyst sees and in which
      output or Cerberus step, what they expected, and what they ask for (a fix, an explanation,
-     a rerun, how to do something, or a new feature). Every later step tests against it.
+     a rerun, how to do something, or a new feature). Every later step tests against it. Name
+     the exact element they point at (the track, column, line or value). When they show how it
+     used to look, compare the two images and say what differs.
 2. **Past issues: was it reported or fixed before?** Search before investigating. `code_read`,
    `cerb_read_text`, `cerb_read_sheet` and `cerb_client_info` answer "Not yet" until
    `jira_search` and a git search below have run:
@@ -39,7 +41,7 @@ gives a proved answer, and say which step that was.
      Find the module that makes the output with one `code_grep`, then `code_log(<module>,
      since=<about two months back>, all_branches=True)`. `code_branches(<DTN key or feature
      word>)` finds work that only a branch name points to.
-   - `confluence_search` for a troubleshooting page on the symptom.
+   - `confluence_search` for a troubleshooting page or SOP on the symptom, with 2 or 3 words.
 3. **Does a past fix apply?** For each match: `jira_get_issue` (status, resolution, fix version,
    links) and its fix commit (its DTN key in `code_log_s` or `code_branches`). Then
    `code_contains(<commit>, <the analyst's Cerberus version>)` and `code_contains(<commit>,
@@ -56,9 +58,7 @@ gives a proved answer, and say which step that was.
    issues are not. If it is not, name the likely owner and stop.
    - VizApp writes most of what Cerberus reads (dvcalipers, bookmarks). When the evidence points
      at that data, check how VizApp makes it (`vizapp_search`, `vizapp_read`) and its release
-     notes for the analyst's VizApp version (`Hades/CHANGELOG.md`). If VizApp is the cause, the
-     analyst raises it in #dh-ask-support (Mon-Fri 9:00-17:00), otherwise in the after-hours
-     channel from https://darkvision.slack.com/archives/C0793LJ1KDM/p1748290762872579.
+     notes for the analyst's VizApp version (`Hades/CHANGELOG.md`).
 5. **Gate B: is it a known setup problem?** The session from step 1 and `cerb_prod_version()`.
    An old Cerberus version, a failed script run, an error in the terminal log or the config file
    in use can settle it; `cerb_read_text(<project>\<last_config>)` reads that config. If the
@@ -86,7 +86,8 @@ gives a proved answer, and say which step that was.
      then the settings, templates and depth ranges the output depends on. Read the output
      itself when it is a PDF or Word file (`cerb_read_document`), and look at its plots and
      images (`cerb_read_image`).
-   - Feature request: step 2's searches cover it; read the matches that look closest.
+   - Feature or custom request: step 2's searches cover it; read the matches that look closest,
+     then follow the DFR rule below.
    - How-to: `confluence_search` and `confluence_page`.
 
 Rules:
@@ -95,16 +96,29 @@ Rules:
 - Only proved results go under Checked, each with its evidence (field, file and line, value).
   Everything else goes under Not proved, with what would settle it.
 - "Possible by design" is not a root cause. Call a result expected only after finding the code
-  path that produced that specific value.
+  path that produced that specific value or symptom; a rule for a nearby behaviour doesn't prove
+  it.
 - When code alone can't say whether a behaviour is intended or a bug, check both references:
   the Confluence SOP and the MATLAB CAT code Cerberus was ported from (`matlab_grep`,
-  `matlab_read`). Either can be wrong. Quote each; if they disagree, the decision goes to the
-  developers under Not proved.
-- A Confluence page's last edit date is part of its reliability. One marked `may_be_out_of_date`
-  (last edited over a year before the ticket) may describe an older Cerberus: check what it says
-  against the code at the analyst's version before relying on it, give its edit date when you
-  cite it, and don't settle anything on it alone. When a page and the code disagree, the code
-  wins.
+  `matlab_read`).
+- A Confluence page marked `may_be_out_of_date` (last edited over a year before the ticket) may
+  describe an older Cerberus: give its edit date when you cite it, and don't settle anything on
+  it alone.
+- A custom request needs a Data Follow-up Request (DFR,
+  https://darkvisiontech.atlassian.net/wiki/spaces/DTILI/pages/4908908629) before a developer
+  works on it. That is an output Cerberus doesn't make (an extra plot, table or deliverable), or a
+  change that neither MATLAB CAT nor a Confluence page describes and that goes against how
+  Cerberus works now. Look for a DFR key in the thread and the ticket's links. With none, the
+  reply asks the analyst to have Sales or their delivery lead raise a DFR, marked as needing
+  Product approval and Dev support, and link it to this ticket. The developers' actions are: confirm
+  the DFR is linked, comment in it the effort in hours and the work it would take them off, and
+  tag Product to approve or reject it. No action builds the output or changes Cerberus before
+  Product approves; how it would be made goes under Details.
+- Once you find the faulty code, `code_grep` its pattern in the other modules: one that already
+  handles the case shows the fix, and others with the same flaw go into the same DTN ticket.
+- Before an action installs, reinstalls or upgrades a package, read Cerberus' pins for it and
+  for the packages it needs (`pyproject.toml` at the analyst's version), and give versions that
+  fit the pins.
 - From a page's steps, give what a step is for (be on the DV network), not its local setup (VPN,
   network settings), unless that setup is the cause.
 - Name Cerberus steps and checks as analysts see them, never by code function names. Say what

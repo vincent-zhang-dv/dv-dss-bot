@@ -219,5 +219,16 @@
 		"prevent": "input_check",
 		"dss_tickets": ["DSS-1186"],
 		"dtn_tickets": []
+	},
+	{
+		"slug": "defender-scans-cerberus-install",
+		"cause": "Windows Defender scans the thousands of DLLs (CUDA, CuPy) of a Cerberus installed outside the C:\\code exclusion folder: Cerberus opens slowly, every step lags, and FF Make Report or Open Napari Window seems to hang with no error, worst on the first run.",
+		"prove": "Other steps are slow on that PC too, Cerberus is not installed in C:\\code\\cerberus, and the same run finishes on another PC.",
+		"fix": "Run the current F:\\DarkVision Dropbox\\Analysis\\CERBERUS\\cerb.bat, which installs Cerberus in C:\\code\\cerberus (needs 10 GB free on C:), then go through an FF delivery once before a live job. IT ticket DVIT-375.",
+		"cause_family": "environment",
+		"feature": "other",
+		"prevent": "install_check",
+		"dss_tickets": ["DSS-1254"],
+		"dtn_tickets": []
 	}
 ]

@@ -21,6 +21,12 @@ SEARCH_ROWS = (  # one line per file: path, tab, its matching fragments
 	r'.items[] | .path + "\t" + '
 	r'([.text_matches[]?.fragment] | join(" ... ") | gsub("\\s+"; " "))'
 )
+# Sent with each VizApp search and read, where VizApp may turn out to be the cause
+SUPPORT = (
+	'If VizApp is the cause, the analyst raises it in #dh-ask-support (Mon-Fri 9:00-17:00), '
+	'otherwise in the after-hours channel from '
+	'https://darkvision.slack.com/archives/C0793LJ1KDM/p1748290762872579.'
+)
 
 
 def search(text: str) -> str:
@@ -90,11 +96,11 @@ def register(server) -> None:
 		"""DVCode files (VizApp, which writes the dvcalipers and bookmarks Cerberus reads, and its
 		release notes) containing *text*, a word or a "quoted phrase", with the matching lines.
 		GitHub code search of master."""
-		return search(text)
+		return f'{search(text)}\n\n{SUPPORT}'
 
 	@server.tool()
 	def vizapp_read(path: str, start: int = 1, end: int = 0, contains: str = '') -> str:
 		"""Lines *start*-*end* of one DVCode file (at most 200), or with *contains* only the lines
 		containing it. VizApp's code is under Hades/Src/dv/apps/desktop/visualizer; its release
 		notes by version are Hades/CHANGELOG.md."""
-		return read(path, start, end, contains)
+		return f'{read(path, start, end, contains)}\n\n{SUPPORT}'
