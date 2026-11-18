@@ -35,7 +35,11 @@ Toolbox Name: CERB-PE · Investigation Outcome: User Error
 CALLS = [
 	{'tool': 'jira_get_issue', 'arguments': {'key': 'DSS-1234'}, 'result': '{}'},
 	{'tool': 'cerb_find_project', 'arguments': {'dvt': 1234}, 'result': '{}'},
-	{'tool': 'code_grep', 'arguments': {'pattern': 'Bookmarks'}, 'result': 'Cerberus at abc1234, x'},
+	{
+		'tool': 'code_grep',
+		'arguments': {'pattern': 'Bookmarks'},
+		'result': 'Cerberus at abc1234, x',
+	},
 ]
 
 
@@ -61,7 +65,7 @@ def test_example_row_loads():
 	('line', 'message'),
 	[
 		('not json', 'line 2: not JSON'),
-		('{"key": "DSS-1"}', 'line 2: no posted, gate, outcome'),
+		('{"key": "DSS-1"}', 'line 2: no posted, outcome'),
 		('{"key": "DSS-1", "posted": "x", "gate": "D", "outcome": "y"}', 'gate must be one of'),
 	],
 )
@@ -197,6 +201,59 @@ def test_run_scores_every_row_and_saves_them(tmp_path):
 	assert [json.loads(line)['key'] for line in saved] == ['DSS-1234', 'DSS-1235']
 	assert eval.summary(scores[0]).startswith('DSS-1234   gate C        read 2/3 · citations 4/4')
 	assert eval.summary(scores[1]).endswith('no answer saved')
+
+
+def test_a_row_from_a_developer_review_needs_no_gate(tmp_path):
+	golden = tmp_path / 'golden.jsonl'
+	golden.write_text(
+		'{"key": "DSS-9001", "posted": "2027-01-15_09-00-00", "outcome": "x"}\n', encoding='utf-8'
+	)
+	(score,) = eval.run(golden, tmp_path, resolve=fake_resolver())
+	assert score == {'key': 'DSS-9001', 'gate': None, 'missing': True}
+	assert eval.summary(score) == 'DSS-9001   gate -        no answer saved'
+
+
+def test_a_replay_record_is_scored_and_judged_like_an_answer(tmp_path):
+	golden = tmp_path / 'golden.jsonl'
+	row = {'key': 'DSS-9001', 'posted': '2027-01-15_09-00-00', 'outcome': 'stale Bookmarks folder'}
+	row['evidence'] = ['cerb_find_project:1234']
+	golden.write_text(json.dumps(row) + '\n', encoding='utf-8')
+	older = {'dm': '**DSS-9001 · old run**', 'thread': ''}
+	newer = {
+		'dm': '**DSS-9001 · Input problem**\n**Bot Summary:** x',
+		'thread': '**Why:** stale folder',
+	}
+	(tmp_path / 'DSS-9001_2027-01-15_09-00-00.json').write_text(json.dumps(older), encoding='utf-8')
+	(tmp_path / 'DSS-9001_2027-01-16_09-00-00.json').write_text(json.dumps(newer), encoding='utf-8')
+	trace = '\n'.join(json.dumps(call) for call in CALLS)
+	(tmp_path / 'DSS-9001_2027-01-16_09-00-00.jsonl').write_text(trace, encoding='utf-8')
+	prompts = []
+
+	def ask(prompt):
+		prompts.append(prompt)
+		return '{"match": true, "reason": "same folder"}'
+
+	(score,) = eval.run(golden, tmp_path, use_judge=True, resolve=fake_resolver(), ask=ask)
+	assert prompts[0].endswith(
+		'Triage:\n**DSS-9001 · Input problem**\n**Bot Summary:** x\n\n**Why:** stale folder'
+	)
+	assert score['evidence_read'] == {'cerb_find_project:1234': True}
+	assert score['judge'] == {'match': True, 'reason': 'same folder'}
+	assert score['citations'] == []  # a record has no Checked section to cite from
+	assert 'under_limit' not in score  # the Markdown answer's limit is not a record's
+
+
+def test_a_replay_that_stopped_has_no_answer(tmp_path):
+	golden = tmp_path / 'golden.jsonl'
+	golden.write_text(
+		'{"key": "DSS-9001", "posted": "2027-01-15_09-00-00", "outcome": "x"}\n', encoding='utf-8'
+	)
+	stopped = {'key': 'DSS-9001', 'stopped': 'over the cost cap'}
+	(tmp_path / 'DSS-9001_2027-01-16_09-00-00.json').write_text(
+		json.dumps(stopped), encoding='utf-8'
+	)
+	(score,) = eval.run(golden, tmp_path, resolve=fake_resolver())
+	assert score['missing']
 
 
 def test_run_without_judge_starts_no_claude(tmp_path, monkeypatch):

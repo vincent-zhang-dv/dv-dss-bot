@@ -59,6 +59,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `dss/triage.md` | The triage system prompt. Most behaviour changes happen here. |
 | `dss/triage.py` | One triage: prompt, Claude run, tokens and cost. |
 | `dss/eval.py`, `docs/golden.example.jsonl` | Scores saved answers against the golden set; a made-up golden row. |
+| `dss/learn.py` | The review page's submitted reviews as golden rows and a digest of what reviewers corrected. |
 | `docs/triage_record.schema.json`, `docs/triage_record.example.json`, `docs/known_causes.json` | The triage record's schema (a proposal), a made-up example, and a draft list of known causes. Only trial mode uses them. |
 | `dss/record.py`, `dss/triage_record.md` | Trial mode: the triage as a checked record, and the answer section that replaces `triage.md`'s. |
 | `dss/replay.py`, `dss/cutoff.py` | Replay mode: old tickets triaged as they stood when posted, and the cutoff every tool answers by. |
@@ -210,6 +211,8 @@ After a reboot, someone has to log in before the bot starts again.
 - **Access:** rating and refreshing need Contributor access to the page; republishing needs Editor.
 - **Changing it:** edit the source, run `node --test review/slack_parse.test.js` (or `uv run pytest tests/test_review_page.py`), then have Claude Code publish the file to the page's link with the capabilities `db`, `user` (scope `profile`) and `mcp` (Slack: `slack_read_channel`, `slack_read_thread`). The tests also check that the page splits posts at the headings `dss/record.py` writes and skips the bot's review link, so a change to either side shows there.
 - **Data:** tickets and reviews hold client names. They stay in the page's database and are never committed.
+- **Learning from it:** export the page's `reviews` and `tickets` collections to a folder (Claude Code's ArtifactData `list` with `out_dir`), then run `python -m dss learn <folder>`. It writes each submitted review as a golden row to `out/eval/golden_reviews.jsonl`, for `dss eval` and `dss replay --golden`, and prints a digest: the reasons by ticket count, those worth a fix (given on two or more tickets, or a post marked harmful) and each ticket's corrections. The outcome is what the reviewers say Why should say, or the bot's Why when they rated it Correct. These rows have no gate. `dss eval` scores a replay folder too: each ticket's newest replay record, its post and thread, is the answer.
+- **The weekly run:** the `dss-learn` Claude Code skill (`.claude/skills/dss-learn/`) exports the reviews, runs `dss learn`, drafts fixes for the reasons worth one, replays up to 6 affected tickets, scores them with `dss eval --judge`, and commits on a branch; pushing and the pull request wait for an owner. The "DSS learning reminder" routine on claude.ai (Mondays 16:30 UTC: 8:30 in BC in winter, 9:30 in summer) reads the page's reviews and DMs Vincent only when some were submitted in the past 7 days; then say "learn from new reviews" in Claude Code.
 
 ## Working together
 

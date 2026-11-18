@@ -18,9 +18,37 @@
   files. The page's refresh ran in
   Vincent's browser through his Slack connector and wrote the same DSS-1256 ticket the tests'
   parser builds.
+  - Draft posts to #data-dev-support-assist-test: a link in the text got a claude.ai preview
+    card; a button shows the DSS preview only. PR #18.
+- **Step 2 done** (branch `learn-reviews`, on `review-link`):
+  - `python -m dss learn <export>` (`dss/learn.py`): each submitted review in an export of the
+    page's database becomes a golden row in `out/eval/golden_reviews.jsonl`, and a digest lists
+    the reasons by ticket count, those worth a fix (on 2+ tickets, or a post marked harmful) and
+    each ticket's corrections. Plain code, no model.
+  - `dss/eval.py`: a golden row's gate is optional (Vincent's choice): reviews don't record one,
+    and eval only prints it. Rows without one show `gate -`. The missing-fields message no
+    longer names gate; its test changed with it.
+  - Ruff's safe fixes in `eval.py` and `test_eval.py` (regex flag names, formatting). Its SIM110
+    finding in `eval.py` (`line_count` loop) is older and left as is.
+- **Checked:** whole suite 277 passed (`test_the_analysts_build_is_exported_from_git_without_a_wheel`
+  failed once and passed on rerun, as on 2026-11-17). A dry run on the real export found the
+  DSS-1256 review not submitted yet, so no rows.
+- **Step 3 done** (same branch), with Vincent's choices: eval learns replays, a weekly reminder
+  to Vincent starts the run, and the run may replay up to 6 tickets before asking.
+  - `dss eval` scores a replay folder: without `<key>.md`, the newest `<key>_<time>.json` record's
+    post and thread is the answer (a stopped replay is "no answer saved"). The judge and the
+    evidence check apply; a record has no Checked section, so no citations. Checked on the
+    DSS-1256 replay of today: read 2/2.
+  - `.claude/skills/dss-learn/SKILL.md`: the weekly run. Export the page's database, `dss learn`,
+    draft fixes (code, then known causes, then tool notes, then `triage.md`), replay up to 6
+    tickets, `dss eval --judge` before and after, commit; pushing and the PR wait for an owner.
+  - Routine "DSS learning reminder" (claude.ai, `trig_014ZGAdkWcyMsnH6AwMNx7en`, Mondays 16:30
+    UTC = 8:30 in BC in winter, 9:30 in summer): reads the page's `reviews` with ArtifactData and
+    DMs Vincent only when some were submitted in the past 7 days. Slack is its only connector. A
+    test run read the database and, with nothing submitted, sent nothing.
+- **Checked:** whole suite 279 passed; ruff clean on the changed files except the older SIM110.
 - **Not done / open:**
-  - Step 2: `python -m dss learn` (reviews to golden cases and a digest). Step 3: the weekly
-    `dss-learn` skill (draft fixes, replay, PR).
+  - The first real run waits for submitted reviews (none yet).
 
 ### 2026-11-18: lessons from how the developers handled DSS-1246 to 1256 (Vincent, with Claude)
 - **Why:** on DSS-1256 (a custom plot for a sales trial) the live bot told a developer to make
