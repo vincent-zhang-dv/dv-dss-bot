@@ -25,6 +25,16 @@ POSTED = '2026-10-22_10-00-05'
 QUESTION = {'ask': 'Which DVCalipers did the RAID run use?', 'settles': 'whether they match'}
 IN_ORDER = ('jira_get_issue', 'jira_search', 'code_log_s', 'code_read', 'cerb_client_info')
 NO_TERMINAL_LOG = {'found': False, 'why': 'Cerberus 1.0.3 writes no terminal log; 1.1 and later do'}
+CLIENT_INFO = {'name': 'DVT1234_client_info.xlsm', 'type': 'file', 'size': 81234}
+BASELINE = {'name': 'DVT1234_baseline_calculation.xlsx', 'type': 'file', 'size': 20480}
+BOOKMARKS = {'name': 'Bookmarks', 'type': 'folder', 'size': ''}
+DVCALIPERS = {'name': 'DVCaliper_Files', 'type': 'folder', 'size': ''}
+CERBERUS = {'name': 'cerberus', 'type': 'folder', 'size': ''}
+LISTING = {
+	'folder': PROJECT,
+	'entries': [BOOKMARKS, DVCALIPERS, CERBERUS, CLIENT_INFO],
+	'cut': False,
+}
 
 
 def answer_text(**changes) -> str:
@@ -70,9 +80,14 @@ def sources(monkeypatch):
 		session = {'found': True, 'cerb': '1.0.3', 'failed_runs': [failed], 'last_config': ''}
 		return {**session, 'terminal_log': NO_TERMINAL_LOG}
 
+	def list_folder(folder):
+		calls.append(('listing', folder))
+		return LISTING
+
 	monkeypatch.setattr(jira, 'get_issue', get_issue)
 	monkeypatch.setattr(cerb, 'find_project', find_project)
 	monkeypatch.setattr(cerb, 'last_session', last_session)
+	monkeypatch.setattr(cerb, 'list_folder', list_folder)
 	monkeypatch.setattr(cerb, 'prod_version', lambda: '1.0.4')
 	monkeypatch.setattr(code, 'web_links', lambda text: {})
 	monkeypatch.delenv('JIRA_URL', raising=False)
@@ -171,6 +186,164 @@ def test_project_path_picks_between_folders(sources, monkeypatch, folders, proje
 )
 def test_workflow_comes_from_the_folder_name(name, expected):
 	assert record.workflow('\\\\server\\projects\\ACME\\' + name) == expected
+
+
+def test_code_lists_the_project_and_checks_gate_cs_inputs_itself(sources):
+	ticket, notes, reads = record.read_ahead('DSS-1234', POSTED)
+	assert ticket['inputs'] == {'client_info': True, 'bookmarks': True, 'dvcalipers': True}
+	assert notes == [] and ('listing', PROJECT) in sources
+	without_inputs = dict(ticket)
+	del without_inputs['inputs']
+	assert without_inputs == record.build_ticket('DSS-1234', POSTED)[0]  # the same facts otherwise
+	calls = [(read['tool'], read['arguments']) for read in reads]
+	assert calls == [  # each read is the tool call Claude would have made
+		('jira_get_issue', {'key': 'DSS-1234'}),
+		('cerb_last_session', {'project': PROJECT, 'user': 'Ann Analyst', 'before': POSTED}),
+		('cerb_list', {'folder': PROJECT}),
+	]
+	assert reads[0]['result'] == ISSUE and reads[2]['result'] == LISTING
+	full = {'schema': record.SCHEMA_ID, 'dss_ticket': ticket, **json.loads(answer_text())}
+	assert record.check(full) == []
+
+
+@pytest.mark.parametrize(
+	('job', 'entries', 'expected'),
+	[
+		(
+			'WI',
+			[BOOKMARKS, CLIENT_INFO],
+			{'client_info': True, 'bookmarks': True, 'dvcalipers': False},
+		),
+		(
+			'PE',
+			[BOOKMARKS, DVCALIPERS, CLIENT_INFO],  # DVCalipers are not a PE input
+			{'client_info': True, 'bookmarks': True, 'baseline_calculation': False},
+		),
+		(
+			'CI-PE',
+			[{**BOOKMARKS, 'name': 'bookmarks'}, DVCALIPERS, BASELINE, CLIENT_INFO],
+			{
+				'client_info': True,
+				'bookmarks': True,
+				'baseline_calculation': True,
+				'dvcalipers': True,
+			},
+		),
+		('FF', [CERBERUS], {'client_info': False, 'bookmarks': False}),
+		(
+			'WI',  # a file named like the client info is not it, and neither is a folder
+			[
+				{**CLIENT_INFO, 'name': 'DVT1234_client_info_old.xlsm'},
+				{**CLIENT_INFO, 'type': 'folder'},
+			],
+			{'client_info': False, 'bookmarks': False, 'dvcalipers': False},
+		),
+		(
+			'PE',  # in a replay: changed since the ticket, so not known to be there then
+			[
+				BOOKMARKS,
+				CLIENT_INFO,
+				{'name': BASELINE['name'], 'type': 'file', 'changed_after_ticket': True},
+			],
+			{'client_info': True, 'bookmarks': True},
+		),
+	],
+)
+def test_gate_cs_inputs_depend_on_the_job_type(job, entries, expected):
+	project = f'\\\\server\\projects\\ACME\\DVT1234_2026-10-20_{job}_Well-1'
+	listing = {'folder': project, 'entries': entries, 'cut': False}
+	assert record.inputs(project, listing) == expected
+
+
+def test_a_listing_that_fails_or_is_cut_short_leaves_the_inputs_to_claude(sources, monkeypatch):
+	monkeypatch.setattr(cerb, 'list_folder', lambda folder: {**LISTING, 'cut': True})
+	ticket, notes, reads = record.read_ahead('DSS-1234', POSTED)
+	assert 'inputs' not in ticket and notes == []
+	assert reads[-1]['tool'] == 'cerb_list'  # Claude still gets what was listed
+
+	def down(folder):
+		raise RuntimeError('the project index did not answer')
+
+	monkeypatch.setattr(cerb, 'list_folder', down)
+	ticket, notes, reads = record.read_ahead('DSS-1234', POSTED)
+	assert 'inputs' not in ticket
+	assert notes == ['project folder listing: the project index did not answer']
+	assert [read['tool'] for read in reads] == ['jira_get_issue', 'cerb_last_session']
+
+
+def test_claude_gets_what_code_read_and_the_trace_keeps_it_apart(sources):
+	prompts: list = []
+	seen = []
+
+	def ask(prompt, trace=None):
+		prompts.append(prompt)
+		seen.extend(json.loads(line) for line in trace.read_text('utf-8').splitlines())
+		lines = [json.dumps({'tool': tool, 'arguments': {}, 'seconds': 0.1}) for tool in IN_ORDER]
+		with open(trace, 'a', encoding='utf-8') as file:  # the `dss` server appends its calls
+			file.write(''.join(line + '\n' for line in lines))
+		return {'result': answer_text(), 'total_cost_usd': 0.3, 'usage': {}}
+
+	result = record.trial('DSS-1234', POSTED, ask=ask)
+	(prompt,) = prompts
+	assert 'Code also made the calls below for you' in prompt and "don't make it again" in prompt
+	assert '`jira_get_issue(key="DSS-1234")`:\n' + json.dumps(ISSUE) in prompt
+	session = '{"found": true, "cerb": "1.0.3", "failed_runs": [{"name": "casing_tally", '
+	assert '`cerb_last_session(project=' in prompt and session in prompt
+	assert prompt.count('writes no terminal log') == 1  # the terminal log is only in the record
+	assert "(the record's `inputs` come from it):\n" + json.dumps(LISTING) in prompt
+	assert '"inputs": {' in prompt
+	# the reads are in the trace before Claude starts, marked as code's
+	assert [(call['tool'], call['by']) for call in seen] == [
+		('jira_get_issue', 'code'),
+		('cerb_last_session', 'code'),
+		('cerb_list', 'code'),
+	]
+	assert seen[2]['result'] == json.dumps(LISTING) and seen[2]['chars'] == len(json.dumps(LISTING))
+	trace = Path(result['trace'])
+	assert record.traced_tools(trace) == list(IN_ORDER)  # only Claude's calls
+	assert result['problems'] == []
+
+
+def test_a_ticket_code_could_not_read_gets_no_reads_section(sources, monkeypatch):
+	def refused(key, fields):
+		raise jira.JiraError('the Jira token was refused')
+
+	monkeypatch.setattr(jira, 'get_issue', refused)
+	prompts: list = []
+	result = record.trial('DSS-1234', POSTED, ask=claude(answer_text(), prompts))
+	assert 'Code also made the calls' not in prompts[0]
+	assert 'Code could not read:\n- Jira: the Jira token was refused' in prompts[0]
+	assert result['problems'] == []
+
+
+@pytest.mark.parametrize(
+	('theirs', 'prod', 'found'),
+	[
+		('1.0.3', '1.0.4', "the reporter's Cerberus 1.0.3 is older than prod 1.0.4."),
+		('1.0.4', '1.1.0.68', "the reporter's Cerberus 1.0.4 is older than prod 1.1.0.68."),
+		('1.0.10', '1.0.4', "the reporter's Cerberus 1.0.10 is newer than prod 1.0.4."),
+		('1.0.4', '1.0.4', "the reporter's Cerberus 1.0.4 is the prod version."),
+		('1.0.4+uat20261031', '1.0.4', 'and prod 1.0.4 are different builds of the same release.'),
+		('1.0.3+uat20261031', '1.0.4', '1.0.3+uat20261031 is older than prod 1.0.4.'),
+		(None, '1.0.4', ''),  # no session found
+		('1.0.4', None, ''),  # no prod wheel found
+		('dev', '1.0.4', ''),  # not a release number
+		('1.1', '1.1.0', ''),  # the same release, written differently
+	],
+)
+def test_code_compares_the_reporters_version_with_prod(theirs, prod, found):
+	said = record.version_check({'cerberus_version': theirs, 'prod_version': prod})
+	assert said.endswith(found) and bool(said) == bool(found)
+
+
+def test_the_version_comparison_goes_to_claude_only_when_code_can_make_it(sources, monkeypatch):
+	prompts: list = []
+	record.trial('DSS-1234', POSTED, ask=claude(answer_text(), prompts))
+	compared = "Gate B's version comparison, made by code: the reporter's Cerberus 1.0.3 is older"
+	assert f'\n\n{compared} than prod 1.0.4.\n\nCode also made the calls' in prompts[0]
+	monkeypatch.setattr(cerb, 'last_session', lambda *args: {'found': False})
+	record.trial('DSS-1234', POSTED, ask=claude(answer_text(), prompts))
+	assert 'version comparison' not in prompts[1]
 
 
 def test_the_trial_keeps_the_bots_steps_and_asks_for_the_record():

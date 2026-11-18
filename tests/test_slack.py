@@ -72,12 +72,12 @@ class FakeClaude:
 def ticket_facts(monkeypatch):
 	"""What the record reads before Claude starts, faked: no Jira, index or telemetry."""
 
-	def build_ticket(key, posted):
+	def read_ahead(key, posted):
 		ticket = {**EXAMPLE['dss_ticket'], 'key': key}
 		ticket.pop('inputs')
-		return ticket, []
+		return ticket, [], []
 
-	monkeypatch.setattr(record, 'build_ticket', build_ticket)
+	monkeypatch.setattr(record, 'read_ahead', read_ahead)
 	monkeypatch.setattr(code, 'web_links', lambda text: {})
 	for name in ('JIRA_URL', 'CONFLUENCE_URL', 'DSS_SLACK_POST_CHANNEL', 'DSS_SLACK_REVIEWER'):
 		monkeypatch.delenv(name, raising=False)

@@ -20,6 +20,7 @@ import contextlib
 import importlib.metadata
 import io
 import json
+import math
 import ntpath
 import os
 import re
@@ -360,6 +361,43 @@ def client_info_run(local: str) -> dict:
 		return found
 	found['cerberus'] = f"the analyst's build {ref}"
 	return found
+
+
+def joints_compact(found: dict) -> dict:
+	"""*found* (:func:`client_info`) with each joint column that holds one value for every joint
+	given once under `every_joint` and left out of each of `joints`; no value is dropped.
+
+	Unchanged when there are fewer than two joints, when no column holds one value, or when the
+	joints do not all have the same columns.
+	"""
+	joints = found.get('joints')
+	if not isinstance(joints, list) or len(joints) < 2:
+		return found
+	columns = list(joints[0])
+	shared = dict(joints[0])
+	for joint in joints[1:]:
+		if list(joint) != columns:
+			return found
+		for name in list(shared):
+			if not _same_value(shared[name], joint[name]):
+				del shared[name]
+	if not shared:
+		return found
+	rows = []
+	for joint in joints:
+		row = {}
+		for name in columns:
+			if name not in shared:
+				row[name] = joint[name]
+		rows.append(row)
+	compact = {}
+	for name, value in found.items():
+		if name == 'joints':
+			compact['every_joint'] = shared
+			compact['joints'] = rows
+		else:
+			compact[name] = value
+	return compact
 
 
 def cerberus_found() -> dict:
@@ -1143,6 +1181,16 @@ def _setting(name: str, default: str) -> str:
 	return value
 
 
+def _same_value(one, other) -> bool:
+	"""Whether two cells hold the same value: the same type and equal, or both NaN (an empty cell
+	of a number column)."""
+	if type(one) is not type(other):
+		return False
+	if isinstance(one, float) and math.isnan(one):
+		return math.isnan(other)
+	return one == other
+
+
 def _version_key(version: str) -> tuple[int, ...]:
 	return tuple(int(part) for part in version.split('.'))
 
@@ -1314,12 +1362,14 @@ def register(server) -> None:
 	@server.tool()
 	def cerb_client_info(path: str) -> dict:
 		"""Well info, casing strings and joints of a `client_info.xlsm`, as Cerberus reads them (the
-		prod wheel's Cerberus, when the bot has it). *path* is a local file or one on the share."""
+		prod wheel's Cerberus, when the bot has it). *path* is a local file or one on the share.
+		A joint column that holds one value for every joint is given once under `every_joint` and
+		is not repeated in `joints`."""
 		if path.startswith('\\\\'):
 			local = local_copy(path)
 		else:
 			local = Path(path).resolve()
-		return as_now(path, client_info_run(str(local)))
+		return as_now(path, joints_compact(client_info_run(str(local))))
 
 	@server.tool()
 	def cerb_find_project(dvt: int) -> dict:

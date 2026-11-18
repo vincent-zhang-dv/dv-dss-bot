@@ -11,8 +11,8 @@ folder, workflow, Toolbox Name, the reporter's Cerberus version and last failed 
 session's terminal log (Cerberus 1.1 and later: its errors with the end of each traceback, and
 its warnings, with line numbers; before 1.1 there is none), and the prod version. Use these
 facts instead of reading them again. Read a source again only when its fact is null or looks
-wrong, and then say why under `flags`. The record has no summary or description: read those
-with `jira_get_issue`.
+wrong, and then say why under `flags`. The summary and description are in the prompt's
+`jira_get_issue` answer; call it only if there is none.
 
 Known causes, for `class.known_cause`:
 $known_causes

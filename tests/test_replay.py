@@ -773,6 +773,8 @@ def sources(monkeypatch):
 		cerb, 'last_session', lambda *args: {**session, 'terminal_log': terminal_log}
 	)
 	monkeypatch.setattr(cerb, 'prod_version', lambda: '1.0.4')
+	listing = {'folder': PROJECT, 'entries': [], 'cut': False}
+	monkeypatch.setattr(cerb, 'list_folder', lambda folder: listing)
 	monkeypatch.setattr(code, 'web_links', lambda text: {})
 	monkeypatch.setattr(code, 'refresh', list)  # nothing to note
 	monkeypatch.delenv('JIRA_URL', raising=False)
@@ -889,6 +891,21 @@ def test_a_replay_answer_without_its_block_or_json_still_says_the_leaks(
 	refused = record.trial('DSS-1234', POSTED, ask=replay_claude('no answer', []), replay=FACTS)
 	assert '**Possible leaks found by code:** 1 tool answer' in refused['dm']
 	assert '- code\\_log\\_s(text=round): names DSS-1234' in refused['thread']
+
+
+def test_a_replays_leak_check_covers_what_code_read_ahead(
+	sources, replaying, tmp_path, monkeypatch
+):
+	later = {'name': 'Report 2099-01-01.pdf', 'type': 'file', 'size': 10}
+	listing = {'folder': PROJECT, 'entries': [later], 'cut': False}
+	monkeypatch.setattr(cerb, 'list_folder', lambda folder: listing)
+	reads = record.read_ahead('DSS-1234', POSTED)[2]
+	trace = tmp_path / 'DSS-1234.jsonl'
+	record.trace_reads(trace, reads)
+	(leak,) = record.traced_leaks(trace)  # the ticket's own Jira fields are not a leak
+	assert leak.startswith('cerb_list(folder=')
+	assert leak.endswith('dates after the ticket: 2099-01-01')
+	assert replay.calls({'trace': str(trace)}) == 0  # code's reads are not Claude's calls
 
 
 def after(seconds: float, **message) -> dict:
