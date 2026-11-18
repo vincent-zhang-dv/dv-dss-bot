@@ -295,6 +295,9 @@ def run(golden: Path, run_dir: Path, use_judge: bool = False, resolve=None, ask=
 			continue
 		answer, calls = saved
 		result = score(row, answer, calls, resolve)
+		# a replay record's limits are its schema's, not the Markdown answer's
+		if not (run_dir / f'{row["key"]}.md').exists():
+			del result['under_limit']
 		if use_judge:
 			result['judge'] = judge(row, answer, ask)
 		scores.append(result)

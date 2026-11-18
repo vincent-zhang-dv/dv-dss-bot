@@ -240,6 +240,7 @@ def test_a_replay_record_is_scored_and_judged_like_an_answer(tmp_path):
 	assert score['evidence_read'] == {'cerb_find_project:1234': True}
 	assert score['judge'] == {'match': True, 'reason': 'same folder'}
 	assert score['citations'] == []  # a record has no Checked section to cite from
+	assert 'under_limit' not in score  # the Markdown answer's limit is not a record's
 
 
 def test_a_replay_that_stopped_has_no_answer(tmp_path):
