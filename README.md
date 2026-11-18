@@ -68,6 +68,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `dss/worker.py` | Runs a function in another app's venv. |
 | `dss/slack.py`, `dss/store.py` | The Slack bot and its saved answers. |
 | `slack_manifest.yaml` | The bot's Slack app. |
+| `review/` | The DSS Bot Review page, where developers rate the bot's posts, and its parser tests (Node). |
 | `tests/` | pytest suite. External services are faked. |
 | `CLAUDE.md` | Rules for Claude Code sessions in this repo. |
 
@@ -169,7 +170,7 @@ The bot runs on the `ddev-support-bot` app (Socket Mode, the `message.groups` an
 
 Each analysis is a checked record, as in trial mode, posted to `DSS_SLACK_POST_CHANNEL` (#data-dev-support-assist), or without that setting to `DSS_SLACK_REVIEWER`'s DM. The bot refuses #data-dev-support, or the watched channel, as a destination. New features are tried in #data-dev-support-assist-test.
 
-- **The post:** the headline (the verdict in a few words, its ticket key linked to the DSS post), Bot Summary (the problem in one sentence), numbered todos for the analyst (headed by their Slack name) and for the data developers (including the questions to ask and the checks that would settle what is not proved), and the Draft Reply to the analyst last, in plain words with no code. A todo list with nothing in it is left out.
+- **The post:** the headline (the verdict in a few words, its ticket key linked to the DSS post), Bot Summary (the problem in one sentence), numbered todos for the analyst (headed by their Slack name) and for the data developers (including the questions to ask and the checks that would settle what is not proved), and the Draft Reply to the analyst last, in plain words with no code. A todo list with nothing in it is left out. Under it, a "Please review the bot's report" button opens the ticket on the review page (below); a button, because Slack would preview a link to the page.
 - **Its thread**, each section only when it has something:
 
   | Section | Record fields | Shown when |
@@ -199,6 +200,16 @@ powercfg /change standby-timeout-ac 0   # never sleep on mains power; locking th
 ```
 
 After a reboot, someone has to log in before the bot starts again.
+
+### The review page
+
+[DSS Bot Review](https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt) is a claude.ai page where the data developers rate each bot post against its real DSS thread. Its source is `review/dss-bot-review.html`; `#DSS-1234` at the end of its link opens that ticket.
+
+- **Tickets:** Refresh from Slack reads the bot's posts in the assist channels from DSS-1256 on, and their DSS threads, with the viewer's own Slack connector (`slack_read_channel` and `slack_read_thread` only). It saves each changed ticket in the page's database, `tickets/DSS-<n>`, for everyone.
+- **Reviews:** one shared review per ticket, `reviews/DSS-<n>`, that any developer can change; each rating keeps who gave it. A change saves only the section it touched.
+- **Access:** rating and refreshing need Contributor access to the page; republishing needs Editor.
+- **Changing it:** edit the source, run `node --test review/slack_parse.test.js` (or `uv run pytest tests/test_review_page.py`), then have Claude Code publish the file to the page's link with the capabilities `db`, `user` (scope `profile`) and `mcp` (Slack: `slack_read_channel`, `slack_read_thread`). The tests also check that the page splits posts at the headings `dss/record.py` writes and skips the bot's review link, so a change to either side shows there.
+- **Data:** tickets and reviews hold client names. They stay in the page's database and are never committed.
 
 ## Working together
 

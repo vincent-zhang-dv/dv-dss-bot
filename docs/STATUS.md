@@ -1,5 +1,27 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-18: DSS Bot Review page in the repo, step 1 of learning from reviews (Vincent, with Claude)
+- **Why:** the team approved learning from the developers' reviews: reviews on the DSS Bot Review
+  page become golden cases and drafted fixes, checked by replays, merged by the owners. Step 1
+  keeps the page's source next to the bot whose posts it reads.
+- **Done** (branch `review-link`):
+  - `review/dss-bot-review.html`, the page's source (no client data; tickets and reviews live in
+    its claude.ai database). `review/slack_parse.test.js` tests its Slack parser on made-up data
+    with Node's own test runner; `tests/test_review_page.py` runs it, and checks the page against
+    `record.render`'s headings and the bot's review link.
+  - Each live bot post has a "Please review the bot's report" button, opening its ticket on the
+    page (`slack.REVIEW_PAGE`, `#DSS-<n>`). A link in the text got a claude.ai preview card under
+    the post (Vincent saw it); `unfurl_links=False` removes the DSS post's preview too (tried), and
+    a button gets none. Its click is acknowledged and does nothing else. Replays and trials don't
+    get it.
+- **Checked:** `node --test`: 5 passed; whole pytest suite: 271 passed. Ruff clean on the changed
+  files. The page's refresh ran in
+  Vincent's browser through his Slack connector and wrote the same DSS-1256 ticket the tests'
+  parser builds.
+- **Not done / open:**
+  - Step 2: `python -m dss learn` (reviews to golden cases and a digest). Step 3: the weekly
+    `dss-learn` skill (draft fixes, replay, PR).
+
 ### 2026-11-18: lessons from how the developers handled DSS-1246 to 1256 (Vincent, with Claude)
 - **Why:** on DSS-1256 (a custom plot for a sales trial) the live bot told a developer to make
   the plot; Annika's first question was "is there a DFR?", and Dimitri then raised one. The
