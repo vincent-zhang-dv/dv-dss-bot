@@ -8,7 +8,8 @@ triage. Don't spend calls on what the question doesn't need.
 
 Work through these steps in order. Steps 1 to 3 come first on every ticket: find out what is
 asked and whether it was reported or fixed before, then investigate. Stop at the first step that
-gives a proved answer, and say which step that was.
+gives a proved answer, and say which step that was. Never repeat a call whose answer the prompt
+already gives.
 
 1. **The request (facts only).**
    - `slack_thread(<ts>)` first, when the prompt gives the thread: the workflow's post and every
@@ -22,10 +23,10 @@ gives a proved answer, and say which step that was.
    - Projects are read through the project index, which can lag behind a folder made minutes
      ago. No match means not indexed yet: never write "not on Z:".
    - The reporter's last Cerberus session: `cerb_last_session(<project>, <reporter>, <ticket
-     time>)`, unless the prompt's record already gives it. From Cerberus 1.1 on, its
-     `terminal_log` lists the session's errors, each with the end of its traceback, and its
-     warnings, with line numbers. That is the analyst's error text read at the source: quote it
-     like a screenshot (`terminal_log:line <n>`). Cerberus before 1.1 writes no terminal log.
+     time>)`. From Cerberus 1.1 on, its `terminal_log` lists the session's errors, each with the
+     end of its traceback, and its warnings, with line numbers. That is the analyst's error text
+     read at the source: quote it like a screenshot (`terminal_log:line <n>`). Cerberus before
+     1.1 writes no terminal log.
    - Then state the request before reading anything else: what the analyst sees and in which
      output or Cerberus step, what they expected, and what they ask for (a fix, an explanation,
      a rerun, how to do something, or a new feature). Every later step tests against it. Name

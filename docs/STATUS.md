@@ -214,6 +214,111 @@
     below was written before that.
   - Annika's note for DSS-1081 still doesn't match its thread; Vincent thinks the note is wrong.
 
+### 2026-11-13 (late afternoon): code compares the versions, checks evidence against the trace and shortens the client info (Vincent, with Claude)
+- **Why:** the four gaps left open by the entry below. Vincent's rule for them: code does what
+  code can settle for certain, the model decides the rest, and no change may make the replies
+  less accurate.
+- **Done** (branch `prefetch-facts`, on top of the entry below):
+  - **Gate B's version comparison** (`record.version_check`): when the reporter's version and
+    the prod version are both release numbers, the prompt says which is older, that they are
+    the same, or that they are two builds of one release (`1.0.4+uat20261031` against `1.0.4`).
+    Otherwise it says nothing and Claude compares as before. On 26 saved trials: nothing for 11
+    (no reporter version), the same for 10, two builds for 4, older for 1.
+  - **Evidence against the trace** (`record.evidence_gaps`): for a record that passed, code
+    checks each evidence ref. A ref that names a tool needs a call of that tool that got an
+    answer in this run (code's reads count); a `code_read` or `matlab_read` ref of one
+    `path:line` or `path:first-last` needs a call that read those lines. A ref that fails is
+    marked in the thread reply ("not shown by the trace"), the post gets one "Evidence to
+    check" line, and the saved trial lists it under `evidence_gaps`. It is a mark for the
+    reviewer and never refuses an answer; an error in the check itself becomes a note. `computed`
+    and refs that hold several locations are left alone.
+  - **Client info size** (`cerb.joints_compact`, in the `cerb_client_info` tool only): a joint
+    column that holds one value for every joint is given once under `every_joint`. The copied
+    `cerb.client_info` is unchanged.
+  - `triage_record.md` said the record has no summary or description and told Claude to call
+    `jira_get_issue`; since the entry below they are in the prompt, so it now says that.
+- **Left with the model, on purpose:**
+  - Known-cause matching: the known causes have no signature code can match, and 4 of 24 saved
+    trials named a listed cause. A wrong match by code would hurt the answer.
+  - The "up to three Jira searches" rule: 1 to 3 searches in each of 25 traces, never broken, so
+    no cap was added.
+  - One Opus run per ticket: code cannot tell for certain which tickets a smaller model answers
+    as well.
+- **Checked:**
+  - `uv run pytest` on `test_record`, `test_runner`, `test_tools`, `test_replay`, `test_slack`
+    and `test_triage`: 228 passed. `ruff check` and `ruff format --check` show only the findings
+    listed in the entry below.
+  - `evidence_gaps` on 17 saved records with their traces (124 evidence refs, 30 of them line
+    refs): none marked. A first version marked two refs that hold several locations; those are
+    now left alone.
+  - `joints_compact` on the 5 real client info files the saved traces read (84 to 553 joints),
+    read through the Cerberus venv: putting `every_joint` back gives every joint value as
+    Cerberus read it, and the answer is 42% to 73% shorter (154,773 characters to 42,182 for the
+    largest).
+  - One regular-mode trial on the branch (`python -m dss trial`, nothing sent to Slack) on
+    DSS-1251, against the bot's run of 2026-11-11: the same cause, the same two lengths in the
+    reply and the same three Casing Record rows, status `proved` both times, no evidence marked, `cerb_client_info` 154,214
+    characters before and 42,182 after, $0.39 against $0.43. Today's run also found the DTN
+    ticket raised since, so the two answers differ in what is known, not in the cause.
+- **Not done / open:**
+  - Nothing is committed or pushed, and the live bot's checkout is untouched.
+  - The system prompt is 19,993 characters, 7 under the tested limit. New instructions have to
+    go into the prompt code builds, or something has to come out first.
+  - `joints_compact` wraps copied code's answer. It may help dv-auto-setup-agent too, if its
+    client info answer is as large; for the owners to pass on.
+  - The evidence check has not yet marked a ref in a real run, so how often it will, and whether
+    the marks are right when it does, is not known.
+  - SIM108 in `dss/cerb.py` is in `cerb_client_info`, which this change touches; it asks for a
+    ternary, so it is left for Vincent to decide.
+
+### 2026-11-13 (afternoon): code makes the fixed reads and Gate C's input check (Vincent, with Claude)
+- **Why:** Vincent wants the bot to use the model only where a task needs reasoning, and plain
+  code for everything else. In the newest 10 traces Claude spent 1 to 4 calls per run on answers
+  code had already read or could work out: its own `jira_get_issue` (10 of 10 runs),
+  `cerb_last_session` (6), `cerb_find_project` (4), the first `cerb_list` of the project (3) and
+  `cerb_prod_version` (1). Gate C's input check was Claude reading that listing.
+- **Done** (branch `prefetch-facts`, the checked-record path only; `python -m dss triage` is
+  unchanged):
+  - `record.read_ahead` keeps what code already read (the Jira ticket, the reporter's last
+    session) and adds one listing of the project folder.
+  - `record.inputs` does Gate C's check on that listing: the client info file and `Bookmarks`
+    for every job, the baseline calculation for PE, `DVCaliper_Files` for WI and CI, by the
+    names Cerberus' project picker checks (`proj_select.py`). The answer is `dss_ticket.inputs`
+    (already in the schema). A listing that fails or is cut short leaves it out, and in a replay
+    so does an input changed after the ticket; Claude then checks as before.
+  - The prompt gives Claude the three reads, each as the tool's own answer, and tells it not to
+    make those calls again. `triage.md` got one sentence for it; the rest is in the prompt,
+    because the system prompt is at its tested limit of 20,000 characters.
+  - The reads go into the trace marked `by: code`. A replay's leak check covers them; Claude's
+    call count, the replay's 30-call cap and the step-order check leave them out.
+    `replay.calls` now counts through `record.traced_tools`.
+  - `slack_thread` stays Claude's call: a screenshot reaches Claude only as a tool result.
+- **Checked:**
+  - `uv run pytest` on `test_record`, `test_replay`, `test_slack`, `test_runner` and
+    `test_triage`: 153 passed. `ruff check` passes on the changed files, and
+    `ruff format --check` on all but `tests/test_eval.py` (not touched).
+  - Two regular-mode trials on the branch (`python -m dss trial`, nothing sent to Slack) on
+    DSS-1253 and DSS-1254, against the bot's own runs of 2026-11-12. Fixed calls by Claude: 2
+    and 3 before, none after. Both records pass the check, `inputs` is filled, and the order
+    check passes. Cost is about the same ($0.70 and $0.82 against $0.67 and $0.65): the fixed
+    calls were 2 or 3 of about 30.
+  - The answers can't be compared one to one: today's runs see a day more of the project
+    folder (DSS-1254's report had been made by then) than the bot saw at the post.
+- **Not done / open:**
+  - Nothing is committed or pushed, and the live bot's checkout is untouched.
+  - The two trials started at the same time, and one noted `git fetch failed` on the Cerberus
+    clone (both fetch into the same clone). Not looked into.
+  - `python -m dss trial` with its output redirected to a file fails at the final print on
+    Windows (`UnicodeEncodeError`, the `≈` in the footer), after the trial is saved. Existing
+    behaviour, not changed.
+  - ruff findings in files this change does not touch, left as they are: SIM108 in
+    `dss/cerb.py` and `dss/code.py`, FURB167 and SIM110 in `dss/eval.py`, formatting in
+    `tests/test_eval.py`.
+  - Other gaps from the same audit, for the owners to decide: the known causes have no
+    signature code can match; live runs don't check the "up to three Jira searches" and
+    "evidence was read" rules; `cerb_client_info` returns about 85,000 characters; every ticket
+    gets one Opus run whatever its size.
+
 ### 2026-11-13: the replay work committed for the merge into main (Vincent, with Claude)
 - **Why:** Vincent read the six replays of 2026-11-12 and asked to merge the replay PR (#14).
 - **Done:** no code change. The branch's work since `4e4a3c0` (the four 2026-11-12 entries

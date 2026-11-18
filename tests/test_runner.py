@@ -249,6 +249,18 @@ def test_client_info_copies_a_share_file_before_cerberus_reads_it(tmp_path, monk
 	assert not failed
 	mcp_call('cerb_client_info', {'path': str(tmp_path / 'local.xlsm')})
 	assert copies == [share_file]
+
+	def run_casing_record(app, module, func, **kwargs):
+		joints = [{'joint': '1', 'csg_od': 5.5}, {'joint': '2', 'csg_od': 5.5}]
+		return {'version': '1.6', 'joints': joints}
+
+	monkeypatch.setattr(cerb, 'run_in', run_casing_record)
+	_, text = mcp_call('cerb_client_info', {'path': str(tmp_path / 'local.xlsm')})
+	assert json.loads(text) == {  # a value every joint shares is given once
+		'version': '1.6',
+		'every_joint': {'csg_od': 5.5},
+		'joints': [{'joint': '1'}, {'joint': '2'}],
+	}
 	assert reads == [
 		('cerb', 'dss.cerb', 'client_info', str(tmp_path / 'copy.xlsm')),
 		('cerb', 'dss.cerb', 'client_info', str((tmp_path / 'local.xlsm').resolve())),

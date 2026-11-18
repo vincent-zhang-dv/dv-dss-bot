@@ -344,13 +344,6 @@ def _duration(minutes: float) -> str:
 
 
 def calls(result: dict) -> int:
-	"""The tool calls one replay made, from its trace, without those held back until past issues
-	were searched: they read nothing, and don't count toward MAX_CALLS."""
-	trace = Path(result['trace'])
-	if not trace.exists():
-		return 0
-	count = 0
-	for line in trace.read_text(encoding='utf-8').splitlines():
-		if line.strip() and not json.loads(line).get('blocked'):
-			count += 1
-	return count
+	"""The tool calls Claude made in one replay, from its trace, without those held back until
+	past issues were searched: they read nothing, and don't count toward MAX_CALLS."""
+	return len(record.traced_tools(Path(result['trace'])))

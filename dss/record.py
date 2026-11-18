@@ -17,6 +17,7 @@ import ntpath
 import os
 import re
 import string
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +40,27 @@ WORKFLOW_FEATURES = {'PE': 'pe_', 'WI': 'wi_', 'CI': 'wi_', 'FF': 'ff_'}  # sche
 PROMPT = """New ticket {key}, posted {posted} (local time).
 
 The DSS ticket record, read by code before you started:
-{ticket}{notes}{thread}{post}"""
+{ticket}{version}{reads}{notes}{thread}{post}"""
+# Heads Gate B's comparison of the reporter's Cerberus version with prod, in the prompt
+VERSION_CHECK = "\n\nGate B's version comparison, made by code: {found}"
+RELEASE = re.compile(r'(\d+(?:\.\d+)*)(.*)')  # 1.0.4+uat20261031: release 1.0.4, build +uat20261031
+# Heads the calls code made ahead of Claude, in the prompt (read_by_code)
+READS = """
+
+Code also made the calls below for you. A fact in the record that is not null is read: use it and
+don't fetch it again. `project` is step 1's project folder, `prod_version` is
+`cerb_prod_version()`'s answer, and `inputs` is Gate C's check of the listing below, for the
+inputs this job type needs (true: there, false: missing). Each call shows the tool's own answer,
+so don't make it again."""
+READ_REMARKS = {
+	'cerb_last_session': ' (its `terminal_log` is in the record)',
+	'cerb_list': " (the record's `inputs` come from it)",
+}
+TRACE_CHARS = 2000  # result text kept per call in a trace line
+# Gate C's inputs, as Cerberus' project picker checks them (proj_select.py in DataDHPython)
+CLIENT_INFO = re.compile(r'DVT\d+_client_info\.xlsm')
+BASELINE = re.compile(r'DVT\d+_baseline_calculation\.xlsx')
+INPUT_FOLDERS = {'bookmarks': 'bookmarks', 'dvcaliper_files': 'dvcalipers'}
 WORDS = {
 	'not_cerberus': 'not Cerberus',
 	'prior_art': 'past issues',
@@ -68,6 +89,12 @@ INVESTIGATION_TOOLS = {
 	'cerb_read_sheet',
 	'cerb_client_info',
 }
+# An evidence ref that names a tool call, such as code_read:cerberus/plots.py:120 (evidence_gaps)
+TOOL_REF = re.compile(r'((?:slack|jira|cerb|code|matlab|confluence)_[a-z_]+)(?::(.*))?', re.DOTALL)
+LINE_REF = re.compile(r'([^\s:;,]+):(\d+)(?:-(\d+))?')  # one path:line or path:first-last
+LINE_TOOLS = {'code_read', 'matlab_read'}  # each call reads at most code.MAX_LINES lines
+# A tool whose answer code put in the record without a traced call, and the fact that holds it
+RECORD_TOOLS = {'cerb_find_project': 'project', 'cerb_prod_version': 'prod_version'}
 CODE_SPAN = re.compile(r'(`[^`\n]*`)')
 MARKDOWN_MARK = re.compile(r'([\\*_~<>\[\]])')  # shown as typed once escaped: \cerberus, __init__
 MAX_PROBLEMS = 10  # schema problems listed in the DM
@@ -125,17 +152,19 @@ def trial(
 	answer schema and *budget* (faked in tests). *label* starts
 	the DM's footer, the headline's key links to *ticket_link* (else to Jira), and *analyst* heads
 	the analyst's todos (else the Jira reporter); the Slack bot gives its own label, the DSS post
-	and the analyst's Slack name. Returns what was saved: `ticket`, `notes` (what
+	and the analyst's Slack name. Code's own reads (:func:`read_ahead`) go into the prompt and
+	the trace, so Claude does not fetch them again. Returns what was saved: `ticket`, `notes` (what
 	code could not read), `record` (None when the answer had no JSON), `problems` (empty when the
-	record passed the check), `dm` and `thread` (Markdown), Claude's raw `text`, its cost, and
-	`file`.
+	record passed the check), `evidence_gaps` (the evidence refs of a checked record that its
+	trace does not show, :func:`evidence_gaps`; they are marked, and the answer still goes out),
+	`dm` and `thread` (Markdown), Claude's raw `text`, its cost, and `file`.
 
 	A replay (:mod:`dss.replay`) gives *replay*, code's part of the record's `replay` block
 	(cutoff, build and code_ref), and saves in its own *folder* with its own *trace* file.
 	"""
 	if not jira.ISSUE_KEY.fullmatch(key):
 		raise ValueError(f'{key!r} is not an issue key like DSS-1234')
-	ticket, notes = build_ticket(key, posted)
+	ticket, notes, reads = read_ahead(key, posted)
 	if ask is None:
 		ask = functools.partial(
 			runner.run_reply,
@@ -144,11 +173,12 @@ def trial(
 			budget=budget,
 		)
 	notes += code.refresh() + matlab.refresh()
-	asked = prompt(key, posted, ticket, notes, post, thread_ts)
+	asked = prompt(key, posted, ticket, notes, post, thread_ts, reads)
 	if replay is not None:
 		asked += replay_prompt()
 	if trace is None:
 		trace = triage.TRACE_DIR / f'{key}_{datetime.now().strftime(triage.TIME_FORMAT)}.jsonl'
+	trace_reads(trace, reads)
 	answer = triage.run(key, posted, asked, ask, trace=trace)
 	record, crash = None, ''
 	gaps: dict[str, str] = {}
@@ -326,12 +356,133 @@ def replay_prompt() -> str:
 	return REPLAY.format(posted=posted, calls=calls)
 
 
-def build_ticket(key: str, posted: str) -> tuple[dict, list[str]]:
+def read_ahead(key: str, posted: str) -> tuple[dict, list[str], list[dict]]:
+	"""What code reads of *key* before Claude starts, so that Claude does not fetch it again: the
+	`dss_ticket` block and notes of :func:`build_ticket`, with Gate C's `inputs` from the project
+	folder's listing (:func:`inputs`), and the reads themselves.
+
+	Each read is the tool call it stands in for (`tool`, `arguments`), the `seconds` it took and
+	its `result` as that tool gives it: they go into the prompt (:func:`read_by_code`) and the
+	trace (:func:`trace_reads`). A listing that fails or is cut short leaves `inputs` out.
+	"""
+	reads: list[dict] = []
+	ticket, notes = build_ticket(key, posted, reads)
+	if not ticket['project']:
+		return ticket, notes, reads
+	started = time.monotonic()
+	try:
+		listing = cerb.list_folder(ticket['project'])
+	except Exception as error:  # noqa: BLE001 - a missing fact is noted, not fatal
+		notes.append(f'project folder listing: {error}')
+		return ticket, notes, reads
+	_keep(reads, 'cerb_list', {'folder': ticket['project']}, started, listing)
+	if not listing['cut']:
+		ticket['inputs'] = inputs(ticket['project'], listing)
+	return ticket, notes, reads
+
+
+def inputs(project: str, listing: dict) -> dict[str, bool]:
+	"""Which of Cerberus' inputs the *project* folder's *listing* (:func:`dss.cerb.list_folder`)
+	has, as Gate C asks: the client info and a `Bookmarks` folder for every job, the baseline
+	calculation for PE, `DVCaliper_Files` for WI and CI.
+
+	In a replay, an input changed after the ticket is left out: the listing cannot say it was
+	there when the ticket was posted.
+	"""
+	kinds = set(_kinds(project))
+	wanted = ['client_info', 'bookmarks']
+	if 'PE' in kinds:
+		wanted.append('baseline_calculation')
+	if kinds & {'WI', 'CI'}:
+		wanted.append('dvcalipers')
+	there_then: dict[str, bool] = {}  # an input in the listing: whether it was there at the ticket
+	for entry in listing['entries']:
+		name = _input(entry)
+		if not name:
+			continue
+		if not entry.get('changed_after_ticket'):
+			there_then[name] = True
+		elif name not in there_then:
+			there_then[name] = False
+	found = {}
+	for name in wanted:
+		if name not in there_then:
+			found[name] = False
+		elif there_then[name]:
+			found[name] = True
+	return found
+
+
+def version_check(ticket: dict) -> str:
+	"""How the reporter's Cerberus version in *ticket* compares with prod, as Gate B asks: older,
+	newer, the same, or another build of the same release. Empty when either version is not
+	known or does not start with a release number such as 1.0.4, and when the two differ only in
+	how the release is written."""
+	theirs = RELEASE.fullmatch(ticket.get('cerberus_version') or '')
+	prod = RELEASE.fullmatch(ticket.get('prod_version') or '')
+	if not theirs or not prod:
+		return ''
+	said = f"the reporter's Cerberus {theirs[0]}"
+	if _numbers(theirs[1]) < _numbers(prod[1]):
+		return f'{said} is older than prod {prod[0]}.'
+	if _numbers(theirs[1]) > _numbers(prod[1]):
+		return f'{said} is newer than prod {prod[0]}.'
+	if theirs[0] == prod[0]:
+		return f'{said} is the prod version.'
+	if theirs[2] != prod[2]:
+		return f'{said} and prod {prod[0]} are different builds of the same release.'
+	return ''
+
+
+def read_by_code(reads: list[dict] | None) -> str:
+	"""Code's *reads* (:func:`read_ahead`) as a prompt section, each as its tool call and that
+	tool's answer; empty when code read nothing. The session is shown without its terminal log,
+	which the record has."""
+	if not reads:
+		return ''
+	parts = [READS]
+	for read in reads:
+		result = read['result']
+		if read['tool'] == 'cerb_last_session':
+			result = dict(result)
+			result.pop('terminal_log', None)
+		remark = READ_REMARKS.get(read['tool'], '')
+		answer = json.dumps(result, ensure_ascii=False, default=str)
+		parts.append(f'`{_call(read)}`{remark}:\n{answer}')
+	return '\n\n'.join(parts)
+
+
+def trace_reads(trace: Path, reads: list[dict]) -> None:
+	"""Append code's *reads* to the run's *trace*, each as the `dss` server writes a tool call
+	(:func:`dss.server.trace`) and marked `by: code`. A replay's leak check covers them like
+	Claude's calls; the counts of Claude's calls leave them out."""
+	if not reads:
+		return
+	trace.parent.mkdir(parents=True, exist_ok=True)
+	with open(trace, 'a', encoding='utf-8') as file:
+		for read in reads:
+			text = json.dumps(read['result'], ensure_ascii=False, default=str)
+			line = {
+				'tool': read['tool'],
+				'arguments': read['arguments'],
+				'seconds': read['seconds'],
+				'by': 'code',
+				'chars': len(text),
+				'result': text[:TRACE_CHARS],
+			}
+			leaks = cutoff.leaks(read['tool'], read['arguments'], text)
+			if leaks:
+				line['leaks'] = leaks
+			file.write(json.dumps(line, ensure_ascii=False, default=str) + '\n')
+
+
+def build_ticket(key: str, posted: str, reads: list[dict] | None = None) -> tuple[dict, list[str]]:
 	"""The `dss_ticket` block of *key*, read by code, and notes on what could not be read.
 
 	*posted* is the ticket time in TIME_FORMAT. A source that fails leaves its facts null and adds
 	a note, so a down index never stops the triage. `prod_version` is today's prod, which is the
-	prod at filing time only for a new DSS ticket.
+	prod at filing time only for a new DSS ticket. The Jira ticket and the session it read are
+	added to *reads*, when given (:func:`read_ahead`).
 	"""
 	notes: list[str] = []
 	created = datetime.strptime(posted, triage.TIME_FORMAT).astimezone()
@@ -348,11 +499,14 @@ def build_ticket(key: str, posted: str) -> tuple[dict, list[str]]:
 		'last_error': None,
 		'terminal_log': None,
 	}
+	started = time.monotonic()
 	try:
 		issue = jira.get_issue(key, RECORD_FIELDS)
 	except Exception as error:  # noqa: BLE001 - Claude reads Jira itself and reports the failure
 		notes.append(f'Jira: {error}')
 		issue = {}
+	else:
+		_keep(reads, 'jira_get_issue', {'key': key}, started, issue)
 	if issue.get('created'):
 		ticket['created'] = _jira_time(issue['created'])
 	if issue.get('reporter'):
@@ -366,7 +520,7 @@ def build_ticket(key: str, posted: str) -> tuple[dict, list[str]]:
 		notes.append('the DSS ticket has no DVT number')
 	if ticket['project']:
 		ticket['workflow'] = workflow(ticket['project'])
-		_last_session(ticket, posted, notes)
+		_last_session(ticket, posted, notes, reads)
 	try:
 		ticket['prod_version'] = cerb.prod_version()
 	except Exception as error:  # noqa: BLE001 - a missing fact is noted, not fatal
@@ -379,10 +533,7 @@ def workflow(project: str) -> str:
 
 	PE, WI, CI or FF; `combo` for a joined type such as CI-PE; `unknown` for any other name.
 	"""
-	parts = ntpath.basename(project).split('_')
-	if len(parts) < 3:
-		return 'unknown'
-	kinds = parts[2].upper().split('-')
+	kinds = _kinds(project)
 	if len(kinds) == 1 and kinds[0] in WORKFLOWS:
 		return kinds[0]
 	if len(kinds) > 1 and set(kinds) <= WORKFLOWS:
@@ -391,14 +542,26 @@ def workflow(project: str) -> str:
 
 
 def prompt(
-	key: str, posted: str, ticket: dict, notes: list[str], post: str = '', thread_ts: str = ''
+	key: str,
+	posted: str,
+	ticket: dict,
+	notes: list[str],
+	post: str = '',
+	thread_ts: str = '',
+	reads: list[dict] | None = None,
 ) -> str:
-	"""The trial's prompt: the bot's ticket and time, the `dss_ticket` block, the Slack thread
-	and the post."""
+	"""The trial's prompt: the bot's ticket and time, the `dss_ticket` block, how its Cerberus
+	version compares with prod (:func:`version_check`), the calls code made ahead (*reads*,
+	:func:`read_by_code`), the Slack thread and the post."""
+	version = version_check(ticket)
+	if version:
+		version = VERSION_CHECK.format(found=version)
 	return PROMPT.format(
 		key=key,
 		posted=posted,
 		ticket=json.dumps(ticket, indent=1),
+		version=version,
+		reads=read_by_code(reads),
 		notes=triage.noted(notes),
 		thread=triage.slack_thread(thread_ts),
 		post=triage.workflow_post(post),
@@ -572,17 +735,105 @@ def traced_leaks(trace: Path) -> list[str]:
 
 
 def traced_tools(trace: Path) -> list[str]:
-	"""The tools a run called, in order, from its *trace*; none when it called none. A call the
-	server held back until past issues were searched read nothing, so it is left out."""
+	"""The tools Claude called in a run, in order, from its *trace*; none when it called none. A
+	call the server held back until past issues were searched read nothing, so it is left out,
+	and so is a read code made ahead (:func:`trace_reads`)."""
 	if not trace.exists():
 		return []
 	tools = []
 	for line in trace.read_text(encoding='utf-8').splitlines():
 		if line.strip():
 			call = json.loads(line)
-			if not call.get('blocked'):
+			if not call.get('blocked') and call.get('by') != 'code':
 				tools.append(call['tool'])
 	return tools
+
+
+def traced_calls(trace: Path) -> list[dict]:
+	"""The calls of a run that got an answer, Claude's and code's (`by: code`), from its *trace*;
+	none when it has none. A call that failed or was held back read nothing, so it is left out."""
+	if not trace.exists():
+		return []
+	calls = []
+	for line in trace.read_text(encoding='utf-8').splitlines():
+		if line.strip():
+			call = json.loads(line)
+			if not call.get('blocked') and 'error' not in call:
+				calls.append(call)
+	return calls
+
+
+def evidence_gaps(record: dict, calls: list[dict]) -> dict[str, str]:
+	"""The evidence refs of *record* that the run's *calls* (:func:`traced_calls`) do not show,
+	each with why. Only what the trace settles is said:
+
+	- a ref that names a tool no call of which got an answer; code's reads count, and so does a
+	  fact code put in the record (RECORD_TOOLS);
+	- a `code_read` or `matlab_read` ref to one file and line (or line range) that no call of
+	  that file read; a ref that lists several is not taken apart;
+	- a `terminal_log` ref when the record has no terminal log and Claude read none.
+
+	`computed` and every other ref are left alone.
+	"""
+	ticket = record['dss_ticket']
+	ran = set()
+	log = ticket.get('terminal_log')
+	log_read = isinstance(log, dict) and bool(log.get('found'))
+	lines_read: dict[tuple[str, str], list[tuple[str, int, int]]] = {}
+	for call in calls:
+		tool = call['tool']
+		ran.add(tool)
+		if tool == 'cerb_read_text' or (tool == 'cerb_last_session' and call.get('by') != 'code'):
+			log_read = True
+		if tool in LINE_TOOLS:
+			arguments = call.get('arguments') or {}
+			path = _path_key(arguments.get('path'))
+			first = max(int(arguments.get('start') or 1), 1)
+			last = first + code.MAX_LINES - 1
+			if arguments.get('end'):
+				last = min(last, int(arguments['end']))
+			lines_read.setdefault((tool, ntpath.basename(path)), []).append((path, first, last))
+	for tool, fact in RECORD_TOOLS.items():
+		if ticket.get(fact):
+			ran.add(tool)
+	gaps = {}
+	for item in record['triage'].get('evidence') or []:
+		ref = item['ref']
+		if ref.startswith('terminal_log'):
+			if not log_read:
+				gaps[ref] = 'the record has no terminal log and this run read none'
+			continue
+		named = TOOL_REF.fullmatch(ref)
+		if not named:
+			continue
+		tool = named[1]
+		if tool not in ran:
+			gaps[ref] = f'no `{tool}` call of this run got an answer'
+			continue
+		cited = LINE_REF.fullmatch(named[2] or '')
+		if tool not in LINE_TOOLS or not cited:
+			continue
+		path = _path_key(cited[1])
+		ends = [int(cited[2])]
+		if cited[3]:
+			ends.append(int(cited[3]))
+		same_file = False
+		unread = set(ends)
+		for read_path, first, last in lines_read.get((tool, ntpath.basename(path)), []):
+			if not _same_file(path, read_path):
+				continue
+			same_file = True
+			for line in ends:
+				if first <= line <= last:
+					unread.discard(line)
+		if not same_file:
+			gaps[ref] = f'no `{tool}` call of this run read that file'
+		elif len(unread) == 1:
+			gaps[ref] = f'no `{tool}` call of this run read line {min(unread)} of that file'
+		elif unread:
+			lines = f'lines {min(unread)} and {max(unread)}'
+			gaps[ref] = f'no `{tool}` call of this run read {lines} of that file'
+	return gaps
 
 
 def order_problems(record: dict, tools: list[str]) -> list[str]:
@@ -966,17 +1217,90 @@ def _project(dvt: int, project_path, notes: list[str]) -> str | None:
 	return None
 
 
-def _last_session(ticket: dict, posted: str, notes: list[str]) -> None:
+def _kinds(project: str) -> list[str]:
+	"""The job types in a project folder's name (DVT<n>_<date>_<type>_<well>), in upper case:
+	several for a joined type such as CI-PE, none when the name has no type part."""
+	parts = ntpath.basename(project).split('_')
+	if len(parts) < 3:
+		return []
+	return parts[2].upper().split('-')
+
+
+def _input(entry: dict) -> str:
+	"""Which of Gate C's inputs a project folder's *entry* is, by its name; empty for any other
+	entry."""
+	if entry['type'] == 'folder':
+		return INPUT_FOLDERS.get(entry['name'].lower(), '')
+	if CLIENT_INFO.fullmatch(entry['name']):
+		return 'client_info'
+	if BASELINE.fullmatch(entry['name']):
+		return 'baseline_calculation'
+	return ''
+
+
+def _numbers(release: str) -> list[int]:
+	"""The numbers of a *release* such as 1.0.4, without trailing zeros: 1.1 and 1.1.0 are one."""
+	numbers = []
+	for part in release.split('.'):
+		numbers.append(int(part))
+	while numbers and numbers[-1] == 0:
+		numbers.pop()
+	return numbers
+
+
+def _path_key(path) -> str:
+	"""A repo *path* as written in a call or an evidence ref, for comparing the two."""
+	return str(path or '').strip().replace('\\', '/').lower().strip('/')
+
+
+def _same_file(cited: str, read: str) -> bool:
+	"""Whether the *cited* path (:func:`_path_key`) is the file a call *read*: the same path, or
+	one given from a folder further down, such as modules/plots.py for cerberus/modules/plots.py."""
+	if cited == read:
+		return True
+	return read.endswith('/' + cited) or cited.endswith('/' + read)
+
+
+def _gap_count(gaps: dict[str, str]) -> str:
+	"""How many evidence refs the trace does not show, in words for the DM."""
+	if len(gaps) == 1:
+		return '1 evidence ref cites a read the trace does not show'
+	return f'{len(gaps)} evidence refs cite a read the trace does not show'
+
+
+def _keep(reads: list[dict] | None, tool: str, arguments: dict, started: float, result) -> None:
+	"""Add a read code made since *started* to *reads*, as the call of *tool* it stands in for;
+	nothing when the caller keeps no reads."""
+	if reads is None:
+		return
+	seconds = round(time.monotonic() - started, 2)
+	reads.append({'tool': tool, 'arguments': arguments, 'seconds': seconds, 'result': result})
+
+
+def _call(read: dict) -> str:
+	"""One of code's reads as the tool call it stands in for: jira_get_issue(key="DSS-1234")."""
+	arguments = []
+	for name, value in read['arguments'].items():
+		arguments.append(f'{name}={json.dumps(value, ensure_ascii=False)}')
+	return f'{read["tool"]}({", ".join(arguments)})'
+
+
+def _last_session(
+	ticket: dict, posted: str, notes: list[str], reads: list[dict] | None = None
+) -> None:
 	"""The reporter's Cerberus version, last failed run and terminal log, from their last session
-	before *posted*, into *ticket*. A missing terminal log is noted only where Cerberus writes
-	one (1.1 and later)."""
+	before *posted*, into *ticket*, and the session into *reads* when given. A missing terminal
+	log is noted only where Cerberus writes one (1.1 and later)."""
 	if ticket['reporter'] == 'unknown':
 		return
+	started = time.monotonic()
 	try:
 		session = cerb.last_session(ticket['project'], ticket['reporter'], posted)
 	except Exception as error:  # noqa: BLE001 - a missing fact is noted, not fatal
 		notes.append(f'telemetry: {error}')
 		return
+	arguments = {'project': ticket['project'], 'user': ticket['reporter'], 'before': posted}
+	_keep(reads, 'cerb_last_session', arguments, started, session)
 	if not session['found']:
 		notes.append(f'no Cerberus telemetry log of {ticket["reporter"]} before {posted}')
 		return

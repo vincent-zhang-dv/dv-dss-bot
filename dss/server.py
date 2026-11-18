@@ -16,10 +16,9 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from dss import cutoff
-from dss.record import HISTORY_TOOLS, INVESTIGATION_TOOLS
+from dss.record import HISTORY_TOOLS, INVESTIGATION_TOOLS, TRACE_CHARS
 
 MODULES = ('thread', 'jira', 'cerb', 'code', 'matlab', 'vizapp', 'confluence')
-TRACE_CHARS = 2000  # result text kept per call in a trace line
 SPENT = (
 	'This replay has used its {calls} tool calls: stop investigating and answer now with what '
 	'you have, putting what is not proved under not_proved.'

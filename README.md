@@ -12,7 +12,8 @@ Owners: Vincent Zhang and Annika. Status log: [docs/STATUS.md](docs/STATUS.md).
 #data-dev-support: a workflow posts "created DSS-1234"
   -> dss/slack.py    new ticket, triaged 15 s after the post so its thread holds the workflow's
                      screenshot (on start, also any from the last 24 h with no saved answer)
-  -> dss/record.py   the checked record: ticket facts read by code, the prompt, the check
+  -> dss/record.py   the checked record: ticket facts and Gate C's inputs read by code and
+                     handed to Claude, the prompt, the check
   -> dss/triage.py   the prompt: ticket key, time posted, the workflow's message, its thread
   -> dss/runner.py   claude -p with no user setup and no built-in tools; system prompt dss/triage.md
   -> dss/server.py   MCP server `dss`, read-only tools:
@@ -36,7 +37,7 @@ The triage flow is the system prompt, [dss/triage.md](dss/triage.md). Claude fir
 | `jira_get_issue`, `jira_search` | A ticket's triage fields, with its resolution, fix versions (released or not), newest comments and attachment names; and similar tickets with their resolution and fix versions. |
 | `cerb_find_project`, `cerb_list`, `cerb_read_text` | The DVT's project folder, a folder's entries, and a text file in 400-line pages, through the project index. |
 | `cerb_last_session` | The reporter's newest Cerberus telemetry log before the ticket: version, failed script runs, last saved config. From Cerberus 1.1 on, also the session's terminal log (`cerberus\terminal_log`, named like the telemetry log): its errors before the ticket, each with the end of its traceback, and its warnings, with line numbers. Before 1.1 there is no terminal log. |
-| `cerb_client_info` | A `client_info.xlsm` as Cerberus reads it. |
+| `cerb_client_info` | A `client_info.xlsm` as Cerberus reads it. A joint column that holds one value for every joint is given once under `every_joint`, not once per joint; no value is left out. |
 | `cerb_read_sheet` | Any `.xlsx` or `.xlsm` on the share (statistics spreadsheets, other client info sheets): its sheets and sizes, then 100-row pages with Excel's row numbers, optionally only the rows containing a text. Copied through the index and read with openpyxl in the Cerberus venv. |
 | `cerb_read_document` | The text of a `.pdf` or `.docx` on the share (deliverable reports, intro pages): up to 20 pages per answer (Word in parts of about 3,000 characters), optionally only the pages containing a text. Pages that are only a picture show no text. Read with pypdf and python-docx in the Cerberus venv. |
 | `cerb_read_image` | An image on the share (`.png`, `.jpg` and other bitmaps), or the pictures in one page of a PDF on the share (plots `cerb_read_document` can't read), given to Claude as images: scaled to 1568 pixels on the long side, logos left out, at most 6 per page. Read with Pillow and pypdf in the Cerberus venv. |
@@ -107,11 +108,13 @@ Every triage, from the CLI or the bot, adds a row to `out/usage.csv`: run time, 
 
 ### Trial mode
 
-`python -m dss trial` runs the triage record design (the DSS Triage Flow page) by hand, without changing the bot. It takes the same arguments as `triage` and runs the same locked-down Claude with the same steps and rules. Four things differ:
+`python -m dss trial` runs the triage record design (the DSS Triage Flow page) by hand, without changing the bot. It takes the same arguments as `triage` and runs the same locked-down Claude with the same steps and rules. Five things differ:
 
-- Before Claude starts, code reads the `dss_ticket` block: the reporter, DVT, project folder, workflow, Toolbox Name, the reporter's Cerberus version, last failed run and terminal log (1.1 and later), and the prod version. A source that fails leaves its facts null and is noted; it doesn't stop the triage.
+- Before Claude starts, code reads the `dss_ticket` block: the reporter, DVT, project folder, workflow, Toolbox Name, the reporter's Cerberus version, last failed run and terminal log (1.1 and later), and the prod version. Code also lists the project folder and checks Gate C's inputs for the job type (`inputs`: the client info file and `Bookmarks` for every job, the baseline calculation for PE, `DVCaliper_Files` for WI and CI), by the names Cerberus' project picker looks for. A source that fails leaves its facts null and is noted; it doesn't stop the triage.
+- The prompt gives Claude what code read (the Jira issue, the last session, the project listing), each as the tool's own answer, and tells it not to make those calls again. The trace keeps them as lines marked `by: code`: a replay's leak check covers them, and Claude's call count and the step-order check leave them out. When both versions are release numbers, the prompt also gives Gate B's comparison of the reporter's Cerberus version with prod (older, newer, the same, or two builds of one release), made by code.
 - Claude answers with one JSON object (the `triage` and `class` blocks) through claude's structured output (`--json-schema`). Code builds that schema from `docs/triage_record.schema.json` (`record.answer_schema`); each field's description is what Claude reads about that field, and claude asks Claude again until the answer fits. [dss/triage_record.md](dss/triage_record.md) replaces `triage.md`'s Markdown answer section with the few rules that aren't about one field, and the known causes that can apply to the ticket's workflow.
 - Code checks the record against `docs/triage_record.schema.json`.
+- Code checks each evidence ref of a record that passed against the run's trace: a ref that names a tool needs a call of that tool that got an answer (code's own reads count), and a `code_read` or `matlab_read` ref with one `path:line` or `path:first-last` needs a call that read those lines. A ref that fails is marked "not shown by the trace" in the thread reply, the post gets an "Evidence to check" line, and the saved trial lists it under `evidence_gaps`. It never refuses an answer.
 - Code renders a post (the decision) and a thread reply (the proof), as the Slack bot posts them (below). An answer that fails the check is shown as given, with the problems.
 
 The command prints the DM, then the thread reply. Each trial is saved as `out/trial/<key>_<run time>.json`, never in `out/answers/`, the folder the bot reads to tell which tickets are done. The trial doesn't post to Slack; whoever runs it delivers the DM and the thread reply to the reviewer.
@@ -178,7 +181,7 @@ Each analysis is a checked record, as in trial mode, posted to `DSS_SLACK_POST_C
   |---|---|---|
   | Why | The cause in one sentence, and where it lives (file, folder, setting, code or version) | There's a cause |
   | Past issues | Matching DSS or DTN tickets, commits or pages, each with its state (fixed, open, explained) and whether it applies here | Always, as "none found" if nothing matched |
-  | Evidence | Each fact the bot read, with the tool that read it | There's evidence |
+  | Evidence | Each fact the bot read, with the tool that read it; a ref the run's trace does not show is marked | There's evidence |
   | What the questions settle | What each question for the analyst would decide | There are questions |
   | Details | Crash: the error, where it's raised, and whether that code changed since the analyst's version. Wrong numbers: both values and the first input that differs. Setup: versions, the failed run, the config. Not Cerberus: the owner and the SOP link | Settled at one of those four |
   | Also found | A second, separate problem the analyst would hit next | There is one |

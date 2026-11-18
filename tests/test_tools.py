@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import math
 import ntpath
 import os
 import sqlite3
@@ -514,6 +515,50 @@ def test_client_info_reads_the_casing_record_when_the_file_has_one(monkeypatch):
 	}
 	monkeypatch.setattr(FakeClientInfo, 'sheets', {})  # an older client info version
 	assert set(cerb.client_info('DVT1234_client_info.xlsm')) == {'version', 'wellinfo'}
+
+
+def test_a_joint_value_shared_by_every_joint_is_given_once_and_none_is_lost():
+	nan = float('nan')
+	joints = [
+		{'joint': 'FS', 'd_top': 80.0, 'd_bot': 82.0, 'csg_id': 4.5, 'smys': nan, 'supp_jt': False},
+		{'joint': '1', 'd_top': 40.0, 'd_bot': 80.0, 'csg_id': 4.5, 'smys': nan, 'supp_jt': False},
+		{'joint': '2', 'd_top': 0.0, 'd_bot': 40.0, 'csg_id': 4.5, 'smys': nan, 'supp_jt': False},
+	]
+	found = {'version': '1.6', 'strings': [{'csg_id': 4.5}], 'joints': joints, 'cerberus': 'prod'}
+	compact = cerb.joints_compact(found)
+	assert list(compact) == ['version', 'strings', 'every_joint', 'joints', 'cerberus']
+	assert list(compact['every_joint']) == ['csg_id', 'smys', 'supp_jt']
+	assert compact['every_joint']['csg_id'] == 4.5 and compact['every_joint']['supp_jt'] is False
+	assert math.isnan(compact['every_joint']['smys'])  # an empty column stays, as empty
+	assert compact['joints'] == [
+		{'joint': 'FS', 'd_top': 80.0, 'd_bot': 82.0},
+		{'joint': '1', 'd_top': 40.0, 'd_bot': 80.0},
+		{'joint': '2', 'd_top': 0.0, 'd_bot': 40.0},
+	]
+	# putting the shared values back gives every joint as Cerberus read it
+	for row, joint in zip(compact['joints'], joints, strict=True):
+		restored = {**row, **compact['every_joint']}
+		assert set(restored) == set(joint)
+		for name, value in joint.items():
+			assert cerb._same_value(restored[name], value)
+	assert compact['version'] == '1.6' and compact['strings'] == found['strings']
+
+
+@pytest.mark.parametrize(
+	'joints',
+	[
+		[{'joint': '1', 'csg_id': 4.5}],  # one joint: nothing to share
+		[{'joint': '1', 'csg_id': 4.5}, {'joint': '2', 'csg_id': 4.55}],  # no value is shared
+		[{'joint': '1', 'supp_jt': False}, {'joint': '2', 'supp_jt': 0}],  # False is not 0
+		[{'joint': '1', 'smys': float('nan')}, {'joint': '2', 'smys': 55.0}],
+		[{'joint': '1', 'csg_id': 4.5}, {'joint': '2', 'csg_od': 4.5}],  # not the same columns
+		[],
+	],
+)
+def test_joints_with_nothing_shared_are_left_as_they_are(joints):
+	found = {'version': '1.6', 'joints': joints}
+	assert cerb.joints_compact(found) is found
+	assert cerb.joints_compact({'version': '1.6'}) == {'version': '1.6'}  # no Casing Record
 
 
 class FakeWorksheet:
