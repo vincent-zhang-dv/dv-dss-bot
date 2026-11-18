@@ -1,5 +1,30 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-18 (evening): code checks cited evidence against the trace (Vincent, with Claude)
+- **Why:** Vincent's goal: a model only where reasoning is needed, scripts for the rest. On 20
+  saved runs (24 tool calls, 26 turns a run), nothing checked that cited evidence was read, and
+  the fixed reads (thread, the ticket's Jira issue, project, last session) were the model's.
+- **Tried, held back:** the 2026-11-13 `prefetch-facts` work, ported onto main (branch
+  `prefetch-port`, local only, 313 tests pass). Replays of DSS-1256, 1255, 1254, 1239, 1222 and
+  1249 on main and on the port: model turns 184 to 168 and tool calls 172 to 154 (both about
+  -10%), cost $4.23 to $4.41, time the same; DSS-1256 half the turns with the same answer. But
+  DSS-1255 went from "likely" (3 of 3 runs on main) to "proved" (3 of 3 on the port), an
+  overclaim: the log never showed why pyarrow failed to load. Its fix advice varied on both sides,
+  so that part was chance. Vincent's choice: ship only what doesn't change what the model is told.
+- **Done** (branch `evidence-check`, from main `41dee7f`): the port's evidence check alone.
+  `record.evidence_gaps` marks an evidence item whose source the trace doesn't show, in the
+  thread, with a count in the post; the answer always goes out. Changed from the port: a file
+  line counts as read by `code_read`, `matlab_read` or a grep hit, whichever tool the item
+  names. On today's real runs the port's version marked 3 refs, all false (the bot cited a
+  `matlab_read` and a grep hit as `code_read`); this version marks none.
+- **Checked:** whole suite 284 passed; ruff clean on the changed files. 38 real records, 251 evidence refs, 0 marked. No real
+  run has cited an unread source yet, so only the unit tests show it catching one.
+- **Not done / open:**
+  - Prefetch: held on `prefetch-port` until the "likely" to "proved" shift is understood.
+  - Step 3 (a scripted past-issue search) dropped by Vincent: the search words are judgement.
+  - 13 of 20 "proved" answers today also list not-proved checks, on main too; the schema says
+    proved means every link was read. Vincent is deciding whether code should enforce it.
+
 ### 2026-11-18: DSS Bot Review page in the repo, step 1 of learning from reviews (Vincent, with Claude)
 - **Why:** the team approved learning from the developers' reviews: reviews on the DSS Bot Review
   page become golden cases and drafted fixes, checked by replays, merged by the owners. Step 1
