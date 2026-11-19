@@ -1,5 +1,38 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-19: narrower DFR rule, replay cap 40 (Vincent, with Claude)
+- **Why:** Annika's ratings of the 2026-11-17 replays had four sections worse than on
+  2026-11-12 and one better. DSS-1095 added an "if you need ..., raise a DFR" to a
+  works-as-designed answer; she deleted exactly that. DSS-1191's run hit the 30-call cap on the
+  call that lists the VizApp suppression mask and then blamed CatCall. On live DSS-1260 the bot
+  offered a DFR to fill two baseline bins that have no calibration perfs. Abhi said that can't
+  work, and Cerberus' error itself suggests using one bin.
+- **Done** (branch `narrow-dfr`): `triage.md`'s DFR rule applies only to what the analyst asks
+  for. It never adds a DFR as an "if you need ..." to a works-as-designed answer, and never
+  suggests one when the request can't work (the data doesn't exist) or the error message, a
+  current Confluence page or a past issue shows it can't work (not only that Cerberus doesn't do
+  it now); it says why and gives the supported way.
+  `replay.MAX_CALLS` is 40 (README too). Live triage has no call cap. These replays ran with the
+  DSS-1260 example in the rule split over two lines, so the replay (which hides lines naming the
+  ticket or a later one) cut it mid-sentence; it is on its own line now.
+- **Checked:** 315 tests pass; ruff clean on `replay.py`. Replays on the branch ($5.84):
+  - DSS-1260: no DFR; it explains why six bins can't be calculated and gives fewer bins or one
+    bin, as Abhi did.
+  - DSS-1095 (two runs): no DFR either time. Both summaries name the radial tracks the analyst
+    asked about.
+  - DSS-1238 and DSS-1256 still ask for a DFR, as they should.
+  - DSS-1258 (after rewording "rules it out" to "shows it can't work"): still asks for a DFR,
+    as Product approved one.
+  - DSS-1081 (two runs): both summaries keep the error code and drop "table export". The
+    2026-11-17 summary was run-to-run variation, not a rule.
+  - DSS-1191 (two runs) splits. One read the Masks folder and pointed at the VizApp suppression
+    (close to Annika's answer). The other used its 40 calls elsewhere, never read the mask, and
+    proposed a Cerberus bug (np.max vs nanmax) that Annika marked overclaimed on 2026-11-12.
+- **Not done / open:**
+  - DSS-1191 is unstable either way; one ticket, so no rule yet.
+  - DSS-1095 still misses that the radii and curves calipers came from different folders.
+  - Not merged: the PR waits for the owners.
+
 ### 2026-11-18 (evening): code checks cited evidence against the trace (Vincent, with Claude)
 - **Why:** Vincent's goal: a model only where reasoning is needed, scripts for the rest. On 20
   saved runs (24 tool calls, 26 turns a run), nothing checked that cited evidence was read, and

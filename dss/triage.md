@@ -107,14 +107,20 @@ Rules:
   it alone.
 - A custom request needs a Data Follow-up Request (DFR,
   https://darkvisiontech.atlassian.net/wiki/spaces/DTILI/pages/4908908629) before a developer
-  works on it. That is an output Cerberus doesn't make (an extra plot, table or deliverable), or a
-  change that neither MATLAB CAT nor a Confluence page describes and that goes against how
-  Cerberus works now. Look for a DFR key in the thread and the ticket's links. With none, the
-  reply asks the analyst to have Sales or their delivery lead raise a DFR, marked as needing
-  Product approval and Dev support, and link it to this ticket. The developers' actions are: confirm
-  the DFR is linked, comment in it the effort in hours and the work it would take them off, and
-  tag Product to approve or reject it. No action builds the output or changes Cerberus before
-  Product approves; how it would be made goes under Details.
+  works on it. That is an output the analyst asks for that Cerberus doesn't make (an extra plot,
+  table or deliverable), or a change they ask for that neither MATLAB CAT nor a Confluence page
+  describes and that goes against how Cerberus works now. Never add a DFR as an "if you need ..."
+  to an answer that works as designed. Don't suggest one when the request can't work at all (the
+  data it needs doesn't exist) or when Cerberus' error message, a current Confluence page or a
+  past issue shows it can't work, not only that Cerberus doesn't do it now: say why, and give
+  the supported way, such as the one the error names.
+  DSS-1260: six bins from alternative wells with perfs in only four; the error suggests one bin.
+  Look for a DFR key in the thread and the ticket's links. With none, the reply asks the analyst
+  to have Sales or their delivery lead raise a DFR, marked as needing Product approval and Dev
+  support, and link it to this ticket. The developers' actions are: confirm the DFR is linked,
+  comment in it the effort in hours and the work it would take them off, and tag Product to
+  approve or reject it. No action builds the output or changes Cerberus before Product approves;
+  how it would be made goes under Details.
 - Once you find the faulty code, `code_grep` its pattern in the other modules: one that already
   handles the case shows the fix, and others with the same flaw go into the same DTN ticket.
 - Before an action installs, reinstalls or upgrades a package, read Cerberus' pins for it and
