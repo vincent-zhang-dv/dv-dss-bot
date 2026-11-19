@@ -1,5 +1,37 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-19 (evening): plain writing for the analyst, replies in the sender's voice (Vincent, with Claude)
+- **Why:** Phase 6 of the Reply Quality Tracker (developer-ready replies). Of 18 rated replies, 8
+  were Correct, 9 Partial and 1 Incorrect. Besides wrong causes, reviewers deleted detail nobody
+  asked for ("not your plugs") and added an owned next step ("I will fix it and rerun it for
+  you"). Abhi proposed simple-English rules (ASD-STE100); the bot's replies averaged 22 words a
+  sentence against 19.5 in the reviewers' rewrites.
+- **Done** (branch `reply-style`):
+  - `triage_record.md`: "Writing for the analyst" covers the summary, the analyst's actions and
+    the reply. It asks for short sentences (20 words in a step, 25 elsewhere), steps that start
+    with a verb, conditions first, active voice, exact paths and numbers, and nothing the
+    analyst doesn't need to act on. The developers' thread stays technical.
+  - The reply speaks as the developer who approves and sends it ("I"). It gives the verdict, the
+    cause with its numbers, and ends with the next step and who takes it. Three examples come
+    from known causes of tickets outside the replay set.
+  - Schema: the reply may have 4 sentences (was 3). For a Cerberus bug it says the developer
+    will fix it and regenerate the output (was "promise no other work").
+  - `triage.md`: the DFR rule bans only a DFR the analyst didn't ask for. The wording merged in
+    PR #23 also blocked DSS-1238's DFR, which Vincent's rewrite asks for.
+- **Checked:** 315 tests pass. Seven replays of tickets whose latest reply was rated Partial or
+  Incorrect ($6.31):
+  - Sentences went from 22.2 to 17.3 words on average; 9 of 25 were over 25 words, now 2 of 23.
+  - DSS-1239 and DSS-1236 now read like Vincent's rewrites; DSS-1249 no longer calls it a bug.
+  - DSS-1191 lost its fix (remove the suppression, re-export, rerun), and DSS-1238 lost its DFR.
+  - After the 4-sentence and DFR fixes, three more replays ($2.57): DSS-1238 ends with the DFR as
+    in Vincent's rewrite; DSS-1095 has no DFR and says "I'm checking your radius caliper";
+    DSS-1191 still gives no fix and no analyst step (it calls the empty splines intended and
+    doesn't say they were suppressed).
+- **Not done / open:**
+  - No code check counts sentence length yet. Add one if the rule stops holding.
+  - DSS-1249 still doesn't cite the LAS SOP page, and DSS-1081 still names Zscaler.
+  - DSS-1191 stays unstable across runs: the investigation, not the writing, decides its fix.
+
 ### 2026-11-19: narrower DFR rule, replay cap 40 (Vincent, with Claude)
 - **Why:** Annika's ratings of the 2026-11-17 replays had four sections worse than on
   2026-11-12 and one better. DSS-1095 added an "if you need ..., raise a DFR" to a

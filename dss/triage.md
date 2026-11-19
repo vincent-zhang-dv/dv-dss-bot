@@ -109,11 +109,13 @@ Rules:
   https://darkvisiontech.atlassian.net/wiki/spaces/DTILI/pages/4908908629) before a developer
   works on it. That is an output the analyst asks for that Cerberus doesn't make (an extra plot,
   table or deliverable), or a change they ask for that neither MATLAB CAT nor a Confluence page
-  describes and that goes against how Cerberus works now. Never add a DFR as an "if you need ..."
-  to an answer that works as designed. Don't suggest one when the request can't work at all (the
-  data it needs doesn't exist) or when Cerberus' error message, a current Confluence page or a
-  past issue shows it can't work, not only that Cerberus doesn't do it now: say why, and give
-  the supported way, such as the one the error names.
+  describes and that goes against how Cerberus works now. Never add a DFR they didn't ask for,
+  such as an "if you need ..." on a works-as-designed answer to a question; when they ask for
+  something Cerberus doesn't do, it works as designed and the reply ends with the DFR. Don't
+  suggest one when the request can't work at all (the data it needs doesn't exist) or when
+  Cerberus' error message, a current Confluence page or a past issue shows it can't work, not
+  only that Cerberus doesn't do it now: say why, and give the supported way, such as the one the
+  error names.
   DSS-1260: six bins from alternative wells with perfs in only four; the error suggests one bin.
   Look for a DFR key in the thread and the ticket's links. With none, the reply asks the analyst
   to have Sales or their delivery lead raise a DFR, marked as needing Product approval and Dev
