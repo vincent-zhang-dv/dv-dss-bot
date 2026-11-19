@@ -36,7 +36,7 @@ from dss import code, cutoff, jira, record, slack, thread, triage
 from dss.worker import ROOT
 
 REPLAY_DIR = ROOT / 'out' / 'replay'  # a folder per day; never out/answers, which the bot reads
-MAX_CALLS = 30  # tool calls per replay, about the 90th percentile of a triage's turns
+MAX_CALLS = 40  # tool calls per replay, then the tools tell Claude to answer with what it has
 MAX_COST_USD = 1.50  # claude stops a replay here: over 5 times a median triage
 TEST_CHANNEL = 'C0CF1J345EY'  # #data-dev-support-assist-test
 POST_WINDOW = timedelta(hours=1)  # the workflow post is looked for this long around the ticket
