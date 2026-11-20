@@ -489,6 +489,7 @@ def test_the_push_history_is_kept_and_only_new_activity_is_asked(monkeypatch):
 	assert code.push_history(datetime(2026, 1, 1, tzinfo=UTC)) == kept and asked == []
 	assert len(code.push_history()) == 2 and asked == ['week']  # only what came since, once each
 	assert json.loads(code.ACTIVITY_FILE.read_text(encoding='utf-8'))[-1][1] == 'refs/heads/DTN-9'
+	assert not code.ACTIVITY_FILE.with_suffix('.tmp').exists()
 
 	def down(period):
 		raise RuntimeError('gh is not logged in')
