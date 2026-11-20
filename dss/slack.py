@@ -3,11 +3,13 @@
 When a support-request workflow posts "created DSS-…" in the channel, Claude triages the ticket as
 a checked record (:func:`dss.record.trial`). The decision is posted to DSS_SLACK_POST_CHANNEL (the
 developers' channel), else to the reviewer's DM (DSS_SLACK_REVIEWER), with the proof in a thread
-under it. Nothing is ever posted in the watched channel. The triage starts TRIAGE_DELAY_S after
-the post, so the thread it reads (`slack_thread`) holds the workflow's screenshot. The bot runs on
-the reviewer's PC under their `claude` login (Socket Mode: no public URL). On start it also
-triages the tickets of the last CATCH_UP_S that have no saved answer, because Slack does not
-resend events missed while the bot was down.
+under it. Nothing is ever posted in the watched channel. A post with a draft reply has an "Edit &
+copy draft" button: a pop-up with the draft to edit and copy into the DSS thread, where the
+developer posts it themselves. The triage starts TRIAGE_DELAY_S after the post, so the thread it
+reads (`slack_thread`) holds the workflow's screenshot. The bot runs on the reviewer's PC under
+their `claude` login (Socket Mode: no public URL). On start it also triages the tickets of the
+last CATCH_UP_S that have no saved answer, because Slack does not resend events missed while the
+bot was down.
 
 	set DSS_SLACK_BOT_TOKEN=xoxb-...  DSS_SLACK_APP_TOKEN=xapp-...  DSS_SLACK_POST_CHANNEL=C0...
 	python -m dss slack
@@ -17,6 +19,7 @@ Slack hands each event to one of an app's open connections, so only one bot may 
 Copied from dv-auto-setup-agent `assistant/slack.py` (commit b3f182e), triage part only.
 """
 
+import json
 import logging
 import os
 import re
@@ -43,6 +46,9 @@ LABEL = 'Draft by Claude'  # starts the post's footer, before what the triage co
 REVIEW_PAGE = 'https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt'  # DSS Bot Review; #<key> opens it
 REVIEW_TEXT = "Please review the bot's report"  # a button: a link would get its own preview
 BUTTON_ACTION = 'open_link'  # a link button still sends its click to the app
+COPY_TEXT = 'Edit & copy draft'
+COPY_ACTION = 'edit_copy'
+COPY_VIEW = 'copy_draft'  # the pop-up's callback id
 MARKDOWN_LINK = re.compile(r'\[([^\]\n]*)\]\([^)\s]*\)')
 
 log = logging.getLogger(__name__)
@@ -148,8 +154,37 @@ class SlackDesk:
 		for name in ('problems', 'tokens', 'cost_usd', 'seconds', 'turns'):
 			saved[name] = result[name]
 		self.store.put(channel, ts, saved)
-		decision = self._post(result['dm'], button=(REVIEW_TEXT, f'{REVIEW_PAGE}#{key}'))
+		review = (REVIEW_TEXT, f'{REVIEW_PAGE}#{key}')
+		decision = self._post(result['dm'], button=review, copy=(key, draft(result)))
 		self._post(result['thread'], thread_ts=decision)
+
+	def open_copy(self, body: dict) -> None:
+		"""The "Edit & copy draft" click: the draft in a pop-up, to edit and copy; Slack buttons
+		cannot write to the clipboard."""
+		draft_reply = json.loads(body['actions'][0]['value'])
+		how = 'Edit it here, then Ctrl+A and Ctrl+C, and paste it in the DSS thread yourself.'
+		view = {
+			'type': 'modal',
+			'callback_id': COPY_VIEW,
+			'title': {'type': 'plain_text', 'text': f'Draft reply · {draft_reply["ticket"]}'},
+			'submit': {'type': 'plain_text', 'text': 'Done'},
+			'close': {'type': 'plain_text', 'text': 'Cancel'},
+			'blocks': [
+				{
+					'type': 'input',
+					'block_id': 'reply',
+					'label': {'type': 'plain_text', 'text': 'Reply to the analyst'},
+					'element': {
+						'type': 'plain_text_input',
+						'action_id': 'text',
+						'multiline': True,
+						'initial_value': draft_reply['reply'],
+					},
+				},
+				{'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': how}]},
+			],
+		}
+		self.client.views_open(trigger_id=body['trigger_id'], view=view)
 
 	def catch_up(self) -> None:
 		"""Triage tickets posted while the bot was down; Slack does not resend those events.
@@ -183,21 +218,34 @@ class SlackDesk:
 		except Exception:  # noqa: BLE001 - a link is a convenience
 			return f'https://slack.com/archives/{channel}/p{ts.replace(".", "")}'
 
-	def _post(self, text: str, thread_ts: str = '', button: tuple[str, str] | None = None) -> str:
+	def _post(
+		self,
+		text: str,
+		thread_ts: str = '',
+		button: tuple[str, str] | None = None,
+		copy: tuple[str, str] | None = None,
+	) -> str:
 		"""*text* (Markdown) to the destination, in the thread *thread_ts* when given; its ts."""
 		if self.destination in (self.channel, CHANNEL):  # checked at start too; never post there
 			raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
-		return post(self.client, self.destination, text, thread_ts, button)
+		return post(self.client, self.destination, text, thread_ts, button, copy)
 
 
 def post(
-	client, to: str, text: str, thread_ts: str = '', button: tuple[str, str] | None = None
+	client,
+	to: str,
+	text: str,
+	thread_ts: str = '',
+	button: tuple[str, str] | None = None,
+	copy: tuple[str, str] | None = None,
 ) -> str:
 	"""*text* (Markdown) to the channel or DM *to*, in the thread *thread_ts* when given; its ts.
 
 	Never to #data-dev-support or the watched channel. Slack previews the link to the DSS post and
 	no Jira or GitHub link. unfurl_links stays at Slack's default: False hides the DSS post's
 	preview too. *button* (label, url) adds a link button under the text; it gets no preview.
+	*copy* (ticket, draft reply) adds the "Edit & copy draft" button when the draft is not empty;
+	the button carries both, so its pop-up needs no saved file.
 	"""
 	if to in (watched_channel(), CHANNEL):
 		raise RuntimeError('analyses never go to #data-dev-support or the watched channel')
@@ -208,14 +256,33 @@ def post(
 		'blocks': [{'type': 'markdown', 'text': text[:MARKDOWN_CHARS]}],
 		'unfurl_media': False,
 	}
+	elements = []
 	if button:
 		label, url = button
 		element = {'type': 'button', 'action_id': BUTTON_ACTION, 'url': url}
 		element['text'] = {'type': 'plain_text', 'text': label}
-		message['blocks'].append({'type': 'actions', 'elements': [element]})
+		elements.append(element)
+	if copy and copy[1]:
+		ticket, reply = copy
+		value = json.dumps(
+			{'ticket': ticket, 'reply': reply}, ensure_ascii=False
+		)  # under 2000 chars
+		element = {'type': 'button', 'action_id': COPY_ACTION, 'value': value}
+		element['text'] = {'type': 'plain_text', 'text': COPY_TEXT}
+		elements.append(element)
+	if elements:
+		message['blocks'].append({'type': 'actions', 'elements': elements})
 	if thread_ts:
 		message['thread_ts'] = thread_ts
 	return client.chat_postMessage(**message)['ts']
+
+
+def draft(result: dict) -> str:
+	"""The reply to the analyst in a trial *result*; '' when the record failed its checks or the
+	replay stopped."""
+	if result.get('problems') or not result.get('record'):
+		return ''
+	return result['record']['triage'].get('reply') or ''
 
 
 def watched_channel() -> str:
@@ -236,6 +303,13 @@ def build_app(store: AnswerStore, to: str):
 	desk = SlackDesk(app.client, to, store, watched_channel())
 	app.event('message')(lambda event: desk.on_message(event))
 	app.action(BUTTON_ACTION)(lambda ack: ack())  # the button only opens its link
+
+	@app.action(COPY_ACTION)
+	def open_copy(ack, body):
+		ack()
+		desk.open_copy(body)
+
+	app.view(COPY_VIEW)(lambda ack: ack())  # Done only closes the pop-up
 	return app, desk
 
 

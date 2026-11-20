@@ -1,5 +1,21 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-20: "Edit & copy draft" button; repo clean-up (Vincent, with Claude)
+- **Why:** Tim suggested approving or editing the drafted reply from a button. Sending it as the
+  developer needs the user scope `chat:write`, and any new scope waits for a workspace admin, so
+  that path (branch `approve-send`, not merged) is parked. Copy and paste needs no new scope and
+  keeps the rule that the bot never posts in DSS threads.
+- **Done** (branch `copy-draft`):
+  - A post whose record passed its checks gets an "Edit & copy draft" button beside the review
+    button. It opens a pop-up with the Draft Reply to edit and copy; the developer posts it in
+    the DSS thread themselves. The button carries the ticket and the draft (at most 700
+    characters), so the pop-up reads no saved file. Replays posted with `--post-test` get it too.
+  - Clean-up: removed the unused frontend-design skill, merged branches and stale worktrees.
+- **Checked:** `test_slack.py` and `test_replay.py` pass (75). A live click needs the bot
+  restarted on this code.
+- **Not done / open:** `approve-send` (send as the developer, needs the admin-approved scope and
+  Annika's agreement on the DSS rule).
+
 ### 2026-11-19 (evening): plain writing for the analyst, replies in the sender's voice (Vincent, with Claude)
 - **Why:** Phase 6 of the Reply Quality Tracker (developer-ready replies). Of 18 rated replies, 8
   were Correct, 9 Partial and 1 Incorrect. Besides wrong causes, reviewers deleted detail nobody
