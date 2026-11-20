@@ -1101,6 +1101,7 @@ def test_the_command_shows_its_plan_or_runs_and_posts_only_to_the_test_channel(
 	assert [post['channel'] for post in posts] == [replay.TEST_CHANNEL, replay.TEST_CHANNEL]
 	first = [method for method, _ in client.calls].index('chat_postMessage') + 1
 	assert 'thread_ts' not in posts[0] and posts[1]['thread_ts'] == f'900.{first}'
+	assert len(posts[0]['blocks']) == 1  # a stopped replay has no draft, so no copy button
 	monkeypatch.setenv('DSS_SLACK_TEST_CHANNEL', slack.CHANNEL)
 	with pytest.raises(ValueError, match='never go to #data-dev-support'):
 		replay.main(['DSS-1234'], go=True, post_test=True, client=client, say=said.append)

@@ -87,7 +87,7 @@ def main(
 		results.append(result)
 		say(outcome(result))
 		if to and 'dm' in result:
-			posted = slack.post(client, to, result['dm'])
+			posted = slack.post(client, to, result['dm'], copy=(key, slack.draft(result)))
 			slack.post(client, to, result['thread'], thread_ts=posted)
 	if not go:
 		say('dry run: add --go to run them; each is a real triage under your Claude login')

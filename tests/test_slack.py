@@ -2,6 +2,7 @@
 client and a fake Claude."""
 
 import json
+import os
 import re
 import time
 
@@ -117,9 +118,12 @@ def test_a_new_ticket_is_triaged_as_a_record_and_posted_to_the_developers(tmp_pa
 	assert '\n\n_Draft by Claude · 1,234 tokens · ≈ $0.02 · ' in block['text']
 	assert block['text'].endswith(' s_')  # the footer ends the text
 	# the review page is a button: Slack gives a link in the text its own preview
-	(button,) = actions['elements']
+	button, copy = actions['elements']
 	assert button['text']['text'] == "Please review the bot's report"
 	assert button['url'] == 'https://claude.ai/artifact/E9iuWzrKfHo6iAxXLhvdwt#DSS-1234'
+	assert copy['text']['text'] == 'Edit & copy draft'
+	reply = {'ticket': 'DSS-1234', 'reply': EXAMPLE['triage']['reply']}
+	assert json.loads(copy['value']) == reply  # the pop-up needs no saved file
 	assert decision['unfurl_media'] is False and 'unfurl_links' not in decision
 	assert proof['thread_ts'] == '900.0' and proof['blocks'][0]['text'].startswith('**Why:** ')
 	assert len(proof['blocks']) == 1  # no button in the thread
@@ -266,3 +270,24 @@ def test_store_names_stay_inside_its_folder(tmp_path):
 	for channel, ts in (('..', '1.0'), (CHANNEL, '../1.0'), (CHANNEL, '1.0\\x')):
 		with pytest.raises(ValueError, match='not a Slack channel'):
 			store.get(channel, ts)
+
+
+def test_edit_and_copy_opens_the_draft_in_a_pop_up(tmp_path):
+	bot = desk(tmp_path)
+	bot.on_message(ticket())
+	button = bot.client.sent('chat_postMessage')[0]['blocks'][1]['elements'][1]
+	os.remove(bot.store.get(CHANNEL, '1792523850.5')['trial'])  # the click needs no saved file
+	bot.open_copy({'trigger_id': 'T1', 'actions': [button]})
+	(opened,) = bot.client.sent('views_open')
+	assert opened['trigger_id'] == 'T1'
+	assert opened['view']['title']['text'] == 'Draft reply · DSS-1234'
+	box = opened['view']['blocks'][0]['element']
+	assert box['initial_value'] == EXAMPLE['triage']['reply'] and box['multiline']
+	assert len(bot.client.sent('chat_postMessage')) == 2  # nothing posted for a copy
+
+
+def test_a_post_without_a_checked_draft_has_no_copy_button(tmp_path):
+	bot = desk(tmp_path, FakeClaude(answer='I could not finish the triage.'))
+	bot.on_message(ticket())
+	(review,) = bot.client.sent('chat_postMessage')[0]['blocks'][1]['elements']
+	assert review['action_id'] == slack.BUTTON_ACTION
