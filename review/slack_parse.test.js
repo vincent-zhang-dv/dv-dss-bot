@@ -20,6 +20,15 @@ const BOT = 'DDEV Support Bot <botuser-x@slack-bots.com> (U0CCHQUDX5E)';
 function message(from, ts, text) {
 	return `From: ${from}\nTime: 2027-01-15 09:00:00 MST\nMessage TS: ${ts}\n${text}`;
 }
+// as the connector now shows a read: '> ' before each line of each message body
+function quoted(read) {
+	const lines = [];
+	for (const line of read.split('\n')) {
+		const frame = line === '' || /^(From|Time|Message TS): |^(===|---) /.test(line);
+		lines.push(frame ? line : `> ${line}`);
+	}
+	return lines.join('\n');
+}
 function thread(parent, replies) {
 	let text = `=== THREAD PARENT MESSAGE ===\n${parent}\n\n=== THREAD REPLIES (${replies.length} total) ===\n`;
 	replies.forEach((reply, index) => {
@@ -36,6 +45,7 @@ const POST = [
 	'> Set the ID to 4.778 in the client info.',
 	'_Draft by Claude · 12,345 tokens · ≈ $0.21 · 42 s_',
 	"Please review the bot's report button",  // how the Slack connector shows the review button
+	'Edit &amp; copy draft button',
 	`Forwarded message from Data Support Request (${LINK}): <@UANA|ana> created DSS-9001`,
 ].join('\n');
 const PROOF = '*Why:* The tally says 4.778.\n*Evidence*\n1. Tally row 3 (`cerb_read_sheet:ACME`)\n*Confidence:* high';
@@ -96,7 +106,7 @@ test('a ticket keeps the post sections, the proof and the real thread', () => {
 	assert.strictEqual(post.reply, '**Draft Reply:**\n> Set the ID to 4.778 in the client info.');
 	assert.ok(post.footer.startsWith('_Draft by Claude'));
 	const all = JSON.stringify(ticket.post);
-	assert.ok(!all.includes('Please review') && !all.includes('Forwarded message'));
+	assert.ok(!all.includes('Please review') && !all.includes('copy draft') && !all.includes('Forwarded message'));
 	const proof = Object.fromEntries(ticket.thread.map((part) => [part.id, part.md]));
 	assert.deepStrictEqual(Object.keys(proof), ['why', 'past', 'evidence', 'confidence']);
 	assert.strictEqual(proof.past, null);
@@ -124,4 +134,15 @@ test('the page shows only tickets with Slack links and the parts it reads', () =
 
 test('a post missing from its thread is an error, not an empty ticket', () => {
 	assert.throws(() => parser.buildTicket(POST_INFO, [], []), /not in its thread/);
+});
+
+test('message bodies the connector quotes read as unquoted ones', () => {
+	const page = quoted(`=== Message from ${BOT} at 2027-01-15 09:00:00 MST === \nMessage TS: ${BOT_TS}\n${POST}\nThread: 2 replies (latest: 2027-01-15 09:10:00 MST)\n`);
+	assert.ok(page.includes('\n> *<https://'));
+	const [post] = parser.channelMessages([page]).map((item) => parser.botPost(item, parser.BOT_CHANNELS[0]));
+	assert.deepStrictEqual(post, { ...POST_INFO, latest: '2027-01-15 09:10:00 MST', channel: parser.BOT_CHANNELS[0] });
+	const plain = parser.buildTicket(POST_INFO, parser.threadMessages([BOT_THREAD]), parser.threadMessages([DSS_THREAD]));
+	const fromQuoted = parser.buildTicket(POST_INFO, parser.threadMessages([quoted(BOT_THREAD)]), parser.threadMessages([quoted(DSS_THREAD)]));
+	assert.ok(quoted(DSS_THREAD).includes('\n> it says *4.5*'));
+	assert.deepStrictEqual(fromQuoted, plain);
 });

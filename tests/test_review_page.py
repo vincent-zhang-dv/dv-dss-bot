@@ -34,8 +34,10 @@ def test_the_page_splits_a_post_at_the_headings_the_bot_writes():
 	assert re.search(r'^\*\*.* Todos:\*\*$', decision, re.MULTILINE)  # the analyst's todos, by name
 
 
-def test_the_page_leaves_out_the_review_link_the_bot_adds():
-	assert f'const REVIEW_LINK = "{slack.REVIEW_TEXT}";' in PAGE.read_text(encoding='utf-8')
+def test_the_page_leaves_out_the_buttons_the_bot_adds():
+	page = PAGE.read_text(encoding='utf-8')
+	assert f'const REVIEW_LINK = "{slack.REVIEW_TEXT}";' in page
+	assert f"const COPY_LINK = '{slack.COPY_TEXT}';" in page
 
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='the page parser tests need Node')

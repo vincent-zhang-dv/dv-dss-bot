@@ -1,5 +1,17 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-25: DSS Bot Review page reads the Slack connector's quoted output (Vincent, with Claude)
+- **Why:** the page showed only DSS-1256 to 1258. The Slack connector now puts `> ` before each
+  line of a message body, so the page no longer matched the bot's post header and skipped every
+  post after DSS-1258, with no error ("No new posts or replies").
+- **Done:** the page's parser takes the `> ` off a body when every line has it (channel and thread
+  reads), and leaves out the "Edit & copy draft button" line as it does the review button.
+  Republished to the review page (version 8).
+- **Checked:** `review/slack_parse.test.js` (new test on quoted output) and
+  `tests/test_review_page.py` pass; the parser finds DSS-1263 in the live channel output.
+- **Not done / open:** someone with Contributor access must press Refresh from Slack once to add
+  DSS-1259 to 1263.
+
 ### 2026-11-20: "Edit & copy draft" button; repo clean-up (Vincent, with Claude)
 - **Why:** Tim suggested approving or editing the drafted reply from a button. Sending it as the
   developer needs the user scope `chat:write`, and any new scope waits for a workspace admin, so

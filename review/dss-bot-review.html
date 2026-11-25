@@ -801,6 +801,7 @@ const OLDEST_TS = '1795015000';  // shortly before DSS-1256 was posted
 const SLACK_ZONE = 'America/Edmonton';
 const MAX_PAGES = 5;
 const REVIEW_LINK = "Please review the bot's report";
+const COPY_LINK = 'Edit & copy draft';
 const SLACK_LINK = 'https://darkvision.slack.com/';
 const BOT_HEAD = /^\*<https:\/\/darkvision\.slack\.com\/archives\/C0793LJ1KDM\/p(\d{10})(\d{6})[^|>]*\|(DSS-(\d+))>/;
 const POST_HEADS = [['**Bot Summary:**', 'summary'], ['**Data Dev Todos:**', 'dev_todos'], ['**Draft Reply:**', 'reply']];
@@ -833,6 +834,12 @@ function slackTime(ts) {
 		timeZone: SLACK_ZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 	});
 }
+/* A message body without the '> ' the connector may put before each of its lines */
+function unquote(text) {
+	const lines = text.split('\n');
+	if (!lines.every((line) => line === '' || line.startsWith('>'))) return text;
+	return lines.map((line) => line.replace(/^> ?/, '')).join('\n');
+}
 /* One message block: From, Time and Message TS lines, then its text, files and reactions */
 function slackMessage(block) {
 	const head = /^From: ?(.*)\nTime: .*\nMessage TS: (\d+\.\d+)\n?/.exec(block);
@@ -842,7 +849,7 @@ function slackMessage(block) {
 	const name = from.replace(/\s*\([A-Z0-9]+\)$/, '').replace(/\s*<[^>]*>$/, '').trim();
 	const files = [];
 	const lines = [];
-	for (const line of block.slice(head[0].length).split('\n')) {
+	for (const line of unquote(block.slice(head[0].length)).split('\n')) {
 		if (line.startsWith('Files: ')) {
 			for (const file of line.slice(7).matchAll(/\s*([^,]+?) \(ID: [^)]*\)/g)) files.push(file[1]);
 		} else if (!line.startsWith('Reactions: ')) {
@@ -875,7 +882,7 @@ function channelMessages(pages) {
 		for (let index = 0; index < starts.length; index++) {
 			const start = starts[index];
 			const end = index + 1 < starts.length ? starts[index + 1].index : page.length;
-			const text = page.slice(start.index + start[0].length, end);
+			const text = unquote(page.slice(start.index + start[0].length, end));
 			const id = /\(([A-Z0-9]+)\)$/.exec(start[1].trim())?.[1] || '';
 			const latest = /^Thread: \d+ repl(?:y|ies) \(latest: (.+)\)$/m.exec(text)?.[1] || '';
 			found.push({ id, ts: start[2], text, latest });
@@ -895,7 +902,7 @@ function splitSections(text, heads, first) {
 	const found = {};
 	let current = first || '';
 	for (const line of text.split('\n')) {
-		if (line.includes(REVIEW_LINK)) continue;
+		if (line.includes(REVIEW_LINK) || line.includes(COPY_LINK)) continue;
 		let started = '';
 		for (const [head, name] of heads) {
 			if (line.startsWith(head)) started = name;
