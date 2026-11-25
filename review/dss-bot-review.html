@@ -514,7 +514,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; width: 6
 	</div>
 </header>
 <div class="wrap notice" id="notice">
-	<span><b>Live DSS tickets.</b> Each DSS ticket the bot has posted in the assist channels since DSS-1256, beside its real DSS thread. Refresh from Slack reads new posts and replies with your Slack connector, for everyone. The page holds client and project details: keep it within the team.</span>
+	<span><b>Live DSS tickets.</b> Each DSS ticket the bot has posted in the assist channels since DSS-1256, beside its real DSS thread. Refresh from Slack reads new posts and replies with your Slack connector, for everyone; once you have allowed Slack for this page, opening it refreshes too. The page holds client and project details: keep it within the team.</span>
 	<span id="mode-note"></span>
 </div>
 <main class="wrap">
@@ -800,6 +800,7 @@ const FIRST_DSS = 1256;
 const OLDEST_TS = '1795015000';  // shortly before DSS-1256 was posted
 const SLACK_ZONE = 'America/Edmonton';
 const MAX_PAGES = 5;
+const AUTO_REFRESH_MS = 10 * 60 * 1000;  // opening the page refreshes it when the last refresh is older
 const REVIEW_LINK = "Please review the bot's report";
 const COPY_LINK = 'Edit & copy draft';
 const SLACK_LINK = 'https://darkvision.slack.com/';
@@ -1090,6 +1091,18 @@ async function refresh() {
 		state.sync = { ...state.sync, busy: false, error: true, text };
 	}
 	renderSync();
+}
+/* on open, without asking: only a viewer who has already allowed Slack for this page */
+async function autoRefresh() {
+	if (state.mode !== 'db' || !state.canWrite) return;
+	const permissions = await window.claude.use('permissions').catch(() => null);
+	if (!permissions) return;
+	const slack = await permissions.state(`mcp:${SLACK_SERVER}`).catch(() => 'unavailable');
+	if (slack !== 'granted') return;
+	const meta = await state.db.doc('meta/refresh').get().catch(() => null);
+	const last = Date.parse(meta?.data()?.at || '');
+	if (Date.now() - last < AUTO_REFRESH_MS) return;
+	refresh();
 }
 function renderSync() {
 	const button = document.getElementById('refresh-btn');
@@ -2375,6 +2388,7 @@ function onTickets(snapshot) {
 	rebuildSessions();
 	const first = !state.ticketsLoaded;
 	state.ticketsLoaded = true;
+	if (first) autoRefresh();
 	renderNav();
 	if (state.view === 'results') {
 		renderResults();

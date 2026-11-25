@@ -7,6 +7,10 @@
 - **Done:** the page's parser takes the `> ` off a body when every line has it (channel and thread
   reads), and leaves out the "Edit & copy draft button" line as it does the review button.
   Republished to the review page (version 8).
+- **Done:** opening the page refreshes it from Slack by itself when the viewer can write, has
+  already allowed Slack for the page (so opening never asks), and the last refresh is more than
+  10 minutes old. The refresh calls the Slack connector, not Claude, so it uses no tokens.
+  Version 9.
 - **Checked:** `review/slack_parse.test.js` (new test on quoted output) and
   `tests/test_review_page.py` pass; the parser finds DSS-1263 in the live channel output.
 - **Not done / open:** someone with Contributor access must press Refresh from Slack once to add
