@@ -514,7 +514,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; width: 6
 	</div>
 </header>
 <div class="wrap notice" id="notice">
-	<span><b>Live DSS tickets.</b> Each DSS ticket the bot has posted in the assist channels since DSS-1256, beside its real DSS thread. Refresh from Slack reads new posts and replies with your Slack connector, for everyone. The page holds client and project details: keep it within the team.</span>
+	<span><b>Live DSS tickets.</b> Each DSS ticket the bot has posted in the assist channels since DSS-1256, beside its real DSS thread. Refresh from Slack reads new posts and replies with your Slack connector, for everyone; once you have allowed Slack for this page, opening it refreshes too. The page holds client and project details: keep it within the team.</span>
 	<span id="mode-note"></span>
 </div>
 <main class="wrap">
@@ -800,7 +800,9 @@ const FIRST_DSS = 1256;
 const OLDEST_TS = '1795015000';  // shortly before DSS-1256 was posted
 const SLACK_ZONE = 'America/Edmonton';
 const MAX_PAGES = 5;
+const AUTO_REFRESH_MS = 10 * 60 * 1000;  // opening the page refreshes it when the last refresh is older
 const REVIEW_LINK = "Please review the bot's report";
+const COPY_LINK = 'Edit & copy draft';
 const SLACK_LINK = 'https://darkvision.slack.com/';
 const BOT_HEAD = /^\*<https:\/\/darkvision\.slack\.com\/archives\/C0793LJ1KDM\/p(\d{10})(\d{6})[^|>]*\|(DSS-(\d+))>/;
 const POST_HEADS = [['**Bot Summary:**', 'summary'], ['**Data Dev Todos:**', 'dev_todos'], ['**Draft Reply:**', 'reply']];
@@ -833,6 +835,12 @@ function slackTime(ts) {
 		timeZone: SLACK_ZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 	});
 }
+/* A message body without the '> ' the connector may put before each of its lines */
+function unquote(text) {
+	const lines = text.split('\n');
+	if (!lines.every((line) => line === '' || line.startsWith('>'))) return text;
+	return lines.map((line) => line.replace(/^> ?/, '')).join('\n');
+}
 /* One message block: From, Time and Message TS lines, then its text, files and reactions */
 function slackMessage(block) {
 	const head = /^From: ?(.*)\nTime: .*\nMessage TS: (\d+\.\d+)\n?/.exec(block);
@@ -842,7 +850,7 @@ function slackMessage(block) {
 	const name = from.replace(/\s*\([A-Z0-9]+\)$/, '').replace(/\s*<[^>]*>$/, '').trim();
 	const files = [];
 	const lines = [];
-	for (const line of block.slice(head[0].length).split('\n')) {
+	for (const line of unquote(block.slice(head[0].length)).split('\n')) {
 		if (line.startsWith('Files: ')) {
 			for (const file of line.slice(7).matchAll(/\s*([^,]+?) \(ID: [^)]*\)/g)) files.push(file[1]);
 		} else if (!line.startsWith('Reactions: ')) {
@@ -875,7 +883,7 @@ function channelMessages(pages) {
 		for (let index = 0; index < starts.length; index++) {
 			const start = starts[index];
 			const end = index + 1 < starts.length ? starts[index + 1].index : page.length;
-			const text = page.slice(start.index + start[0].length, end);
+			const text = unquote(page.slice(start.index + start[0].length, end));
 			const id = /\(([A-Z0-9]+)\)$/.exec(start[1].trim())?.[1] || '';
 			const latest = /^Thread: \d+ repl(?:y|ies) \(latest: (.+)\)$/m.exec(text)?.[1] || '';
 			found.push({ id, ts: start[2], text, latest });
@@ -895,7 +903,7 @@ function splitSections(text, heads, first) {
 	const found = {};
 	let current = first || '';
 	for (const line of text.split('\n')) {
-		if (line.includes(REVIEW_LINK)) continue;
+		if (line.includes(REVIEW_LINK) || line.includes(COPY_LINK)) continue;
 		let started = '';
 		for (const [head, name] of heads) {
 			if (line.startsWith(head)) started = name;
@@ -1083,6 +1091,18 @@ async function refresh() {
 		state.sync = { ...state.sync, busy: false, error: true, text };
 	}
 	renderSync();
+}
+/* on open, without asking: only a viewer who has already allowed Slack for this page */
+async function autoRefresh() {
+	if (state.mode !== 'db' || !state.canWrite) return;
+	const permissions = await window.claude.use('permissions').catch(() => null);
+	if (!permissions) return;
+	const slack = await permissions.state(`mcp:${SLACK_SERVER}`).catch(() => 'unavailable');
+	if (slack !== 'granted') return;
+	const meta = await state.db.doc('meta/refresh').get().catch(() => null);
+	const last = Date.parse(meta?.data()?.at || '');
+	if (Date.now() - last < AUTO_REFRESH_MS) return;
+	refresh();
 }
 function renderSync() {
 	const button = document.getElementById('refresh-btn');
@@ -2368,6 +2388,7 @@ function onTickets(snapshot) {
 	rebuildSessions();
 	const first = !state.ticketsLoaded;
 	state.ticketsLoaded = true;
+	if (first) autoRefresh();
 	renderNav();
 	if (state.view === 'results') {
 		renderResults();
