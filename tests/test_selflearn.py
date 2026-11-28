@@ -185,3 +185,10 @@ def test_cli_check_fails_on_a_bad_review(answers, monkeypatch, capsys):
 	with pytest.raises(SystemExit):
 		cli.main()
 	assert f'key and run must be DSS-9001 and its bundle run {POST_TS}' in capsys.readouterr().out
+
+
+def test_an_answer_saved_before_trial_records_is_skipped(answers):
+	old = answers.parent / 'answers' / f'C0793LJ1KDM_{float(DSS_TS) - 60:.6f}.json'
+	old.write_text(json.dumps({'ticket': 'DSS-9000', 'posted': '2030-03-12'}), encoding='utf-8')
+	lines = selflearn.gather(answers, NOW, FakeSlack([said_by('UDEV', 4, 'fixed')], []))
+	assert lines == [f'DSS-9001: due, {answers / "self" / "DSS-9001.json"}']

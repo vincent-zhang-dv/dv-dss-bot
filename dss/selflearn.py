@@ -58,7 +58,6 @@ def gather(export: Path, now: float | None = None, client=None) -> list[str]:
 		dss = said(client, names, slack.CHANNEL, record['thread_ts'], raised_by=True)
 		bot = [line for line in said(client, names, channel, posts[key]) if line['role'] != 'bot']
 		replies = [line for line in dss + bot if line['role'] in ('analyst', 'helper')]
-		replies = [line for line in replies if float(line['ts']) > float(record['thread_ts'])]
 		latest = max((float(line['ts']) for line in replies), default=0.0)
 		if not any(line['role'] == 'helper' for line in dss):
 			lines.append(f'{key}: skipped, nobody but the analyst replied in the DSS thread')
