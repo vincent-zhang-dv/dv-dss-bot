@@ -1,5 +1,33 @@
 # Status (newest first; add an entry per work session)
 
+### 2026-11-27: self-learning from the developers' Slack replies, a weekly run (Vincent, with Claude)
+- **Why:** developers seldom fill in the review page; they answer in the DSS thread and talk under
+  the bot's post. Vincent's choices: run on his PC, draft and test fixes on their own, keep the
+  lessons on the page, learn from a thread once it has been quiet for 2 days.
+- **Done** (branch `self-learning`):
+  - `python -m dss selflearn <export>`: each ticket the bot answered in the last 4 weeks
+    (`out/answers`), with both Slack threads read by the bot token (GETs only), written to
+    `<export>/self/DSS-<n>.json` when someone other than the analyst replied, both threads are
+    quiet for 2 days and no person rated it on the page. `--check` checks the reviews the run
+    writes as the page checks a person's.
+  - `dss learn` counts self-learned reviews (`source: self-learning`) beside submitted ones; their
+    golden rows say so.
+  - Review page: self-learned ratings show a 🤖 face, the basis and "no developer check yet"; a
+    developer's rating replaces the bot's. Results lists the lessons (`lessons/<id>`).
+  - `dss-learn` skill rewritten as the weekly run: export, self-learn, digest, lessons, fix in a
+    worktree for a problem on two tickets or once when harmful, replay, commit locally, DM Vincent
+    at most five lines. Windows task "DSS weekly learning" (Mondays 7:30) runs it headless from
+    `%USERPROFILE%\dss-weekly-learn\run.ps1`.
+- **Checked:** `test_learn.py`, `test_selflearn.py`, `test_review_page.py` and the page parser
+  tests pass. `selflearn` on live data found 7 due tickets (DSS-1257 to 1264, not 1262, which has a
+  person's review). A headless dry run wrote 7 reviews that pass `--check`, 5 lessons (none repeated
+  yet) and the message "Nothing to change this week"; it wrote nothing to the page or Slack.
+- **Not done / open:**
+  - The page's `lessons` and self-learned reviews are first written on the first live run.
+  - `learn.plain()` drops a whole bot headline (`**[DSS-n](…) · … · likely**` matches the label
+    pattern), so a headline rated Correct gives no golden outcome. Left as is; ask Vincent.
+  - Old per-reviewer document `reviews/u_….DSS-1256` is still in the page's database.
+
 ### 2026-11-25: DSS Bot Review page reads the Slack connector's quoted output (Vincent, with Claude)
 - **Why:** the page showed only DSS-1256 to 1258. The Slack connector now puts `> ` before each
   line of a message body, so the page no longer matched the bot's post header and skipped every

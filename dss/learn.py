@@ -2,10 +2,12 @@
 
 *export* is the page's database as files, one JSON document each: `<export>/reviews/DSS-<n>.json`
 and `<export>/tickets/DSS-<n>.json`, as Claude Code's ArtifactData `list` with `out_dir` saves
-them. Each submitted review becomes a golden row for `dss eval` in out/eval/golden_reviews.jsonl
-(git-ignored: it holds client data), and the digest says what the reviewers corrected: the reasons
-by ticket count, the ones worth a fix (given on two or more tickets, or a post marked harmful), and
-each ticket's corrections. Reads and writes local files only.
+them. Each submitted review, and each review the weekly run inferred from the developers' Slack
+replies (`source` SELF, :mod:`dss.selflearn`), becomes a golden row for `dss eval` in
+out/eval/golden_reviews.jsonl (git-ignored: it holds client data), and the digest says what the
+reviewers corrected: the reasons by ticket count, the ones worth a fix (given on two or more
+tickets, or a post marked harmful), and each ticket's corrections. Reads and writes local files
+only.
 """
 
 import json
@@ -17,6 +19,7 @@ from dss.worker import ROOT
 
 GOLDEN = ROOT / 'out' / 'eval' / 'golden_reviews.jsonl'
 REPEATED = 2  # a reason given on this many tickets is worth a fix
+SELF = 'self-learning'  # `by` and `source` of what the weekly run writes from the Slack replies
 # the page's rated sections and reasons (review/dss-bot-review.html SECTIONS, TAGS, ACTS)
 SECTIONS = {
 	'headline': 'Headline and status',
@@ -97,17 +100,25 @@ def posted(ticket: dict) -> str:
 	return created.astimezone().strftime('%Y-%m-%d_%H-%M-%S')
 
 
+def counted(review: dict) -> bool:
+	"""Whether *review* teaches: a person submitted it, or the weekly run wrote it."""
+	return bool(review.get('submittedAt')) or review.get('source') == SELF
+
+
 def golden_row(review: dict, ticket: dict) -> dict | None:
-	"""The golden row of a submitted *review*; None when it gives no outcome."""
+	"""The golden row of a counted *review*; None when it gives no outcome."""
 	cause = outcome(review, ticket)
 	if not cause:
 		return None
-	submitted = review['submittedAt'][:10]
+	if review.get('submittedAt'):
+		source = f'DSS Bot Review page, submitted {review["submittedAt"][:10]}'
+	else:
+		source = f'{SELF} from the Slack replies, {(review.get("updatedAt") or "")[:10]}'
 	return {
 		'key': review['key'],
 		'posted': posted(ticket),
 		'outcome': cause,
-		'source_of_truth': f'DSS Bot Review page, submitted {submitted}',
+		'source_of_truth': source,
 	}
 
 
@@ -122,8 +133,8 @@ def reasons(rating: dict) -> list[str]:
 def digest(
 	reviews: dict[str, dict], tickets: dict[str, dict], written: str, skipped: list[str]
 ) -> list[str]:
-	"""What the submitted reviews say, for the person or session drafting fixes."""
-	submitted = {key: review for key, review in reviews.items() if review.get('submittedAt')}
+	"""What the counted reviews say, for the person or session drafting fixes."""
+	submitted = {key: review for key, review in reviews.items() if counted(review)}
 	counts = {'correct': 0, 'partial': 0, 'incorrect': 0}
 	by_reason: dict[str, set[str]] = {}
 	harmful = []
@@ -131,6 +142,8 @@ def digest(
 	for key, review in sorted(submitted.items()):
 		overall = review.get('overall') or {}
 		head = f'{key} · would act on it: {ACTS.get(overall.get("act"), "not answered")}'
+		if not review.get('submittedAt'):
+			head += f' · {SELF}'
 		if overall.get('harmful'):
 			head += ' · HARMFUL'
 			harmful.append(f'{key}: {(overall.get("note") or "").strip() or "no note"}')
@@ -154,7 +167,10 @@ def digest(
 			)
 		corrections.append(lines)
 	out = [
-		f'Reviews: {len(submitted)} submitted of {len(reviews)}; {len(tickets)} tickets on the page',
+		(
+			f'Reviews: {len(submitted)} submitted or self-learned of {len(reviews)}; '
+			f'{len(tickets)} tickets on the page'
+		),
 		f'Sections: correct {counts["correct"]} · partial {counts["partial"]} · incorrect {counts["incorrect"]}',
 		f'Golden rows: {written}',
 	]
@@ -182,14 +198,14 @@ def digest(
 
 
 def run(export: Path, golden: Path | None = None) -> list[str]:
-	"""Write the golden rows of every submitted review in *export* to *golden* (GOLDEN by
+	"""Write the golden rows of every counted review in *export* to *golden* (GOLDEN by
 	default), replacing what it held, and return the digest."""
 	golden = golden or GOLDEN
 	reviews, tickets = load(export)
 	rows = []
 	skipped = []
 	for key, review in sorted(reviews.items()):
-		if not review.get('submittedAt'):
+		if not counted(review):
 			continue
 		row = golden_row(review, tickets[key]) if key in tickets else None
 		if row is None:
