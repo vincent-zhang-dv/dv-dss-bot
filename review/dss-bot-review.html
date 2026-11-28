@@ -553,6 +553,7 @@ const TICKETS = DATA.tickets;
 const SESSIONS = [];  // the viewer, then everyone else who has rated: see rebuildSessions
 const TICKET_BY_KEY = {};
 const LOCAL = 'local';  // the viewer's session before their account is known
+const SELF_LEARNING = 'self-learning';  // `by` of what the weekly run writes (dss.learn.SELF)
 
 const SECTIONS = {
 	headline: {
@@ -657,6 +658,7 @@ const state = {
 	pane: 'thread',
 	sheet: false,
 	reviews: {},
+	lessons: {},
 	ui: {},
 	me: { id: null, name: '', avatar: '' },
 	mySession: LOCAL,
@@ -1136,6 +1138,7 @@ function sessionTickets(id) {
 function nameOf(id) {
 	if (!id) return '';
 	if (id === LOCAL) return 'You';
+	if (id === SELF_LEARNING) return 'Self-learning (bot)';
 	return state.names[id] || 'Someone';
 }
 /* the one session: the viewer, over every ticket; the review itself is shared */
@@ -1155,6 +1158,7 @@ function namedPeople() {
 	ids.delete(undefined);
 	ids.delete(null);
 	ids.delete(LOCAL);
+	ids.delete(SELF_LEARNING);
 	return ids;
 }
 async function resolveNames() {
@@ -1182,7 +1186,8 @@ async function resolveNames() {
 }
 function avatar(id, name) {
 	const url = state.avatars[id];
-	const face = url ? `<img src="${esc(url)}" alt="">` : esc(initials(name));
+	let face = url ? `<img src="${esc(url)}" alt="">` : esc(initials(name));
+	if (id === SELF_LEARNING) face = '🤖';
 	return `<span class="av" aria-hidden="true">${face}</span>`;
 }
 /* everyone who gave a rating on *ticket*'s review, in order, and who submitted it */
@@ -1206,6 +1211,11 @@ function raters(ticket) {
 function ratersRow(ticket) {
 	const list = raters(ticket);
 	if (!list.length) return '<p class="revs" id="revs">No reviews yet</p>';
+	const review = reviewOf(state.session, ticket.key);
+	let learned = '';
+	if (review?.source === SELF_LEARNING) {
+		learned = `<p class="means">🤖 Self-learning wrote the ratings marked with the robot from the developers' Slack replies (${esc(fmtDate(review.updatedAt))}). A rating you give replaces its rating. Based on: ${esc(review.basis || '')}</p>`;
+	}
 	let chips = '';
 	for (const person of list) {
 		const you = person.id === state.mySession ? ' (you)' : '';
@@ -1213,7 +1223,7 @@ function ratersRow(ticket) {
 		const title = person.done ? 'submitted the review' : 'gave ratings';
 		chips += `<span class="rev${person.done ? ' done' : ''}" title="${esc(title)}">${avatar(person.id, person.name)}${esc(person.name + you)}${mark}</span>`;
 	}
-	return `<div class="revs" id="revs"><span>Reviewed by</span>${chips}</div>`;
+	return `<div class="revs" id="revs"><span>Reviewed by</span>${chips}</div>${learned}`;
 }
 /* who gave section *id*'s rating, as a small face ringed in that rating's colour */
 function sectionFaces(ticket, id) {
@@ -1307,6 +1317,9 @@ function statusOf(sessionId, ticket) {
 	const review = reviewOf(sessionId, ticket.key);
 	if (review?.submittedAt) return { kind: 'done', text: 'Done' };
 	if (review?.firstSubmittedAt) return { kind: 'progress', text: 'Reopened, not resubmitted' };
+	if (review?.source === SELF_LEARNING && raters(ticket).every((person) => person.id === SELF_LEARNING)) {
+		return { kind: 'progress', text: '🤖 Self-learning, no developer check yet' };
+	}
 	const parts = ratedParts(ticket);
 	let rated = 0;
 	for (const part of parts) {
@@ -2047,6 +2060,23 @@ function timePanel() {
 		<p class="means">The bot's time is its run. The developers' time runs from their first reply in the real thread to their last: elapsed time, waits for the analyst included, not hours of work. Everyone who replied, other than the person who raised the ticket, counts as a developer here, so a manager's or a reviewer's reply counts too.</p>
 		${tiles}<div class="tbl-wrap"><table><thead><tr><th>Ticket</th><th class="dur">Bot</th><th class="dur">First developer reply, after the post</th><th class="dur">Developers, first reply to last</th><th class="dur">Developer replies</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
 }
+/* what the weekly run learned (lessons/<id>), from the developers' reviews and Slack replies */
+function lessonsPanel() {
+	const order = { watching: 0, 'fix drafted': 1, fixed: 2 };
+	const lessons = Object.values(state.lessons).sort((left, right) =>
+		(order[left.status] ?? 0) - (order[right.status] ?? 0) || (right.tickets?.length || 0) - (left.tickets?.length || 0));
+	let body = '';
+	for (const lesson of lessons) {
+		const tickets = (lesson.tickets || []).map((item) =>
+			`<span class="mono">${esc(item.key)}</span>${item.source === SELF_LEARNING ? ' 🤖' : ''}${item.harmful ? ' ⚠' : ''}`).join(', ');
+		const fix = lesson.fix ? ` · ${esc(lesson.fix)}` : '';
+		body += `<tr><td><b>${esc(lesson.rule)}</b><br><span class="means">${esc(lesson.problem || '')}</span></td>
+			<td>${tickets}</td><td>${esc(lesson.status || 'watching')}${fix}</td><td>${esc(fmtDate(lesson.updatedAt))}</td></tr>`;
+	}
+	const table = body ? `<div class="tbl-wrap"><table><thead><tr><th>Lesson</th><th>Tickets</th><th>Status</th><th>Updated</th></tr></thead><tbody>${body}</tbody></table></div>` : '<p class="means">None yet.</p>';
+	return `<section class="card panel"><h3>Lessons</h3>
+		<p class="means">What the weekly run learned from the reviews here and, for tickets nobody reviewed, from the developers' replies in Slack (🤖). A problem seen on two tickets, or once when harmful (⚠), gets a rule fix the owners merge.</p>${table}</section>`;
+}
 function median(values) {
 	if (!values.length) return null;
 	const sorted = [...values].sort((left, right) => left - right);
@@ -2062,7 +2092,7 @@ function renderResults() {
 	const which = 'Every submitted rating.';
 	const head = `<div class="res-head"><div><h2>Results</h2><p class="means">${which} Ratings not yet submitted show beside each section.</p></div>${sample}</div>`;
 	if (!rows.length) {
-		el.innerHTML = `<div class="results">${head}${progressPanel()}${timePanel()}<div class="card empty"><b>No submitted ratings yet.</b>Submit a ticket in your session and its ratings show here, with everyone else's.</div></div>`;
+		el.innerHTML = `<div class="results">${head}${progressPanel()}${timePanel()}${lessonsPanel()}<div class="card empty"><b>No submitted ratings yet.</b>Submit a ticket in your session and its ratings show here, with everyone else's.</div></div>`;
 		return;
 	}
 	let usable = 0;
@@ -2151,7 +2181,7 @@ function renderResults() {
 	}
 	const fixes = `<section class="card panel"><h3>Corrections</h3><p class="means">What each section should have said. Each one can become a golden case for <code>dss eval</code>.</p>${list || '<p class="means">None yet.</p>'}</section>`;
 
-	el.innerHTML = `<div class="results">${head}${progressPanel()}${timePanel()}${stats}${sections}${tags}${fixes}</div>`;
+	el.innerHTML = `<div class="results">${head}${progressPanel()}${timePanel()}${stats}${sections}${tags}${fixes}${lessonsPanel()}</div>`;
 }
 
 /* views and routes: #results, #DSS-<n> (that ticket, from the link under its Slack post), else the viewer's reviews */
@@ -2365,6 +2395,7 @@ async function connect() {
 		renderSync();
 	});
 	db.collection('meta').onSnapshot(onMeta, () => {});
+	db.collection('lessons').onSnapshot(onLessons, () => {});
 	setTimeout(() => {
 		if (state.ticketsLoaded) return;
 		state.loadFailed = true;
@@ -2402,6 +2433,14 @@ function onTickets(snapshot) {
 		renderTicket();
 		window.scrollTo(0, y);
 	}
+}
+function onLessons(snapshot) {
+	state.lessons = {};
+	for (const doc of snapshot.docs) {
+		const body = doc.data();
+		if (body && typeof body === 'object' && typeof body.rule === 'string') state.lessons[doc.id] = body;
+	}
+	if (state.view === 'results') renderResults();
 }
 function onMeta(snapshot) {
 	const body = snapshot.docs.find((doc) => doc.id === 'refresh')?.data();

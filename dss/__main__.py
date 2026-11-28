@@ -8,6 +8,7 @@
 	                                          # old tickets as they stood when posted (dss.replay)
 	python -m dss eval out/eval/golden.jsonl out/eval/<run> [--judge] # score saved answers
 	python -m dss learn <export folder>                              # reviews: golden rows, digest
+	python -m dss selflearn <export folder> [--check]  # tickets to learn from the Slack replies
 	python -m dss cerberus                                           # set up the bot's Cerberus
 	python -m dss slack                                              # the bot (see dss.slack)
 	python -m dss mcp                                                # the tools over stdio (MCP)
@@ -89,6 +90,13 @@ def main() -> None:
 		'learn', help="turn the review page's submitted reviews into golden rows and a digest"
 	)
 	learn.add_argument('export', type=Path, help='folder with reviews/ and tickets/ JSON files')
+	self_learn = commands.add_parser(
+		'selflearn', help='gather the unreviewed tickets the developers answered in Slack'
+	)
+	self_learn.add_argument('export', type=Path, help='folder with the reviews/ JSON files')
+	self_learn.add_argument(
+		'--check', action='store_true', help='check the self/*.review.json files instead'
+	)
 	commands.add_parser(
 		'cerberus', help="set up or update the bot's own Cerberus copies and show what they hold"
 	)
@@ -139,6 +147,17 @@ def main() -> None:
 			raise SystemExit(f'cannot read the export: {error}') from error
 		for line in lines:
 			print(line)
+	elif args.command == 'selflearn':
+		from dss import selflearn
+
+		try:
+			lines = selflearn.check(args.export) if args.check else selflearn.gather(args.export)
+		except (OSError, ValueError, RuntimeError) as error:  # a bad file, or Slack not set up
+			raise SystemExit(f'cannot gather the tickets: {error}') from error
+		for line in lines:
+			print(line)
+		if args.check and lines:
+			raise SystemExit(1)
 	elif args.command == 'replay':
 		from dss import replay
 

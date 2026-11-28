@@ -118,7 +118,7 @@ def test_the_digest_names_the_reasons_worth_a_fix(tmp_path):
 	lines = learn.run(export(tmp_path), tmp_path / 'golden.jsonl')
 	text = '\n'.join(lines)
 	# the old per-reviewer review of DSS-9001 is left out
-	assert lines[0] == 'Reviews: 2 submitted of 3; 3 tickets on the page'
+	assert lines[0] == 'Reviews: 2 submitted or self-learned of 3; 3 tickets on the page'
 	assert lines[1] == 'Sections: correct 2 · partial 1 · incorrect 2'
 	assert '  Missed a known issue: 2 tickets (DSS-9001, DSS-9002)' in lines
 	worth = text.split('Worth a fix')[1].split('Corrections:')[0]
@@ -181,5 +181,37 @@ def test_cli_learn_prints_the_digest(tmp_path, monkeypatch, capsys):
 	monkeypatch.setattr(sys, 'argv', ['dss', 'learn', str(folder)])
 	monkeypatch.setattr(cli, 'load_env', lambda: None)
 	cli.main()
-	assert capsys.readouterr().out.startswith('Reviews: 2 submitted of 3')
+	assert capsys.readouterr().out.startswith('Reviews: 2 submitted or self-learned of 3')
 	assert (tmp_path / 'golden.jsonl').exists()
+
+
+def test_a_self_learning_review_teaches_and_says_so(tmp_path):
+	folder = export(tmp_path)
+	learned = {
+		'key': 'DSS-9003',
+		'source': learn.SELF,
+		'by': learn.SELF,
+		'updatedAt': '2027-01-20T10:00:00Z',
+		'sections': {
+			'why': {
+				'rating': 'incorrect',
+				'tags': ['wrong_cause'],
+				'should': 'The tally was stale.',
+				'by': learn.SELF,
+			}
+		},
+	}
+	(folder / 'reviews' / 'DSS-9003.json').write_text(json.dumps(learned), encoding='utf-8')
+	golden = tmp_path / 'golden.jsonl'
+	lines = learn.run(folder, golden)
+	assert lines[0] == 'Reviews: 3 submitted or self-learned of 3; 3 tickets on the page'
+	assert 'DSS-9003 · would act on it: not answered · self-learning' in lines
+	row = eval.load_golden(golden)[-1]
+	assert row['outcome'] == 'The tally was stale.'
+	assert row['source_of_truth'] == 'self-learning from the Slack replies, 2027-01-20'
+
+
+def test_the_page_marks_what_self_learning_wrote():
+	page = PAGE.read_text(encoding='utf-8')
+	assert f"const SELF_LEARNING = '{learn.SELF}';" in page
+	assert "db.collection('lessons')" in page
